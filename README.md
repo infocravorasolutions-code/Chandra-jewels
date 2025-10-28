@@ -1,97 +1,269 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Chandra Jewellery Management App
 
-# Getting Started
+A comprehensive React Native application for jewelry business management with role-based access control and modern UI/UX design.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## 🎯 Features
 
-## Step 1: Start Metro
+### 🔐 Authentication & Roles
+- **Multi-role login system** (Admin, Client, Coral Designer, CAD Designer)
+- **Role-based navigation** and feature access
+- **Persistent authentication** with AsyncStorage
+- **Demo credentials** for easy testing
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+### 📱 Core Screens
+- **Login Screen** - Simple ID/password authentication with demo credentials
+- **Dashboard** - Role-specific dashboards with statistics and quick actions
+- **Enquiry Management** - List, view, and manage jewellery enquiries
+- **Chat System** - WhatsApp-like messaging interface
+- **Admin Panel** - Metal prices and client management
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+### 🎨 UI/UX Features
+- **Modern Material Design** with gold/brown color scheme
+- **Card-based layouts** similar to Zomato/Groww style
+- **Bottom tab navigation** with role-based tabs
+- **Search and filtering** capabilities
+- **Pull-to-refresh** functionality
+- **Modal dialogs** for notifications and account management
 
-```sh
-# Using npm
-npm start
+## 🏗️ Project Structure
 
-# OR using Yarn
-yarn start
+```
+src/
+├── components/
+│   ├── common/          # Reusable UI components
+│   │   ├── Button.js    # Custom button components
+│   │   ├── Text.js      # Typography components
+│   │   ├── Input.js     # Form input components
+│   │   ├── Loader.js    # Loading indicators
+│   │   └── TopNavbar.js # Top navigation bar
+│   ├── cards/           # Card components
+│   │   └── Cards.js     # Status cards, enquiry cards
+│   └── modals/          # Modal components
+│       ├── AccountModal.js      # User account modal
+│       └── NotificationsModal.js # Notifications modal
+├── navigation/          # Navigation setup
+│   ├── BottomTabs.js    # Bottom tab navigator
+│   ├── StackNavigator.js # Stack navigator
+│   └── index.js         # Main navigation
+├── screens/            # Screen components
+│   ├── Auth/
+│   │   └── LoginScreen.js
+│   ├── Dashboard/
+│   │   └── DashboardScreen.js
+│   ├── Enquiries/
+│   │   ├── EnquiryListScreen.js
+│   │   └── SingleEnquiryScreen.js
+│   ├── Chats/
+│   │   ├── ChatsScreen.js
+│   │   └── ChatDetailScreen.js
+│   ├── Admin/
+│   │   ├── MetalPricesScreen.js
+│   │   └── ClientsListScreen.js
+│   └── AddEnquiry/
+│       ├── AddEnquiryStep1Screen.js
+│       └── AddEnquiryStep2Screen.js
+├── context/
+│   └── AuthContext.js   # Authentication context
+├── constants/
+│   ├── colors.js        # Color palette
+│   ├── fonts.js        # Typography
+│   └── images.js       # Image assets
+├── services/
+│   └── api.js          # API service (dummy data)
+└── utils/
+    └── helpers.js      # Utility functions
 ```
 
-## Step 2: Build and run your app
+## 🚀 Getting Started
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+### Prerequisites
+- Node.js >= 20
+- React Native development environment
+- iOS Simulator or Android Emulator
 
-### Android
+### Installation
 
-```sh
-# Using npm
-npm run android
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-# OR using Yarn
-yarn android
-```
+2. **Install iOS dependencies (iOS only):**
+   ```bash
+   cd ios && pod install && cd ..
+   ```
 
-### iOS
+3. **Run the app:**
+   ```bash
+   # iOS
+   npm run ios
+   
+   # Android
+   npm run android
+   ```
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+## 🔑 Demo Credentials
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+The app includes demo credentials for testing different roles:
 
-```sh
-bundle install
-```
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | admin@chandrajewels.com | admin123 |
+| Client | john@example.com | client123 |
+| Coral Designer | coral@chandrajewels.com | coral123 |
+| CAD Designer | cad@chandrajewels.com | cad123 |
 
-Then, and every time you update your native dependencies, run:
+## 📱 Role-Based Features
 
-```sh
-bundle exec pod install
-```
+### 👑 Admin
+- **Dashboard**: Total enquiries, clients, revenue statistics
+- **Metal Prices**: Manage gold, silver, platinum prices
+- **Client Management**: View and manage all clients
+- **Full Access**: All enquiry management features
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+### 👤 Client
+- **Dashboard**: Personal enquiry statistics
+- **Add Enquiries**: 2-step enquiry creation process
+- **View Designs**: Coral and CAD design versions
+- **Approve/Reject**: Design approval workflow
+- **Chat**: Communicate with designers
 
-```sh
-# Using npm
-npm run ios
+### 🎨 Coral Designer
+- **Dashboard**: Assigned enquiries and completion stats
+- **Upload Designs**: Coral Excel/image uploads
+- **Chat**: Client communication
+- **Assigned Work**: View only assigned enquiries
 
-# OR using Yarn
-yarn ios
-```
+### 💻 CAD Designer
+- **Dashboard**: Assigned enquiries and completion stats
+- **Upload Designs**: CAD Excel/image uploads
+- **Chat**: Client communication
+- **Assigned Work**: View only assigned enquiries
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+## 🎨 Design System
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+### Colors
+- **Primary**: Gold (#D4AF37)
+- **Secondary**: Brown (#8B4513)
+- **Success**: Green (#10B981)
+- **Error**: Red (#EF4444)
+- **Warning**: Orange (#F59E0B)
+- **Info**: Blue (#3B82F6)
 
-## Step 3: Modify your app
+### Typography
+- **Headings**: Bold, various sizes (h1-h4)
+- **Body**: Regular weight, readable sizes
+- **Captions**: Smaller, secondary information
+- **Labels**: Medium weight for form labels
 
-Now that you have successfully run the app, let's make changes!
+## 🔧 Technical Implementation
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+### Navigation
+- **React Navigation v6** with stack and tab navigators
+- **Role-based navigation** with conditional screens
+- **Deep linking** support for enquiry details
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+### State Management
+- **React Context API** for authentication
+- **Local state** with React hooks
+- **AsyncStorage** for persistent authentication
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+### Data Management
+- **Dummy API service** with realistic data
+- **Simulated API calls** with loading states
+- **Error handling** with user-friendly messages
 
-## Congratulations! :tada:
+### UI Components
+- **Reusable components** with consistent styling
+- **Custom hooks** for common functionality
+- **Responsive design** for different screen sizes
 
-You've successfully run and modified your React Native App. :partying_face:
+## 📋 Key Features Implemented
 
-### Now what?
+### ✅ Authentication System
+- [x] Multi-role login with demo credentials
+- [x] Persistent authentication state
+- [x] Role-based navigation flow
+- [x] Secure logout functionality
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+### ✅ Dashboard Screens
+- [x] Role-specific dashboard content
+- [x] Statistics cards with real data
+- [x] Quick action buttons
+- [x] Recent activity feed
 
-# Troubleshooting
+### ✅ Enquiry Management
+- [x] Enquiry list with search and filters
+- [x] Card-based layout (Zomato style)
+- [x] Detailed enquiry view
+- [x] Role-based actions (approve/reject/upload)
+- [x] 2-step enquiry creation process
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+### ✅ Chat System
+- [x] WhatsApp-like chat interface
+- [x] Real-time message simulation
+- [x] Chat list with unread indicators
+- [x] Message timestamps and sender info
 
-# Learn More
+### ✅ Admin Features
+- [x] Metal prices management
+- [x] Client list with search
+- [x] Statistics and analytics
+- [x] Edit capabilities
 
-To learn more about React Native, take a look at the following resources:
+### ✅ UI/UX Features
+- [x] Modern Material Design
+- [x] Bottom tab navigation
+- [x] Top navbar with notifications
+- [x] Modal dialogs for account/notifications
+- [x] Pull-to-refresh functionality
+- [x] Loading states and error handling
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+## 🔮 Future Enhancements
+
+### Backend Integration
+- Replace dummy API with real backend
+- Implement real-time chat with WebSocket
+- Add push notifications
+- File upload for images/documents
+
+### Advanced Features
+- Push notifications
+- Offline support
+- Advanced search and filtering
+- Export functionality (PDF generation)
+- Analytics and reporting
+- Multi-language support
+
+### Performance
+- Image optimization
+- Lazy loading
+- Caching strategies
+- Performance monitoring
+
+## 🐛 Known Issues
+
+- Images use placeholder URLs (replace with actual assets)
+- Some navigation flows may need refinement
+- Error handling could be more comprehensive
+- File upload is simulated (needs real implementation)
+
+## 📄 License
+
+This project is created for demonstration purposes. Please ensure you have proper licensing for any production use.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## 📞 Support
+
+For support or questions, please contact the development team.
+
+---
+
+**Built with ❤️ using React Native**
