@@ -12,12 +12,12 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { StatusCard, Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
-import { Loader } from '../../components/common/Loader';
+import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
-import { formatCurrency, getRoleDisplayName } from '../../utils/helpers';
+import { formatCurrency, getRoleDisplayName, spacing, responsivePadding, imageSizes } from '../../utils';
 
 const DashboardScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -31,7 +31,7 @@ const DashboardScreen = ({ navigation }) => {
 
   // Safety check - don't render if user is not loaded
   if (!user) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={60} />;
   }
 
   const loadDashboardData = async () => {
@@ -171,6 +171,11 @@ const DashboardScreen = ({ navigation }) => {
           title: 'Font Test',
           icon: <Icon name="info" size={20} color={colors.primary} />,
           onPress: () => navigation.navigate('FontTest'),
+        },
+        {
+          title: 'Responsive Demo',
+          icon: <Icon name="dashboard" size={20} color={colors.primary} />,
+          onPress: () => navigation.navigate('ResponsiveDemo'),
         }
       );
     }
@@ -234,9 +239,6 @@ const DashboardScreen = ({ navigation }) => {
           </View>
           <View style={styles.bannerText}>
             <Text style={styles.bannerTitle}>
-              Welcome to Chandra Jewels!
-            </Text>
-            <Text style={styles.bannerSubtitle}>
               Your premium jewelry design platform
             </Text>
           </View>
@@ -246,7 +248,7 @@ const DashboardScreen = ({ navigation }) => {
   );
 
   if (loading) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={80} />;
   }
 
   return (
@@ -267,7 +269,7 @@ const DashboardScreen = ({ navigation }) => {
                   Good {getTimeOfDay()}, {user?.name || 'User'}! 👋
                 </Text>
                 <Text style={styles.welcomeSubtitle}>
-                  Welcome to Chandra Jewels Dashboard
+                  Dashboard
                 </Text>
                 <View style={styles.roleBadge}>
                   <Icon name="account" size={14} color={colors.textWhite} />
@@ -285,7 +287,7 @@ const DashboardScreen = ({ navigation }) => {
           </View>
         </View>
 
-        {renderBanner()}
+        {/* Banner removed as requested */}
 
         {user?.role === 'admin' && renderAdminDashboard()}
         {user?.role === 'client' && renderClientDashboard()}
@@ -461,15 +463,15 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: responsivePadding.screenHorizontal,
+    paddingVertical: spacing.sm,
     justifyContent: 'space-between',
   },
 
   // Enhanced Quick Actions Section
   quickActionsSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingHorizontal: responsivePadding.screenHorizontal,
+    paddingVertical: spacing.lg,
   },
   sectionTitle: {
     fontSize: fonts['2xl'],

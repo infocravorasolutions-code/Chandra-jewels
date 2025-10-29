@@ -1,7 +1,7 @@
 export const colors = {
-  primary: '#022d35', // Brand color - Dark teal
-  primaryDark: '#011a1f', // Darker shade
-  primaryLight: '#044a56', // Lighter shade
+  primary: '#103534', // Brand color - Dark teal
+  primaryDark: '#0a2a29', // Darker shade
+  primaryLight: '#1a4a48', // Lighter shade
   secondary: '#8B4513', // Brown (complementary)
   accent: '#D4AF37', // Gold accent
   
@@ -31,7 +31,7 @@ export const colors = {
   cardShadow: 'rgba(0, 0, 0, 0.1)',
   
   // Tab colors
-  tabActive: '#022d35', // Using brand color
+  tabActive: '#103534', // Using brand color
   tabInactive: '#9CA3AF',
   
   // Modal colors

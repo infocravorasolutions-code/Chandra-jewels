@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../services/api';
 import { Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
-import { Loader } from '../../components/common/Loader';
+import { AnimatedLogoLoader } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
@@ -186,7 +186,7 @@ const ClientsListScreen = () => {
   );
 
   if (loading) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={80} />;
   }
 
   return (

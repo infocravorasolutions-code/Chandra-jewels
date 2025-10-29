@@ -14,6 +14,7 @@ import MetalPricesScreen from '../screens/Admin/MetalPricesScreen';
 import ClientsListScreen from '../screens/Admin/ClientsListScreen';
 import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
 import FontTest from '../components/FontTest';
+// import ResponsiveDemoScreen from '../components/ResponsiveDemoScreen';
 
 const Stack = createStackNavigator();
 
@@ -99,6 +100,13 @@ const StackNavigator = ({ isAuthenticated }) => {
               title: 'Font Test',
             }}
           />
+          {/* <Stack.Screen
+            name="ResponsiveDemo"
+            component={ResponsiveDemoScreen}
+            options={{
+              title: 'Responsive Demo',
+            }}
+          /> */}
         </>
       ) : (
         // Unauthenticated screens

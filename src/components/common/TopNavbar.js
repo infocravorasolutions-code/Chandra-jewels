@@ -67,11 +67,11 @@ const TopNavbar = ({ navigation }) => {
             <Text style={[styles.logoText, { color: colors.textWhite, fontSize: fonts.xl, fontFamily: fonts.bold }]}>
               Chandra Jewels
             </Text>
-            {buttonPressed && (
+            {/* {buttonPressed && (
               <Text style={{ color: colors.textWhite, fontSize: 10, marginLeft: 8 }}>
                 {buttonPressed} pressed
               </Text>
-            )}
+            )} */}
           </View>
         </View>
 
@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     flex: 1,
-    backgroundColor: colors.error,
+    backgroundColor: colors.primary,
     borderRadius: 8,
     paddingVertical: 12,
     marginLeft: 8,

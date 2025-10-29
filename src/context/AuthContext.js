@@ -54,6 +54,7 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthState = async () => {
     try {
+      // Check auth state quickly, let video splash screen handle timing
       const storedUser = await AsyncStorage.getItem('user');
       if (storedUser) {
         const userData = JSON.parse(storedUser);
@@ -63,6 +64,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Error checking auth state:', error);
     } finally {
+      // Set loading to false immediately - let video splash screen control timing
       setIsLoading(false);
     }
   };

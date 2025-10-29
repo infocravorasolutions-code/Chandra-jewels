@@ -13,7 +13,7 @@ import { api } from '../../services/api';
 import { Card } from '../../components/cards/Cards';
 import { SearchInput } from '../../components/common';
 // Removed custom Text components to fix crashes
-import { Loader } from '../../components/common/Loader';
+import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -38,14 +38,96 @@ const ChatsScreen = ({ navigation }) => {
 
   // Safety check - don't render if user is not loaded
   if (!user) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={60} />;
   }
 
   const loadChats = async () => {
     try {
       setLoading(true);
-      const data = await api.getChats(user?.role || 'client');
-      setChats(data);
+      // Enhanced dummy data for group chats
+      const dummyChats = [
+        {
+          id: '1',
+          enquiryTitle: 'Custom Diamond Ring Design',
+          clientName: 'John Smith',
+          lastMessage: 'Perfect! I love the vintage elements you added.',
+          lastMessageTime: new Date(Date.now() - 1000 * 60 * 5).toISOString(), // 5 minutes ago
+          unreadCount: 3,
+          isGroup: true,
+          participants: [
+            { id: 'client1', name: 'John Smith', role: 'client' },
+            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
+            { id: 'designer1', name: 'Mike Designer', role: 'coral' },
+          ],
+          lastSender: 'John Smith',
+          status: 'active',
+        },
+        {
+          id: '2',
+          enquiryTitle: 'Emerald Necklace Collection',
+          clientName: 'Sarah Johnson',
+          lastMessage: 'The CAD design is ready for review.',
+          lastMessageTime: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
+          unreadCount: 1,
+          isGroup: true,
+          participants: [
+            { id: 'client2', name: 'Sarah Johnson', role: 'client' },
+            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
+            { id: 'designer2', name: 'Lisa CAD', role: 'cad' },
+          ],
+          lastSender: 'Lisa CAD',
+          status: 'active',
+        },
+        {
+          id: '3',
+          enquiryTitle: 'Gold Bracelet Set',
+          clientName: 'Michael Brown',
+          lastMessage: 'Thank you for the beautiful design!',
+          lastMessageTime: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
+          unreadCount: 0,
+          isGroup: true,
+          participants: [
+            { id: 'client3', name: 'Michael Brown', role: 'client' },
+            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
+            { id: 'designer1', name: 'Mike Designer', role: 'coral' },
+          ],
+          lastSender: 'Michael Brown',
+          status: 'completed',
+        },
+        {
+          id: '4',
+          enquiryTitle: 'Sapphire Earrings',
+          clientName: 'Emily Davis',
+          lastMessage: 'I need some changes to the design.',
+          lastMessageTime: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), // 4 hours ago
+          unreadCount: 2,
+          isGroup: true,
+          participants: [
+            { id: 'client4', name: 'Emily Davis', role: 'client' },
+            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
+            { id: 'designer1', name: 'Mike Designer', role: 'coral' },
+          ],
+          lastSender: 'Emily Davis',
+          status: 'active',
+        },
+        {
+          id: '5',
+          enquiryTitle: 'Pearl Necklace',
+          clientName: 'Robert Wilson',
+          lastMessage: 'The design is approved. Moving to production.',
+          lastMessageTime: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
+          unreadCount: 0,
+          isGroup: true,
+          participants: [
+            { id: 'client5', name: 'Robert Wilson', role: 'client' },
+            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
+            { id: 'designer2', name: 'Lisa CAD', role: 'cad' },
+          ],
+          lastSender: 'Sarah Johnson',
+          status: 'approved',
+        },
+      ];
+      setChats(dummyChats);
     } catch (error) {
       console.error('Error loading chats:', error);
     } finally {
@@ -114,7 +196,7 @@ const ChatsScreen = ({ navigation }) => {
   );
 
   if (loading) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={80} />;
   }
 
   return (

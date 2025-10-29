@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Card } from '../../components/cards/Cards';
-import { Loader } from '../../components/common/Loader';
+import { AnimatedLogoLoader } from '../../components/common';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -147,7 +147,7 @@ const NotificationsScreen = ({ navigation }) => {
               styles.notificationTitle,
               { 
                 color: colors.textPrimary, 
-                fontSize: fonts.base, 
+                fontSize: fonts.lg, 
                 fontFamily: fonts.bold 
               }
             ]}>
@@ -175,7 +175,7 @@ const NotificationsScreen = ({ navigation }) => {
   );
 
   if (loading) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={80} />;
   }
 
   return (

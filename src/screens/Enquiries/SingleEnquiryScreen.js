@@ -10,20 +10,36 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { Card } from '../../components/cards/Cards';
-import { Button, Input } from '../../components/common';
-import { Loader } from '../../components/common/Loader';
+import { Button, Input, EnquiryImage } from '../../components/common';
+import { AnimatedLogoLoader } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
-import { formatCurrency, formatDate, getStatusColor, getPriorityColor } from '../../utils/helpers';
+import { formatCurrency, formatDate, getStatusColor, getPriorityColor, imageSizes, spacing } from '../../utils';
 
 const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
-  const { enquiry: initialEnquiry } = route.params;
-  const [enquiry, setEnquiry] = useState(initialEnquiry);
+  const { enquiry: initialEnquiry } = route.params || {};
+  const [enquiry, setEnquiry] = useState(initialEnquiry || {});
   const [loading, setLoading] = useState(false);
   const [approvalMessage, setApprovalMessage] = useState('');
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+
+  // Safety check - don't render if enquiry is not available
+  if (!enquiry || !enquiry.id) {
+    return (
+      <View style={styles.container}>
+        <Text style={[styles.errorText, { color: colors.textPrimary, fontSize: fonts.lg }]}>
+          Enquiry not found
+        </Text>
+        <Button
+          title="Go Back"
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        />
+      </View>
+    );
+  }
 
   const handleApprove = () => {
     Alert.alert(
@@ -116,17 +132,17 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     <Card style={styles.detailsCard}>
       <View style={styles.detailsHeader}>
         <Text style={{ fontSize: fonts['3xl'], fontWeight: 'bold', color: colors.textPrimary }}>
-          {enquiry.title}
+          {enquiry?.title || 'Untitled Enquiry'}
         </Text>
         <View style={styles.statusContainer}>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(enquiry.status) }]}>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(enquiry?.status || 'pending') }]}>
             <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
-              {enquiry.status.toUpperCase()}
+              {(enquiry?.status || 'pending').toUpperCase()}
             </Text>
           </View>
-          <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(enquiry.priority) }]}>
+          <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(enquiry?.priority || 'medium') }]}>
             <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
-              {enquiry.priority.toUpperCase()}
+              {(enquiry?.priority || 'medium').toUpperCase()}
             </Text>
           </View>
         </View>
@@ -136,44 +152,64 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         <View style={styles.detailRow}>
           <Icon name="account" size={16} color={colors.textSecondary} />
           <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-            {enquiry.client}
+            {enquiry?.client || 'Unknown Client'}
           </Text>
         </View>
 
         <View style={styles.detailRow}>
           <Icon name="warning" size={16} color={colors.textSecondary} />
           <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-            {formatDate(enquiry.createdAt)}
+            {formatDate(enquiry?.createdAt || new Date().toISOString())}
           </Text>
         </View>
 
         <View style={styles.detailRow}>
           <Icon name="dashboard" size={16} color={colors.textSecondary} />
           <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-            {formatCurrency(enquiry.estimatedPrice)}
+            {formatCurrency(enquiry?.estimatedPrice || enquiry?.budget || 0)}
           </Text>
         </View>
       </View>
     </Card>
   );
 
-  const renderImages = () => (
-    <Card style={styles.imagesCard}>
-      <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
-        Reference Images
-      </Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        {enquiry.images.map((image, index) => (
-          <View key={index} style={styles.imageContainer}>
-            <Image
-              source={{ uri: `https://via.placeholder.com/150x150?text=${image}` }}
-              style={styles.image}
-            />
+  const renderImages = () => {
+    // Safety check for images array
+    const images = enquiry?.images || [];
+    
+    if (images.length === 0) {
+      return (
+        <Card style={styles.imagesCard}>
+          <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+            Reference Images
+          </Text>
+          <View style={styles.noImagesContainer}>
+            <Icon name="image" size={40} color={colors.textLight} />
+            <Text style={[styles.noImagesText, { color: colors.textSecondary, fontSize: fonts.base }]}>
+              No reference images available
+            </Text>
           </View>
-        ))}
-      </ScrollView>
-    </Card>
-  );
+        </Card>
+      );
+    }
+
+    return (
+      <Card style={styles.imagesCard}>
+        <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+          Reference Images
+        </Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {images.map((image, index) => (
+                <View key={index} style={styles.imageContainer}>
+                  <EnquiryImage
+                    source={{ uri: `https://via.placeholder.com/150x150?text=${image}` }}
+                  />
+                </View>
+              ))}
+        </ScrollView>
+      </Card>
+    );
+  };
 
   const renderVersions = () => (
     <Card style={styles.versionsCard}>
@@ -183,18 +219,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
       <View style={styles.versionItem}>
         <View style={styles.versionHeader}>
-          <Text style={{ fontSize: 20, color: colors.primary }}>🎨</Text>
+          <Icon name="palette" size={20} color={colors.primary} />
           <Text style={[styles.versionTitle, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
             Coral Design
           </Text>
         </View>
-        {enquiry.coralVersion ? (
+        {enquiry?.coralVersion ? (
           <TouchableOpacity style={styles.versionFile}>
             <Icon name="pdf" size={16} color={colors.success} />
             <Text style={[styles.fileName, { color: colors.success, fontSize: fonts.base }]}>
               {enquiry.coralVersion}
             </Text>
-            <Text style={{ fontSize: 16, color: colors.textSecondary }}>⬇️</Text>
+            <Icon name="download" size={16} color={colors.textSecondary} />
           </TouchableOpacity>
         ) : (
           <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
@@ -205,18 +241,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
       <View style={styles.versionItem}>
         <View style={styles.versionHeader}>
-          <Text style={{ fontSize: 20, color: colors.primary }}>🏗️</Text>
+          <Icon name="build" size={20} color={colors.primary} />
           <Text style={[styles.versionTitle, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
             CAD Design
           </Text>
         </View>
-        {enquiry.cadVersion ? (
+        {enquiry?.cadVersion ? (
           <TouchableOpacity style={styles.versionFile}>
             <Icon name="pdf" size={16} color={colors.success} />
             <Text style={[styles.fileName, { color: colors.success, fontSize: fonts.base }]}>
               {enquiry.cadVersion}
             </Text>
-            <Text style={{ fontSize: 16, color: colors.textSecondary }}>⬇️</Text>
+            <Icon name="download" size={16} color={colors.textSecondary} />
           </TouchableOpacity>
         ) : (
           <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
@@ -367,24 +403,28 @@ const styles = StyleSheet.create({
     margin: 16,
   },
   detailsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: 'column',
     marginBottom: 16,
   },
   statusContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
+    marginTop: 12,
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 80,
+    alignItems: 'center',
   },
   priorityBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 80,
+    alignItems: 'center',
   },
   detailsGrid: {
     gap: 12,
@@ -405,10 +445,20 @@ const styles = StyleSheet.create({
   imageContainer: {
     marginRight: 12,
   },
-  image: {
-    width: 100,
-    height: 100,
-    borderRadius: 8,
+  noImagesContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noImagesText: {
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  errorText: {
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  backButton: {
+    marginTop: 20,
   },
   versionsCard: {
     margin: 16,

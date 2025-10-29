@@ -7,17 +7,20 @@ import {
   RefreshControl,
   Modal,
   Text,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { EnquiryCard, Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
-import { Loader } from '../../components/common/Loader';
+import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
+
+const { width } = Dimensions.get('window');
 
 const EnquiryListScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -43,14 +46,113 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Safety check - don't render if user is not loaded
   if (!user) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={60} />;
   }
 
   const loadEnquiries = async () => {
     try {
       setLoading(true);
-      const data = await api.getEnquiries(user?.role || 'client', filters);
-      setEnquiries(data);
+      // Enhanced dummy data with proper statuses and priorities
+      const dummyEnquiries = [
+        {
+          id: '1',
+          title: 'Custom Diamond Ring Design',
+          clientName: 'John Smith',
+          clientId: 'client1',
+          status: 'pending',
+          priority: 'high',
+          description: 'Looking for a custom diamond engagement ring with vintage style',
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
+          updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
+          budget: 15000,
+          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(), // 7 days from now
+          category: 'Engagement Ring',
+          metalType: 'Gold',
+          stoneType: 'Diamond',
+        },
+        {
+          id: '2',
+          title: 'Emerald Necklace Collection',
+          clientName: 'Sarah Johnson',
+          clientId: 'client2',
+          status: 'in_progress',
+          priority: 'medium',
+          description: 'Design a luxury emerald necklace for special occasion',
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago
+          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), // 4 hours ago
+          budget: 25000,
+          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString(), // 14 days from now
+          category: 'Necklace',
+          metalType: 'Platinum',
+          stoneType: 'Emerald',
+        },
+        {
+          id: '3',
+          title: 'Gold Bracelet Set',
+          clientName: 'Michael Brown',
+          clientId: 'client3',
+          status: 'completed',
+          priority: 'low',
+          description: 'Traditional gold bracelet set for wedding',
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(), // 7 days ago
+          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
+          budget: 8000,
+          deadline: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago (completed)
+          category: 'Bracelet',
+          metalType: 'Gold',
+          stoneType: 'Ruby',
+        },
+        {
+          id: '4',
+          title: 'Sapphire Earrings',
+          clientName: 'Emily Davis',
+          clientId: 'client4',
+          status: 'pending',
+          priority: 'high',
+          description: 'Elegant sapphire drop earrings for gala event',
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), // 6 hours ago
+          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), // 6 hours ago
+          budget: 12000,
+          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 5).toISOString(), // 5 days from now
+          category: 'Earrings',
+          metalType: 'White Gold',
+          stoneType: 'Sapphire',
+        },
+        {
+          id: '5',
+          title: 'Pearl Necklace',
+          clientName: 'Robert Wilson',
+          clientId: 'client5',
+          status: 'in_progress',
+          priority: 'medium',
+          description: 'Classic pearl necklace with diamond accents',
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(), // 3 days ago
+          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
+          budget: 18000,
+          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10).toISOString(), // 10 days from now
+          category: 'Necklace',
+          metalType: 'Gold',
+          stoneType: 'Pearl',
+        },
+        {
+          id: '6',
+          title: 'Ruby Ring',
+          clientName: 'Lisa Anderson',
+          clientId: 'client6',
+          status: 'completed',
+          priority: 'high',
+          description: 'Vintage ruby ring with intricate design',
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10).toISOString(), // 10 days ago
+          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 1).toISOString(), // 1 day ago
+          budget: 22000,
+          deadline: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(), // 3 days ago (completed)
+          category: 'Ring',
+          metalType: 'Gold',
+          stoneType: 'Ruby',
+        },
+      ];
+      
+      setEnquiries(dummyEnquiries);
     } catch (error) {
       console.error('Error loading enquiries:', error);
     } finally {
@@ -129,11 +231,70 @@ const EnquiryListScreen = ({ navigation }) => {
   ];
 
   const getClientOptions = () => {
-    const clients = [...new Set(enquiries.map(e => e.client))];
+    const clients = [...new Set(enquiries.map(e => e.clientName))];
     return [
       { label: 'All Clients', value: 'all' },
       ...clients.map(client => ({ label: client, value: client })),
     ];
+  };
+
+  // Helper functions for status and priority styling
+  const getStatusColor = (status) => {
+    const statusColors = {
+      pending: colors.warning,
+      in_progress: colors.info,
+      completed: colors.success,
+      rejected: colors.error,
+    };
+    return statusColors[status] || colors.textSecondary;
+  };
+
+  const getStatusIcon = (status) => {
+    const statusIcons = {
+      pending: 'schedule',
+      in_progress: 'play-circle-filled',
+      completed: 'check-circle',
+      rejected: 'cancel',
+    };
+    return statusIcons[status] || 'help';
+  };
+
+  const getPriorityColor = (priority) => {
+    const priorityColors = {
+      high: colors.error,
+      medium: colors.warning,
+      low: colors.success,
+    };
+    return priorityColors[priority] || colors.textSecondary;
+  };
+
+  const getPriorityIcon = (priority) => {
+    const priorityIcons = {
+      high: 'keyboard-arrow-up',
+      medium: 'remove',
+      low: 'keyboard-arrow-down',
+    };
+    return priorityIcons[priority] || 'help';
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now - date);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
+    return date.toLocaleDateString();
   };
 
   const renderFilterChips = () => {
@@ -264,35 +425,39 @@ const EnquiryListScreen = ({ navigation }) => {
   );
 
   if (loading) {
-    return <Loader />;
+    return <AnimatedLogoLoader size={80} />;
   }
 
   return (
     <SafeAreaView style={styles.container}>
       <TopNavbar navigation={navigation} />
       <View style={styles.header}>
-        <SearchInput
-          placeholder="Search enquiries..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          onClear={() => setSearchQuery('')}
-        />
-        
-        <View style={styles.headerActions}>
+        <View style={styles.searchRow}>
+          <View style={styles.searchContainer}>
+            <SearchInput
+              placeholder="Search enquiries..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onClear={() => setSearchQuery('')}
+            />
+          </View>
+          
           <TouchableOpacity
             style={styles.filterButton}
             onPress={() => setShowFilters(true)}>
-            <Icon name="search" size={20} color={colors.primary} />
+            <Icon name="filter-list" size={20} color={colors.primary} />
           </TouchableOpacity>
-          
-          {user?.role === 'client' && (
+        </View>
+        
+        {user?.role === 'client' && (
+          <View style={styles.addButtonContainer}>
             <Button
               title="Add Enquiry"
               onPress={() => navigation.navigate('AddEnquiryStep1')}
               size="small"
             />
-          )}
-        </View>
+          </View>
+        )}
       </View>
 
       {renderFilterChips()}
@@ -314,19 +479,26 @@ const EnquiryListScreen = ({ navigation }) => {
             </Text>
           </Card>
         ) : (
-          filteredEnquiries.map(enquiry => (
+          filteredEnquiries.filter(enquiry => enquiry && enquiry.id).map(enquiry => (
             <EnquiryCard
               key={enquiry.id}
-              title={enquiry.title}
-              client={enquiry.client}
-              status={enquiry.status}
-              priority={enquiry.priority}
-              createdAt={enquiry.createdAt}
-              estimatedPrice={enquiry.estimatedPrice}
+              enquiry={enquiry}
               onPress={() => {
                 console.log('Navigating to SingleEnquiry with enquiry:', enquiry);
-                navigation.navigate('SingleEnquiry', { enquiry });
+                console.log('Enquiry ID:', enquiry?.id);
+                console.log('Enquiry object keys:', enquiry ? Object.keys(enquiry) : 'No enquiry object');
+                try {
+                  navigation.navigate('SingleEnquiry', { enquiryId: enquiry.id, enquiry });
+                } catch (error) {
+                  console.error('Navigation error:', error);
+                }
               }}
+              getStatusColor={getStatusColor}
+              getStatusIcon={getStatusIcon}
+              getPriorityColor={getPriorityColor}
+              getPriorityIcon={getPriorityIcon}
+              formatCurrency={formatCurrency}
+              formatDate={formatDate}
             />
           ))
         )}
@@ -343,19 +515,44 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundSecondary,
   },
   header: {
-    padding: 16,
+    padding: 20,
     backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    shadowColor: colors.cardShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+    marginBottom: 16,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 12,
+    marginTop: 16,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  searchContainer: {
+    flex: 1,
+  },
+  addButtonContainer: {
+    marginTop: 16,
+    alignItems: 'flex-end',
   },
   filterButton: {
-    padding: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.borderLight,
   },
   filterChips: {
     paddingHorizontal: 16,

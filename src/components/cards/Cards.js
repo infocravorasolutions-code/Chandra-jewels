@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
+import { spacing, responsivePadding, imageSizes } from '../../utils';
 import Icon from '../common/Icon';
 
 export const Card = ({ children, style, onPress, ...props }) => {
@@ -36,58 +37,110 @@ export const StatusCard = ({ title, value, icon, color = colors.primary, onPress
 );
 
 export const EnquiryCard = ({
-  title,
-  client,
-  status,
-  priority,
-  createdAt,
-  estimatedPrice,
+  enquiry,
   onPress,
-}) => (
-  <Card style={styles.enquiryCard} onPress={onPress}>
-    <View style={styles.enquiryHeader}>
-      <Text style={{ color: colors.textPrimary, fontSize: fonts.xl, fontFamily: fonts.bold }}>
-        {title}
+  getStatusColor,
+  getStatusIcon,
+  getPriorityColor,
+  getPriorityIcon,
+  formatCurrency,
+  formatDate,
+}) => {
+  // Safety checks to prevent undefined errors
+  if (!enquiry) {
+    return null;
+  }
+
+  const statusColor = getStatusColor ? getStatusColor(enquiry.status || 'pending') : colors.primary;
+  const statusIcon = getStatusIcon ? getStatusIcon(enquiry.status || 'pending') : 'help';
+  const priorityColor = getPriorityColor ? getPriorityColor(enquiry.priority || 'medium') : colors.textSecondary;
+  const priorityIcon = getPriorityIcon ? getPriorityIcon(enquiry.priority || 'medium') : 'help';
+  const formattedPrice = formatCurrency ? formatCurrency(enquiry.budget || 0) : `₹${enquiry.budget || 0}`;
+  const formattedDate = formatDate ? formatDate(enquiry.createdAt || new Date().toISOString()) : (enquiry.createdAt || 'Recently');
+
+  return (
+    <Card style={styles.enquiryCard} onPress={onPress}>
+      {/* Header with Status and Priority */}
+      <View style={styles.enquiryHeader}>
+        <View style={styles.enquiryTitleContainer}>
+          <Text style={styles.enquiryTitle} numberOfLines={2}>
+            {enquiry.title || 'Untitled Enquiry'}
+          </Text>
+          <Text style={styles.enquiryClient}>
+            {enquiry.clientName || 'Unknown Client'}
+          </Text>
+        </View>
+        <View style={styles.enquiryBadges}>
+          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+            <Icon name={statusIcon} size={12} color={colors.textWhite} />
+            <Text style={styles.statusText}>
+              {(enquiry.status || 'pending').replace('_', ' ').toUpperCase()}
+            </Text>
+          </View>
+          <View style={[styles.priorityBadge, { backgroundColor: priorityColor }]}>
+            <Icon name={priorityIcon} size={12} color={colors.textWhite} />
+            <Text style={styles.priorityText}>
+              {(enquiry.priority || 'medium').toUpperCase()}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Description */}
+      <Text style={styles.enquiryDescription} numberOfLines={2}>
+        {enquiry.description || 'No description available'}
       </Text>
-      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status) }]}>
-        <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
-          {status.toUpperCase()}
+
+      {/* Details Row */}
+      <View style={styles.enquiryDetails}>
+        <View style={styles.detailItem}>
+          <Icon name="category" size={14} color={colors.textSecondary} />
+          <Text style={styles.detailText}>{enquiry.category || 'General'}</Text>
+        </View>
+        <View style={styles.detailItem}>
+          <Icon name="diamond" size={14} color={colors.textSecondary} />
+          <Text style={styles.detailText}>{enquiry.metalType || 'Gold'}</Text>
+        </View>
+        <View style={styles.detailItem}>
+          <Icon name="jewelry" size={14} color={colors.textSecondary} />
+          <Text style={styles.detailText}>{enquiry.stoneType || 'Diamond'}</Text>
+        </View>
+      </View>
+
+      {/* Footer with Price and Date */}
+      <View style={styles.enquiryFooter}>
+        <View style={styles.enquiryPriceContainer}>
+          <Text style={styles.enquiryPriceLabel}>Budget</Text>
+          <Text style={styles.enquiryPrice}>{formattedPrice}</Text>
+        </View>
+        <View style={styles.enquiryDateContainer}>
+          <Icon name="schedule" size={14} color={colors.textLight} />
+          <Text style={styles.enquiryDate}>{formattedDate}</Text>
+        </View>
+      </View>
+
+      {/* Progress Indicator */}
+      <View style={styles.progressContainer}>
+        <View style={styles.progressBar}>
+          <View 
+            style={[
+              styles.progressFill, 
+              { 
+                width: (enquiry.status || 'pending') === 'completed' ? '100%' : 
+                      (enquiry.status || 'pending') === 'in_progress' ? '60%' : '20%',
+                backgroundColor: statusColor 
+              }
+            ]} 
+          />
+        </View>
+        <Text style={styles.progressText}>
+          {(enquiry.status || 'pending') === 'completed' ? 'Completed' : 
+           (enquiry.status || 'pending') === 'in_progress' ? 'In Progress' : 'Pending'}
         </Text>
       </View>
-    </View>
-    
-    <View style={styles.enquiryDetails}>
-      <View style={styles.enquiryRow}>
-        <Icon name="account" size={14} color={colors.textSecondary} />
-        <Text style={[styles.enquiryText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-          {client}
-        </Text>
-      </View>
-      
-      <View style={styles.enquiryRow}>
-        <Icon name="warning" size={14} color={colors.textSecondary} />
-        <Text style={[styles.enquiryText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-          {formatDate(createdAt)}
-        </Text>
-      </View>
-      
-      <View style={styles.enquiryRow}>
-        <Icon name="dashboard" size={14} color={colors.textSecondary} />
-        <Text style={[styles.enquiryText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-          {formatCurrency(estimatedPrice)}
-        </Text>
-      </View>
-    </View>
-    
-    <View style={styles.enquiryFooter}>
-      <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(priority) }]}>
-        <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
-          {priority.toUpperCase()}
-        </Text>
-      </View>
-    </View>
-  </Card>
-);
+    </Card>
+  );
+};
 
 const getStatusColor = (status) => {
   const colors = {
@@ -169,39 +222,166 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  // Enquiry Card
+  // Modern Enquiry Card
   enquiryCard: {
     marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 16,
+    padding: 20,
+    backgroundColor: colors.background,
+    shadowColor: colors.cardShadow,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
   },
+  
+  // Header Styles
   enquiryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 16,
+  },
+  enquiryTitleContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  enquiryTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 4,
+    lineHeight: 22,
+  },
+  enquiryClient: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+  },
+  enquiryBadges: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 6,
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  enquiryDetails: {
-    marginBottom: 12,
-  },
-  enquiryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
   },
-  enquiryText: {
-    marginLeft: 8,
-  },
-  enquiryFooter: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+  statusText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.bold,
+    color: colors.textWhite,
+    letterSpacing: 0.5,
   },
   priorityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 4,
+    borderRadius: 16,
+    gap: 3,
+  },
+  priorityText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.bold,
+    color: colors.textWhite,
+    letterSpacing: 0.5,
+  },
+  
+  // Description
+  enquiryDescription: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  
+  // Details Row
+  enquiryDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    gap: 4,
+  },
+  detailText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  
+  // Footer
+  enquiryFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  enquiryPriceContainer: {
+    alignItems: 'flex-start',
+  },
+  enquiryPriceLabel: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    marginBottom: 2,
+  },
+  enquiryPrice: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.primary,
+  },
+  enquiryDateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  enquiryDate: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+  },
+  
+  // Progress Indicator
+  progressContainer: {
+    marginTop: 4,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    color: colors.textLight,
+    textAlign: 'center',
   },
 });

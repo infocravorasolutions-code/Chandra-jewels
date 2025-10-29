@@ -1,3 +1,5 @@
+import { responsiveFonts } from '../utils/responsive';
+
 export const fonts = {
   // Font families - Avenir (without .otf extension)
   regular: 'AvenirLTStd-Roman',
@@ -7,15 +9,15 @@ export const fonts = {
   black: 'AvenirLTStd-Black',
   book: 'AvenirLTStd-Book',
   
-  // Font sizes
-  xs: 12,
-  sm: 14,
-  base: 16,
-  lg: 18,
-  xl: 20,
-  '2xl': 24,
-  '3xl': 30,
-  '4xl': 36,
+  // Responsive font sizes
+  xs: responsiveFonts.xs,
+  sm: responsiveFonts.sm,
+  base: responsiveFonts.base,
+  lg: responsiveFonts.lg,
+  xl: responsiveFonts.xl,
+  '2xl': responsiveFonts['2xl'],
+  '3xl': responsiveFonts['3xl'],
+  '4xl': responsiveFonts['4xl'],
   
   // Line heights
   lineHeight: {
