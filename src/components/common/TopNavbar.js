@@ -95,12 +95,14 @@ const TopNavbar = ({ navigation }) => {
             <Icon name="account" size={24} color={colors.textWhite} />
           </TouchableOpacity>
 
+          {/* Logout button hidden as requested
           <TouchableOpacity
             style={[styles.iconButton, showLogoutModal && styles.activeButton]}
             onPress={handleLogoutPress}
             activeOpacity={0.7}>
             <Icon name="logout" size={24} color={colors.textWhite} />
           </TouchableOpacity>
+          */}
         </View>
       </View>
 
