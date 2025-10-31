@@ -171,21 +171,21 @@ const ChatsScreen = ({ navigation }) => {
 
       <View style={styles.chatContent}>
         <View style={styles.chatHeader}>
-          <Text style={[styles.chatTitle, { color: colors.textPrimary, fontSize: fonts.base, fontFamily: fonts.bold }]}>
+          <Text style={styles.chatTitle}>
             {chat.enquiryTitle}
           </Text>
-          <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
+          <Text style={styles.chatTime}>
             {formatDateTime(chat.lastMessageTime)}
           </Text>
         </View>
 
         <View style={styles.chatFooter}>
-          <Text style={[styles.chatMessage, { color: colors.textSecondary, fontSize: fonts.sm }]}>
+          <Text style={styles.chatMessage}>
             {chat.isClient ? chat.clientName : 'You'}: {truncateText(chat.lastMessage, 50)}
           </Text>
           {chat.unreadCount > 0 && (
             <View style={styles.unreadBadge}>
-              <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
+              <Text style={styles.unreadBadgeText}>
                 {chat.unreadCount}
               </Text>
             </View>
@@ -288,8 +288,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   chatTitle: {
-    fontWeight: fonts.medium,
+    fontSize: 16, // standardized header size
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
     flex: 1,
+  },
+  chatTime: {
+    color: colors.textLight,
+    fontSize: 13,
+    fontFamily: fonts.regular,
   },
   chatFooter: {
     flexDirection: 'row',
@@ -298,6 +305,9 @@ const styles = StyleSheet.create({
   },
   chatMessage: {
     flex: 1,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontFamily: fonts.regular,
   },
   unreadBadge: {
     backgroundColor: colors.primary,
@@ -307,6 +317,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 6,
+  },
+  unreadBadgeText: {
+    color: colors.textWhite,
+    fontSize: 13,
+    fontFamily: fonts.bold,
   },
   emptyCard: {
     margin: 16,

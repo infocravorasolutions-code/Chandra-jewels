@@ -3,7 +3,9 @@ export const images = {
   // App logos and branding
   logo: require('../assets/images/logo.png'),
   logoWhite: require('../assets/images/logo.png'), // Using same logo for now, can be updated later
+  logoHeader: require('../assets/images/logo-header.png'),
   loginImage: require('../assets/images/Login-Image.png'),
+  loginLogo: require('../assets/images/Login-logo.png'),
   
   // Placeholder images - using local placeholders or keeping online for now
   placeholder: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=300&h=200&fit=crop&crop=center',
@@ -32,10 +34,17 @@ export const icons = {
   chat: 'chat',
   dashboard: 'dashboard',
   enquiry: 'assignment',
+  description: 'description',
+  tune: 'tune',
+  sort: 'sort',
+  pendingActions: 'pending-actions',
+  work: 'work',
+  priorityHigh: 'priority-high',
+  lowPriority: 'low-priority',
   
   // Tab bar icons
   homeIcon: 'home',
-  enquiryIcon: 'assignment',
+  enquiryIcon: 'description',
   chatIcon: 'chat',
   profileIcon: 'person',
   
@@ -58,4 +67,20 @@ export const icons = {
   login: 'login',
   diamond: 'diamond',
   jewelry: 'diamond',
+  
+  // Jewelry specific icons
+  gold: 'workspace-premium',
+  engagementRing: 'lens',
+  stone: 'diamond',
+  
+  // Professional enquiry detail icons
+  person: 'person',
+  schedule: 'schedule',
+  attachMoney: 'currency-rupee',
+  rupee: 'currency-rupee',
+  photoLibrary: 'photo-library',
+  designServices: 'design-services',
+  precisionManufacturing: 'precision-manufacturing',
+  description: 'description',
+  download: 'download',
 };

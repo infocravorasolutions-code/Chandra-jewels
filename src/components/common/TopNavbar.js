@@ -60,13 +60,15 @@ const TopNavbar = ({ navigation }) => {
         <View style={styles.leftSection}>
           <View style={styles.logoContainer}>
             <Image 
-              source={images.logo} 
+              source={images.logo}
               style={styles.logoImage}
               resizeMode="contain"
             />
-            <Text style={[styles.logoText, { color: colors.textWhite, fontSize: fonts.xl, fontFamily: fonts.bold }]}>
-              Chandra Jewels
-            </Text>
+            <Image 
+              source={images.logoHeader}
+              style={styles.logoHeaderImage}
+              resizeMode="contain"
+            />
             {/* {buttonPressed && (
               <Text style={{ color: colors.textWhite, fontSize: 10, marginLeft: 8 }}>
                 {buttonPressed} pressed
@@ -162,8 +164,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoImage: {
-    width: 30,
-    height: 30,
+    width: 40,
+    height: 40,
+  },
+  logoHeaderImage: {
+    height: 40,
+    width: 160,
+    marginLeft: 8,
   },
   logoText: {
     marginLeft: 8,

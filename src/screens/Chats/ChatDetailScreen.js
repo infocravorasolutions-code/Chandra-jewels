@@ -12,6 +12,7 @@ import {
   Alert,
   StatusBar,
   ImageBackground,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
@@ -43,6 +44,18 @@ const ChatDetailScreen = ({ route, navigation }) => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
   }, [messages]);
+
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+
+    return () => {
+      keyboardDidShowListener?.remove();
+    };
+  }, []);
 
   const loadMessages = async () => {
     try {
@@ -303,54 +316,55 @@ const ChatDetailScreen = ({ route, navigation }) => {
     >
       <View style={styles.backgroundOverlay}>
         <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
-        <KeyboardAvoidingView
-          style={styles.keyboardContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        
         {renderChatHeader()}
 
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.messagesContainer}
-        contentContainerStyle={styles.messagesContent}>
-        
-        {messages.length === 0 ? (
-          renderEmptyState()
-        ) : (
-          messages.map((message, index) => renderMessage(message, index))
-        )}
-      </ScrollView>
+        <KeyboardAvoidingView
+          style={styles.keyboardContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
 
-      <View style={styles.inputContainer}>
-        <View style={styles.inputWrapper}>
-          <TouchableOpacity style={styles.attachButton}>
-            <Icon name="attach-file" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-          
-          <View style={styles.textInputContainer}>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Type a message..."
-              placeholderTextColor={colors.textLight}
-              value={newMessage}
-              onChangeText={setNewMessage}
-              multiline
-              maxLength={500}
-            />
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.messagesContainer}
+            contentContainerStyle={styles.messagesContent}>
+            
+            {messages.length === 0 ? (
+              renderEmptyState()
+            ) : (
+              messages.map((message, index) => renderMessage(message, index))
+            )}
+          </ScrollView>
+
+          <View style={styles.inputContainer}>
+            <View style={styles.inputWrapper}>
+              <TouchableOpacity style={styles.attachButton}>
+                <Icon name="attach-file" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+              
+              <View style={styles.textInputContainer}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Type a message..."
+                  placeholderTextColor={colors.textLight}
+                  value={newMessage}
+                  onChangeText={setNewMessage}
+                  multiline
+                  maxLength={500}
+                />
+              </View>
+              
+              {newMessage.trim() ? (
+                <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
+                  <Icon name="send" size={20} color={colors.textWhite} />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.micButton}>
+                  <Icon name="mic" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-          
-          {newMessage.trim() ? (
-            <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
-              <Icon name="send" size={20} color={colors.textWhite} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.micButton}>
-              <Icon name="mic" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
       </View>
     </ImageBackground>
   );
@@ -395,7 +409,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   headerAvatarText: {
-    fontSize: fonts.base,
+    fontSize: 13,
     fontFamily: fonts.bold,
     color: colors.primary,
   },
@@ -403,13 +417,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   chatTitle: {
-    fontSize: fonts.lg,
+    fontSize: 16,
     fontFamily: fonts.bold,
     color: colors.textWhite,
     marginBottom: 2,
   },
   clientName: {
-    fontSize: fonts.sm,
+    fontSize: 13,
     color: colors.textWhite,
     opacity: 0.8,
   },
@@ -453,7 +467,7 @@ const styles = StyleSheet.create({
     marginRight: 'auto',
   },
   messageText: {
-    fontSize: fonts.base,
+    fontSize: 13,
     lineHeight: 20,
     flexWrap: 'wrap',
   },
@@ -470,10 +484,12 @@ const styles = StyleSheet.create({
   },
   messageTime: {
     marginRight: 8,
+    fontSize: 10,
   },
   senderName: {
     fontWeight: '500',
     flexShrink: 1,
+    fontSize: 13,
   },
   emptyState: {
     alignItems: 'center',
@@ -488,6 +504,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+    paddingBottom: Platform.OS === 'ios' ? 16 : 16,
   },
   inputWrapper: {
     flexDirection: 'row',

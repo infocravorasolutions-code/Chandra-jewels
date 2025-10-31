@@ -10,6 +10,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRoute } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { EnquiryCard, Card } from '../../components/cards/Cards';
@@ -22,27 +23,56 @@ import { fonts } from '../../constants/fonts';
 
 const { width } = Dimensions.get('window');
 
+const statusList = ['All', 'Pending', 'In Progress', 'Completed'];
+
 const EnquiryListScreen = ({ navigation }) => {
   const { user } = useAuth();
+  const route = useRoute();
   const [enquiries, setEnquiries] = useState([]);
   const [filteredEnquiries, setFilteredEnquiries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
+  const [sortBy, setSortBy] = useState('createdAt'); // Default sort by creation date
+  const [sortOrder, setSortOrder] = useState('desc'); // Default to newest first
+  
+  // Get filter from route params, default to 'all' if not provided
+  const initialFilter = route.params?.filter || 'all';
   const [filters, setFilters] = useState({
-    status: 'all',
+    status: initialFilter,
     priority: 'all',
     client: 'all',
   });
+
+  const [selectedStatus, setSelectedStatus] = useState('All');
+  const [selectedClient, setSelectedClient] = useState('All');
+
+  // Get unique client list
+  const clientList = Array.from(new Set(enquiries.map(e => e.clientName))).sort();
 
   useEffect(() => {
     loadEnquiries();
   }, []);
 
+  // Update filter when route params change
+  useEffect(() => {
+    const newStatus = route.params?.filter || 'all';
+    if (newStatus !== filters.status) {
+      setFilters(prev => ({
+        ...prev,
+        status: newStatus
+      }));
+    }
+    if (route.params?.filterType === 'client' && route.params?.filter) {
+      setSelectedClient(route.params.filter);
+    }
+  }, [route.params?.filterType, route.params?.filter]);
+
   useEffect(() => {
     applyFilters();
-  }, [enquiries, searchQuery, filters]);
+  }, [enquiries, searchQuery, filters, sortBy, sortOrder]);
 
   // Safety check - don't render if user is not loaded
   if (!user) {
@@ -173,7 +203,7 @@ const EnquiryListScreen = ({ navigation }) => {
     if (searchQuery) {
       filtered = filtered.filter(enquiry =>
         enquiry.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        enquiry.client.toLowerCase().includes(searchQuery.toLowerCase())
+        enquiry.clientName.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -187,10 +217,33 @@ const EnquiryListScreen = ({ navigation }) => {
       filtered = filtered.filter(enquiry => enquiry.priority === filters.priority);
     }
 
-    // Client filter
-    if (filters.client !== 'all') {
-      filtered = filtered.filter(enquiry => enquiry.client === filters.client);
+    if (selectedClient !== 'All') {
+      filtered = filtered.filter(enquiry => enquiry.clientName === selectedClient);
     }
+
+    // Sort the filtered results
+    filtered.sort((a, b) => {
+      let aValue = a[sortBy];
+      let bValue = b[sortBy];
+
+      // Handle different data types
+      if (sortBy === 'createdAt' || sortBy === 'updatedAt') {
+        aValue = new Date(aValue).getTime();
+        bValue = new Date(bValue).getTime();
+      } else if (sortBy === 'budget') {
+        aValue = parseFloat(aValue) || 0;
+        bValue = parseFloat(bValue) || 0;
+      } else if (typeof aValue === 'string') {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+
+      if (sortOrder === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
 
     setFilteredEnquiries(filtered);
   };
@@ -251,8 +304,8 @@ const EnquiryListScreen = ({ navigation }) => {
 
   const getStatusIcon = (status) => {
     const statusIcons = {
-      pending: 'schedule',
-      in_progress: 'play-circle-filled',
+      pending: 'pendingActions',
+      in_progress: 'work',
       completed: 'check-circle',
       rejected: 'cancel',
     };
@@ -270,9 +323,9 @@ const EnquiryListScreen = ({ navigation }) => {
 
   const getPriorityIcon = (priority) => {
     const priorityIcons = {
-      high: 'keyboard-arrow-up',
+      high: 'priorityHigh',
       medium: 'remove',
-      low: 'keyboard-arrow-down',
+      low: 'lowPriority',
     };
     return priorityIcons[priority] || 'help';
   };
@@ -297,32 +350,108 @@ const EnquiryListScreen = ({ navigation }) => {
     return date.toLocaleDateString();
   };
 
+  // Sort options
+  const sortOptions = [
+    { key: 'createdAt', label: 'Date Created', icon: 'schedule' },
+    { key: 'title', label: 'Title', icon: 'title' },
+    { key: 'clientName', label: 'Client', icon: 'person' },
+    { key: 'budget', label: 'Budget', icon: 'currency-rupee' },
+    { key: 'status', label: 'Status', icon: 'flag' },
+  ];
+
+  const getSortLabel = () => {
+    const option = sortOptions.find(opt => opt.key === sortBy);
+    return option ? option.label : 'Sort by';
+  };
+
+  const handleSortChange = (newSortBy) => {
+    if (newSortBy === sortBy) {
+      // Toggle order if same field
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(newSortBy);
+      setSortOrder('desc'); // Default to desc for new field
+    }
+    setShowSortModal(false);
+  };
+
   const renderFilterChips = () => {
     const activeFilters = Object.entries(filters).filter(([key, value]) => value !== 'all');
     
     if (activeFilters.length === 0) return null;
 
     return (
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChips}>
-        {activeFilters.map(([key, value]) => (
-          <TouchableOpacity
-            key={key}
-            style={styles.filterChip}
-            onPress={() => handleFilterChange(key, 'all')}>
-            <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
-              {key}: {value}
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.textWhite }}>✕</Text>
-          </TouchableOpacity>
-        ))}
-        <TouchableOpacity style={styles.clearAllChip} onPress={clearFilters}>
-          <Text style={{ color: colors.primary, fontSize: fonts.sm }}>
-            Clear All
-          </Text>
+      <View style={styles.filterChipsContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChips}>
+          {activeFilters.map(([key, value]) => (
+            <View key={key} style={styles.filterChip}>
+              <Text style={styles.filterChipText}>
+                {key === 'status' ? 'Status' : key}: {value}
+              </Text>
+              <TouchableOpacity
+                style={styles.filterChipClose}
+                onPress={() => handleFilterChange(key, 'all')}>
+                <Icon name="close" size={14} color={colors.textWhite} />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </ScrollView>
+        <TouchableOpacity style={styles.clearAllButton} onPress={clearFilters}>
+          <Text style={styles.clearAllText}>Clear All</Text>
         </TouchableOpacity>
-      </ScrollView>
+      </View>
     );
   };
+
+  const renderStatusChips = () => (
+    statusList.length <= 1 ? null : (
+      <View style={styles.chipsGroupRow}>
+        <Text style={styles.chipGroupLabel}>Status</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+          {statusList.map(status => (
+            <TouchableOpacity
+              key={status}
+              style={[
+                styles.chip,
+                selectedStatus === status && styles.chipActive,
+              ]}
+              onPress={() => setSelectedStatus(status)}
+            >
+              <Text style={[
+                styles.chipText,
+                selectedStatus === status && styles.chipTextActive,
+              ]}>{status}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    )
+  );
+
+  const renderClientChips = () => (
+    clientList.length <= 1 ? null : (
+      <View style={styles.chipsGroupRow}>
+        <Text style={styles.chipGroupLabel}>Client</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+          {["All", ...clientList].map(client => (
+            <TouchableOpacity
+              key={client}
+              style={[
+                styles.chip,
+                selectedClient === client && styles.chipActive,
+              ]}
+              onPress={() => setSelectedClient(client)}
+            >
+              <Text style={[
+                styles.chipText,
+                selectedClient === client && styles.chipTextActive,
+              ]}>{client}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    )
+  );
 
   const renderFilterModal = () => (
     <Modal
@@ -331,7 +460,7 @@ const EnquiryListScreen = ({ navigation }) => {
       presentationStyle="pageSheet">
       <View style={styles.filterModal}>
         <View style={styles.filterHeader}>
-          <Text style={{ fontSize: fonts.xl, fontFamily: fonts.bold, color: colors.textPrimary }}>
+          <Text style={{ fontSize: 16, fontFamily: fonts.bold, color: colors.textPrimary }}>
             Filters
           </Text>
           <TouchableOpacity onPress={() => setShowFilters(false)}>
@@ -341,7 +470,7 @@ const EnquiryListScreen = ({ navigation }) => {
 
         <ScrollView style={styles.filterContent}>
           <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
+            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
               Status
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -355,7 +484,7 @@ const EnquiryListScreen = ({ navigation }) => {
                   onPress={() => handleFilterChange('status', option.value)}>
                   <Text style={{ 
                     color: filters.status === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: fonts.sm 
+                    fontSize: 13 
                   }}>
                     {option.label}
                   </Text>
@@ -365,7 +494,7 @@ const EnquiryListScreen = ({ navigation }) => {
           </View>
 
           <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
+            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
               Priority
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -379,7 +508,7 @@ const EnquiryListScreen = ({ navigation }) => {
                   onPress={() => handleFilterChange('priority', option.value)}>
                   <Text style={{ 
                     color: filters.priority === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: fonts.sm 
+                    fontSize: 13 
                   }}>
                     {option.label}
                   </Text>
@@ -389,7 +518,7 @@ const EnquiryListScreen = ({ navigation }) => {
           </View>
 
           <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
+            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
               Client
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -403,7 +532,7 @@ const EnquiryListScreen = ({ navigation }) => {
                   onPress={() => handleFilterChange('client', option.value)}>
                   <Text style={{ 
                     color: filters.client === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: fonts.sm 
+                    fontSize: 13 
                   }}>
                     {option.label}
                   </Text>
@@ -421,6 +550,65 @@ const EnquiryListScreen = ({ navigation }) => {
           />
         </View>
       </View>
+    </Modal>
+  );
+
+  const renderSortModal = () => (
+    <Modal
+      visible={showSortModal}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setShowSortModal(false)}>
+      <TouchableOpacity
+        style={styles.modalOverlay}
+        activeOpacity={1}
+        onPress={() => setShowSortModal(false)}>
+        <View style={styles.sortModalContent}>
+          <View style={styles.sortModalHeader}>
+            <Text style={styles.sortModalTitle}>Sort by</Text>
+            <TouchableOpacity
+              style={styles.sortModalClose}
+              onPress={() => setShowSortModal(false)}>
+              <Icon name="close" size={20} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.sortOptionsList}>
+            {sortOptions.map((option) => (
+              <TouchableOpacity
+                key={option.key}
+                style={[
+                  styles.sortOption,
+                  sortBy === option.key && styles.sortOptionActive
+                ]}
+                onPress={() => handleSortChange(option.key)}>
+                <View style={styles.sortOptionContent}>
+                  <Icon 
+                    name={option.icon} 
+                    size={20} 
+                    color={sortBy === option.key ? colors.primary : colors.textSecondary} 
+                  />
+                  <Text style={[
+                    styles.sortOptionText,
+                    sortBy === option.key && styles.sortOptionTextActive
+                  ]}>
+                    {option.label}
+                  </Text>
+                </View>
+                {sortBy === option.key && (
+                  <View style={styles.sortOrderIndicator}>
+                    <Icon 
+                      name={sortOrder === 'asc' ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} 
+                      size={20} 
+                      color={colors.primary} 
+                    />
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </TouchableOpacity>
     </Modal>
   );
 
@@ -443,9 +631,15 @@ const EnquiryListScreen = ({ navigation }) => {
           </View>
           
           <TouchableOpacity
+            style={styles.sortButton}
+            onPress={() => setShowSortModal(true)}>
+            <Icon name="sort" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity
             style={styles.filterButton}
             onPress={() => setShowFilters(true)}>
-            <Icon name="filter-list" size={20} color={colors.primary} />
+            <Icon name="tune" size={20} color={colors.primary} />
           </TouchableOpacity>
         </View>
         
@@ -460,6 +654,8 @@ const EnquiryListScreen = ({ navigation }) => {
         )}
       </View>
 
+      {renderStatusChips()}
+      {renderClientChips()}
       {renderFilterChips()}
 
       <ScrollView
@@ -470,8 +666,8 @@ const EnquiryListScreen = ({ navigation }) => {
         
         {filteredEnquiries.length === 0 ? (
           <Card style={styles.emptyCard}>
-            <Icon name="enquiry" size={40} color={colors.textLight} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.base }]}>
+            <Icon name="description" size={40} color={colors.textLight} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 13 }]}>
               No enquiries found
             </Text>
             <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
@@ -505,6 +701,7 @@ const EnquiryListScreen = ({ navigation }) => {
       </ScrollView>
 
       {renderFilterModal()}
+      {renderSortModal()}
     </SafeAreaView>
   );
 };
@@ -515,8 +712,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundSecondary,
   },
   header: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
     shadowColor: colors.cardShadow,
@@ -524,7 +724,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 5,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   headerActions: {
     flexDirection: 'row',
@@ -544,6 +744,16 @@ const styles = StyleSheet.create({
     marginTop: 16,
     alignItems: 'flex-end',
   },
+  sortButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
   filterButton: {
     width: 48,
     height: 48,
@@ -554,25 +764,58 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderLight,
   },
-  filterChips: {
+  filterChipsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  filterChips: {
+    flex: 1,
   },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.primary,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     marginRight: 8,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  clearAllChip: {
+  filterChipText: {
+    color: colors.textWhite,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    marginRight: 6,
+  },
+  filterChipClose: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clearAllButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     backgroundColor: colors.backgroundSecondary,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  clearAllText: {
+    color: colors.textSecondary,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
   },
   scrollView: {
     flex: 1,
@@ -625,6 +868,122 @@ const styles = StyleSheet.create({
   },
   applyButton: {
     width: '100%',
+  },
+  
+  // Sort Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  sortModalContent: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '60%',
+    width: '100%',
+    shadowColor: colors.textPrimary,
+    shadowOffset: {
+      width: 0,
+      height: -4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  sortModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  sortModalTitle: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  sortModalClose: {
+    padding: 4,
+  },
+  sortOptionsList: {
+    padding: 8,
+  },
+  sortOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 8,
+    marginVertical: 2,
+  },
+  sortOptionActive: {
+    backgroundColor: colors.backgroundSecondary,
+  },
+  sortOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  sortOptionText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginLeft: 12,
+  },
+  sortOptionTextActive: {
+    color: colors.primary,
+    fontFamily: fonts.bold,
+  },
+  sortOrderIndicator: {
+    marginLeft: 8,
+  },
+  chipsGroupRow: {
+    marginBottom: 2,
+    paddingLeft: 20,    // match Enquiry Cards' left inset
+    paddingRight: 20,  
+  },
+  chipGroupLabel: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: colors.textSecondary,
+    marginBottom: 2,
+    marginLeft: 8,
+  },
+  chipsScroll: {
+    marginBottom: 6,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.textSecondary,
+    backgroundColor: colors.background,
+    marginRight: 8,
+    marginBottom: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  chipText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontFamily: fonts.medium,
+  },
+  chipTextActive: {
+    color: colors.textWhite,
+  },
+  clientsChipsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginBottom: 8,
   },
 });
 

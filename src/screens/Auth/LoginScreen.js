@@ -90,9 +90,11 @@ const LoginScreen = ({ navigation }) => {
             style={styles.logo}
             resizeMode="contain"
           />
-          <Heading level={1} color="primary" style={styles.title}>
-            Chandra Jewels
-          </Heading>
+          <Image 
+            source={images.loginLogo} 
+            style={styles.loginLogoImage}
+            resizeMode="contain"
+          />
           <BodyText color="secondary" style={styles.subtitle}>
             Welcome back! Please sign in to continue.
           </BodyText>
@@ -168,11 +170,12 @@ const styles = StyleSheet.create({
   logo: {
     width: 80,
     height: 80,
-    marginBottom: 16,
-  },
-  title: {
     marginBottom: 8,
-    textAlign: 'center',
+  },
+  loginLogoImage: {
+    width: 200,
+    height: 60,
+    marginBottom: 12,
   },
   subtitle: {
     textAlign: 'center',

@@ -88,14 +88,14 @@ const styles = StyleSheet.create({
   
   // Variants
   primary: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primary, // Chandra green
   },
   primaryText: {
     color: colors.textWhite,
   },
   
   secondary: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.textSecondary, // Grey
   },
   secondaryText: {
     color: colors.textWhite,

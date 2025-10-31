@@ -17,9 +17,9 @@ export const colors = {
   textWhite: '#FFFFFF',
   
   // Status colors
-  success: '#10B981',
+  success: '#47b02c', // Vibrant green like the image
   error: '#EF4444',
-  warning: '#F59E0B',
+  warning: '#ffbb34', // Bright yellow to match the green vibrancy
   info: '#3B82F6',
   
   // Border colors

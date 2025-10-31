@@ -67,7 +67,7 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
                 onLongPress={onLongPress}
                 style={styles.searchButtonContainer}>
                 <View style={styles.searchButton}>
-                  <Icon name="search" size={24} color={colors.textWhite} />
+                  <Icon name="enquiryIcon" size={24} color={colors.textWhite} />
                 </View>
                 <Text style={styles.searchLabel}>INQUIRIES</Text>
               </TouchableOpacity>
@@ -90,6 +90,9 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
                 size={28} 
                 color={isFocused ? colors.primary : colors.textSecondary} 
               />
+              <Text style={[styles.tabLabel, { color: isFocused ? colors.primary : colors.textSecondary }]}>
+                {label.toUpperCase()}
+              </Text>
             </TouchableOpacity>
           );
         })}
@@ -138,6 +141,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     minWidth: 60,
+  },
+  tabLabel: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.bold,
+    marginTop: 4,
+    letterSpacing: 0.5,
   },
   searchButtonContainer: {
     alignItems: 'center',

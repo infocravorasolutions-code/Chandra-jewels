@@ -81,6 +81,29 @@ const MetalPricesScreen = () => {
     setIsEditing(false);
   };
 
+  // Build a compact summary row for Gold, Silver, Platinum
+  const renderSummaryRow = () => {
+    if (!metalPrices) return null;
+    const order = ['gold', 'silver', 'platinum'];
+    const items = order
+      .filter(key => metalPrices[key])
+      .map(key => ({ key, ...metalPrices[key] }));
+
+    if (items.length === 0) return null;
+
+    return (
+      <View style={styles.summaryRow}>
+        {items.map((item, idx) => (
+          <Card key={item.key} style={[styles.summaryCard, idx !== items.length - 1 && { marginRight: 8 }]}>
+            <Text style={styles.summaryTitle}>{item.key.charAt(0).toUpperCase() + item.key.slice(1)}</Text>
+            <Text style={styles.summaryPrice}>{(item.price)}</Text>
+            <Text style={styles.summaryUpdated}>Last up: {formatDate(item.lastUpdated)}</Text>
+          </Card>
+        ))}
+      </View>
+    );
+  };
+
   const renderMetalPriceCard = (metal, data) => (
     <Card key={metal} style={styles.priceCard}>
       <View style={styles.priceHeader}>
@@ -88,7 +111,7 @@ const MetalPricesScreen = () => {
           <Icon name="jewelry" size={20} color={colors.primary} />
         </View>
         <View style={styles.metalInfo}>
-          <Text style={[styles.metalName, { fontSize: fonts.xl, fontFamily: fonts.bold, color: colors.textPrimary }]}>
+          <Text style={[styles.metalName, { fontSize: fonts.lg, fontFamily: fonts.bold, color: colors.textPrimary }]}>
             {metal.charAt(0).toUpperCase() + metal.slice(1)}
           </Text>
           <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
@@ -113,9 +136,12 @@ const MetalPricesScreen = () => {
           </View>
         ) : (
           <View style={styles.priceDisplay}>
-            <Text style={[styles.priceValue, { fontSize: fonts['3xl'], fontFamily: fonts.bold, color: colors.textPrimary }]}>
-              {formatCurrency(data.price)}
-            </Text>
+            <View style={{flexDirection:'row', alignItems:'center', justifyContent:'center'}}>
+              <Icon name="attach-money" size={24} color={colors.primary} style={{marginRight:4}} />
+              <Text style={[styles.priceValue, { fontSize: fonts['2xl'], fontFamily: fonts.bold, color: colors.textPrimary }]}>
+                {(data.price)}
+              </Text>
+            </View>
             <Text style={[styles.priceUnit, { color: colors.textSecondary, fontSize: fonts.sm }]}>
               {data.unit}
             </Text>
@@ -127,7 +153,7 @@ const MetalPricesScreen = () => {
 
   const renderActionButtons = () => (
     <Card style={styles.actionCard}>
-      <Text style={[styles.actionTitle, { fontSize: fonts.xl, fontFamily: fonts.bold, color: colors.textPrimary }]}>
+      <Text style={[styles.actionTitle, { fontSize: fonts.lg, fontFamily: fonts.bold, color: colors.textPrimary }]}>
         Actions
       </Text>
       
@@ -159,7 +185,7 @@ const MetalPricesScreen = () => {
 
   const renderPriceHistory = () => (
     <Card style={styles.historyCard}>
-      <Text style={[styles.historyTitle, { fontSize: fonts.xl, fontFamily: fonts.bold, color: colors.textPrimary }]}>
+      <Text style={[styles.historyTitle, { fontSize: fonts.lg, fontFamily: fonts.bold, color: colors.textPrimary }]}>
         Price History
       </Text>
       
@@ -212,15 +238,16 @@ const MetalPricesScreen = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left','right','bottom']}>
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={{ paddingTop:20 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }>
         
         <View style={styles.header}>
-          <Text style={{ fontSize: fonts['3xl'], fontFamily: fonts.bold, color: colors.textPrimary }}>
+          <Text style={{ fontSize: fonts['2xl'], fontFamily: fonts.bold, color: colors.primary }}>
             Metal Prices
           </Text>
           <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
@@ -228,9 +255,9 @@ const MetalPricesScreen = () => {
           </Text>
         </View>
 
-        {metalPrices && Object.entries(metalPrices).map(([metal, data]) =>
-          renderMetalPriceCard(metal, data)
-        )}
+        {renderSummaryRow()}
+
+        {/* Vertical detailed metal cards removed as requested */}
 
         {renderActionButtons()}
         {renderPriceHistory()}
@@ -248,13 +275,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    padding: 20,
+    paddingTop: 0,
+    paddingBottom: 8,
+    paddingHorizontal: 20,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    marginBottom: 8,
   },
   priceCard: {
-    margin: 16,
+    marginTop: 8,
+    marginBottom: 12,
+    marginHorizontal: 20,
   },
   priceHeader: {
     flexDirection: 'row',
@@ -297,7 +329,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   actionCard: {
-    margin: 16,
+    marginHorizontal: 20,
+    marginVertical: 12,
   },
   actionTitle: {
     marginBottom: 16,
@@ -315,7 +348,8 @@ const styles = StyleSheet.create({
     borderColor: colors.error,
   },
   historyCard: {
-    margin: 16,
+    marginHorizontal: 20,
+    marginVertical: 12,
   },
   historyTitle: {
     marginBottom: 16,
@@ -338,6 +372,34 @@ const styles = StyleSheet.create({
   },
   historyContent: {
     flex: 1,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  summaryCard: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  summaryTitle: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginBottom: 6,
+  },
+  summaryPrice: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  summaryUpdated: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
   },
 });
 

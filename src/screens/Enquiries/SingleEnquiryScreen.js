@@ -131,7 +131,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const renderEnquiryDetails = () => (
     <Card style={styles.detailsCard}>
       <View style={styles.detailsHeader}>
-        <Text style={{ fontSize: fonts['3xl'], fontWeight: 'bold', color: colors.textPrimary }}>
+        <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>
           {enquiry?.title || 'Untitled Enquiry'}
         </Text>
         <View style={styles.statusContainer}>
@@ -150,22 +150,22 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
       <View style={styles.detailsGrid}>
         <View style={styles.detailRow}>
-          <Icon name="account" size={16} color={colors.textSecondary} />
-          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: fonts.base }]}>
+          <Icon name="person" size={16} color={colors.primary} />
+          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: 13 }]}>
             {enquiry?.client || 'Unknown Client'}
           </Text>
         </View>
 
         <View style={styles.detailRow}>
-          <Icon name="warning" size={16} color={colors.textSecondary} />
-          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: fonts.base }]}>
+          <Icon name="schedule" size={16} color={colors.primary} />
+          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: 13 }]}>
             {formatDate(enquiry?.createdAt || new Date().toISOString())}
           </Text>
         </View>
 
         <View style={styles.detailRow}>
-          <Icon name="dashboard" size={16} color={colors.textSecondary} />
-          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: fonts.base }]}>
+          <Icon name="currency-rupee" size={16} color={colors.primary} />
+          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: 13 }]}>
             {formatCurrency(enquiry?.estimatedPrice || enquiry?.budget || 0)}
           </Text>
         </View>
@@ -180,11 +180,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     if (images.length === 0) {
       return (
         <Card style={styles.imagesCard}>
-          <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
             Reference Images
           </Text>
           <View style={styles.noImagesContainer}>
-            <Icon name="image" size={40} color={colors.textLight} />
+            <Icon name="photo-library" size={40} color={colors.primary} />
             <Text style={[styles.noImagesText, { color: colors.textSecondary, fontSize: fonts.base }]}>
               No reference images available
             </Text>
@@ -195,7 +195,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
     return (
       <Card style={styles.imagesCard}>
-        <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+        <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
           Reference Images
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -213,24 +213,24 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   const renderVersions = () => (
     <Card style={styles.versionsCard}>
-      <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+      <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
         Design Versions
       </Text>
 
       <View style={styles.versionItem}>
         <View style={styles.versionHeader}>
-          <Icon name="palette" size={20} color={colors.primary} />
-          <Text style={[styles.versionTitle, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
+          <Icon name="design-services" size={20} color={colors.primary} />
+          <Text style={[styles.versionTitle, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
             Coral Design
           </Text>
         </View>
         {enquiry?.coralVersion ? (
           <TouchableOpacity style={styles.versionFile}>
-            <Icon name="pdf" size={16} color={colors.success} />
-            <Text style={[styles.fileName, { color: colors.success, fontSize: fonts.base }]}>
+            <Icon name="description" size={16} color={colors.primary} />
+            <Text style={[styles.fileName, { color: colors.success, fontSize: 13 }]}>
               {enquiry.coralVersion}
             </Text>
-            <Icon name="download" size={16} color={colors.textSecondary} />
+            <Icon name="download" size={16} color={colors.primary} />
           </TouchableOpacity>
         ) : (
           <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
@@ -241,18 +241,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
       <View style={styles.versionItem}>
         <View style={styles.versionHeader}>
-          <Icon name="build" size={20} color={colors.primary} />
-          <Text style={[styles.versionTitle, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
+          <Icon name="precision-manufacturing" size={20} color={colors.primary} />
+          <Text style={[styles.versionTitle, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
             CAD Design
           </Text>
         </View>
         {enquiry?.cadVersion ? (
           <TouchableOpacity style={styles.versionFile}>
-            <Icon name="pdf" size={16} color={colors.success} />
-            <Text style={[styles.fileName, { color: colors.success, fontSize: fonts.base }]}>
+            <Icon name="description" size={16} color={colors.primary} />
+            <Text style={[styles.fileName, { color: colors.success, fontSize: 13 }]}>
               {enquiry.cadVersion}
             </Text>
-            <Icon name="download" size={16} color={colors.textSecondary} />
+            <Icon name="download" size={16} color={colors.primary} />
           </TouchableOpacity>
         ) : (
           <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
@@ -265,7 +265,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   const renderClientActions = () => (
     <Card style={styles.actionsCard}>
-      <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+      <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
         Actions
         </Text>
       
@@ -287,7 +287,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={styles.chatButton}
         onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
         <Icon name="chat" size={16} color={colors.primary} />
-        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: fonts.base }]}>
+        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
           Open Chat
         </Text>
       </TouchableOpacity>
@@ -296,7 +296,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   const renderDesignerActions = (role) => (
     <Card style={styles.actionsCard}>
-      <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+      <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
         Designer Actions
         </Text>
       
@@ -310,7 +310,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={styles.chatButton}
         onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
         <Icon name="chat" size={16} color={colors.primary} />
-        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: fonts.base }]}>
+        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
           Open Chat
         </Text>
       </TouchableOpacity>
@@ -319,7 +319,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   const renderAdminActions = () => (
     <Card style={styles.actionsCard}>
-      <Text style={[styles.sectionTitle, { fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }]}>
+      <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
         Admin Actions
         </Text>
       
@@ -333,7 +333,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={styles.chatButton}
         onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
         <Icon name="chat" size={16} color={colors.primary} />
-        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: fonts.base }]}>
+        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
           Open Chat
         </Text>
       </TouchableOpacity>
@@ -343,8 +343,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const renderApprovalModal = () => (
     <View style={styles.modalOverlay}>
       <View style={styles.modalContent}>
-        <Text style={{ fontSize: fonts['2xl'], fontWeight: 'bold', color: colors.textPrimary }}>Reject Enquiry</Text>
-        <Text style={{ color: colors.textSecondary, fontSize: fonts.base }}>
+        <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>Reject Enquiry</Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
           Please provide a reason for rejecting this enquiry:
         </Text>
         
@@ -398,9 +398,12 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    paddingHorizontal: 16,
   },
   detailsCard: {
-    margin: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 12,
   },
   detailsHeader: {
     flexDirection: 'column',
@@ -437,10 +440,11 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   imagesCard: {
-    margin: 16,
+    marginHorizontal: 16,
+    marginVertical: 12,
   },
   sectionTitle: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   imageContainer: {
     marginRight: 12,
@@ -461,7 +465,8 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   versionsCard: {
-    margin: 16,
+    marginHorizontal: 16,
+    marginVertical: 12,
   },
   versionItem: {
     marginBottom: 16,
@@ -469,7 +474,7 @@ const styles = StyleSheet.create({
   versionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   versionTitle: {
     marginLeft: 8,
@@ -487,7 +492,8 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   actionsCard: {
-    margin: 16,
+    marginHorizontal: 16,
+    marginVertical: 12,
   },
   actionButtons: {
     flexDirection: 'row',
@@ -513,7 +519,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 12,
+    padding: 10,
     backgroundColor: colors.backgroundSecondary,
     borderRadius: 8,
   },

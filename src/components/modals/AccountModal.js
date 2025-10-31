@@ -126,11 +126,11 @@ const AccountModal = ({ visible, onClose }) => {
       
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={{ fontSize: fonts['2xl'], fontWeight: 'bold', color: colors.textPrimary }}>
+          <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>
             My Account
           </Text>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={{ fontSize: 20, color: colors.textPrimary }}>✕</Text>
+            <Text style={{ fontSize: 16, color: colors.textPrimary }}>✕</Text>
           </TouchableOpacity>
         </View>
 
@@ -141,14 +141,14 @@ const AccountModal = ({ visible, onClose }) => {
                 <Icon name="account" size={24} color={colors.textWhite} />
               </View>
               <View style={styles.profileInfo}>
-                <Text style={{ fontSize: fonts.xl, fontWeight: 'bold', color: colors.textPrimary }}>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>
                   {user?.name || 'User'}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: fonts.base }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
                   {user?.email || 'No email'}
                 </Text>
                 <View style={styles.roleBadge}>
-                  <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
+                  <Text style={{ color: colors.textWhite, fontSize: 13 }}>
                     {user?.role ? getRoleDisplayName(user.role) : 'Unknown Role'}
                   </Text>
                 </View>
@@ -166,10 +166,10 @@ const AccountModal = ({ visible, onClose }) => {
                   <Icon name={item.icon} size={20} color={colors.primary} />
                 </View>
                 <View style={styles.menuContent}>
-                  <Text style={{ color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }}>
+                  <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: 'bold' }}>
                     {item.title}
                   </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
                     {item.subtitle}
                   </Text>
                 </View>
@@ -181,7 +181,7 @@ const AccountModal = ({ visible, onClose }) => {
           <Card style={styles.logoutCard}>
             <Button
               title="Sign Out"
-              variant="outline"
+              variant="primary"
               onPress={handleLogout}
               style={styles.logoutButton}
             />
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     margin: 16,
   },
   logoutButton: {
-    borderColor: colors.error,
+    // Using primary variant, no custom styling needed
   },
 });
 

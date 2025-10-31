@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { spacing, responsivePadding, imageSizes } from '../../utils';
+import { formatCount } from '../../utils/helpers';
 import Icon from '../common/Icon';
 
 export const Card = ({ children, style, onPress, ...props }) => {
@@ -21,18 +22,35 @@ export const Card = ({ children, style, onPress, ...props }) => {
 export const StatusCard = ({ title, value, icon, color = colors.primary, onPress }) => (
   <Card style={styles.statusCard} onPress={onPress}>
     <View style={styles.statusCardContent}>
-      <View style={[styles.statusIcon, { backgroundColor: color }]}>
-        {icon}
-      </View>
-      <View style={styles.statusText}>
-        <Text style={{ color: colors.textSecondary, fontSize: fonts.xs, fontFamily: fonts.regular, textAlign: 'center' }}>
+      <View style={styles.statusHeader}>
+        <View style={[styles.statusIcon, { backgroundColor: color }]}>
+          {icon}
+        </View>
+        <Text style={styles.statusTitle}>
           {title}
         </Text>
-        <Text style={{ color: colors.textPrimary, fontSize: fonts.lg, fontFamily: fonts.bold, textAlign: 'center' }}>
-          {value}
-        </Text>
       </View>
+      <Text style={styles.statusValue}>
+        {formatCount(value)}
+      </Text>
     </View>
+  </Card>
+);
+
+export const EnquiryStatusCard = ({ status, value, color, icon, onPress, style }) => (
+  <Card style={[styles.enquiryStatusCard, style]} onPress={onPress}>
+    <View style={styles.enquiryStatusHeader}>
+      <View style={styles.statusIndicatorContainer}>
+        <View style={[styles.statusIndicator, { backgroundColor: color }]} />
+        {icon && (
+          <View style={styles.statusIconContainer}>
+            {icon}
+          </View>
+        )}
+      </View>
+      <Text style={styles.statusLabel}>{status}</Text>
+    </View>
+    <Text style={styles.statusValue}>{formatCount(value)}</Text>
   </Card>
 );
 
@@ -71,15 +89,15 @@ export const EnquiryCard = ({
           </Text>
         </View>
         <View style={styles.enquiryBadges}>
-          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-            <Icon name={statusIcon} size={12} color={colors.textWhite} />
-            <Text style={styles.statusText}>
+          <View style={styles.statusIndicator}>
+            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+            <Text style={[styles.statusText, { color: statusColor }]}>
               {(enquiry.status || 'pending').replace('_', ' ').toUpperCase()}
             </Text>
           </View>
-          <View style={[styles.priorityBadge, { backgroundColor: priorityColor }]}>
-            <Icon name={priorityIcon} size={12} color={colors.textWhite} />
-            <Text style={styles.priorityText}>
+          <View style={styles.priorityIndicator}>
+            <View style={[styles.priorityDot, { backgroundColor: priorityColor }]} />
+            <Text style={[styles.priorityText, { color: priorityColor }]}>
               {(enquiry.priority || 'medium').toUpperCase()}
             </Text>
           </View>
@@ -94,15 +112,15 @@ export const EnquiryCard = ({
       {/* Details Row */}
       <View style={styles.enquiryDetails}>
         <View style={styles.detailItem}>
-          <Icon name="category" size={14} color={colors.textSecondary} />
-          <Text style={styles.detailText}>{enquiry.category || 'General'}</Text>
-        </View>
-        <View style={styles.detailItem}>
-          <Icon name="diamond" size={14} color={colors.textSecondary} />
+          <Icon name="workspace-premium" size={14} color={colors.primary} />
           <Text style={styles.detailText}>{enquiry.metalType || 'Gold'}</Text>
         </View>
         <View style={styles.detailItem}>
-          <Icon name="jewelry" size={14} color={colors.textSecondary} />
+          <Icon name="lens" size={14} color={colors.primary} />
+          <Text style={styles.detailText}>{enquiry.category || 'General'}</Text>
+        </View>
+        <View style={styles.detailItem}>
+          <Icon name="diamond" size={14} color={colors.primary} />
           <Text style={styles.detailText}>{enquiry.stoneType || 'Diamond'}</Text>
         </View>
       </View>
@@ -197,29 +215,88 @@ const styles = StyleSheet.create({
     width: '48%',
     marginHorizontal: '1%',
     marginVertical: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    minHeight: 80,
+    aspectRatio: 1.2,
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
   },
   statusCardContent: {
     flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    height: '100%',
+  },
+  statusHeader: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
   statusIcon: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 6,
     justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  statusTitle: {
+    color: colors.textPrimary,
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    textAlign: 'left',
+    maxWidth: '100%',
+  },
+  
+  // Enquiry Status Card (like the image)
+  enquiryStatusCard: {
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    shadowColor: colors.cardShadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+    minHeight: 110,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  enquiryStatusHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
   },
-  iconText: {
-    fontSize: 12,
-    color: colors.textWhite,
+  statusIndicatorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
   },
-  statusText: {
-    flex: 1,
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  statusIconContainer: {
+    marginLeft: 2,
+  },
+  statusLabel: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    letterSpacing: 0.5,
+  },
+  statusValue: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: 8,
   },
   
   // Modern Enquiry Card
@@ -269,32 +346,34 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 6,
   },
-  statusBadge: {
+  statusIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 4,
+    gap: 6,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   statusText: {
     fontSize: fonts.xs,
-    fontFamily: fonts.bold,
-    color: colors.textWhite,
+    fontFamily: fonts.medium,
     letterSpacing: 0.5,
   },
-  priorityBadge: {
+  priorityIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 16,
-    gap: 3,
+    gap: 6,
+  },
+  priorityDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   priorityText: {
     fontSize: fonts.xs,
-    fontFamily: fonts.bold,
-    color: colors.textWhite,
+    fontFamily: fonts.medium,
     letterSpacing: 0.5,
   },
   

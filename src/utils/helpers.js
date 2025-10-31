@@ -73,3 +73,17 @@ export const truncateText = (text, maxLength) => {
   if (text.length <= maxLength) return text;
   return text.substr(0, maxLength) + '...';
 };
+
+export const formatCount = (count) => {
+  const num = parseInt(count) || 0;
+  
+  if (num >= 10000000) { // 1 Crore
+    return (num / 10000000).toFixed(1).replace(/\.0$/, '') + 'Cr';
+  } else if (num >= 100000) { // 1 Lac
+    return (num / 100000).toFixed(1).replace(/\.0$/, '') + 'L';
+  } else if (num >= 1000) { // 1 Thousand
+    return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  }
+  
+  return num.toString();
+};

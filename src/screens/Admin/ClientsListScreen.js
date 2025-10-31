@@ -102,10 +102,10 @@ const ClientsListScreen = () => {
 
       <View style={styles.clientContent}>
         <View style={styles.clientHeader}>
-          <Text style={[styles.clientName, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
+          <Text style={styles.clientName}>
             {client.name}
           </Text>
-          <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
+          <Text style={styles.clientDate}>
             {formatDate(client.lastOrder)}
           </Text>
         </View>
@@ -113,14 +113,14 @@ const ClientsListScreen = () => {
         <View style={styles.clientDetails}>
           <View style={styles.clientRow}>
             <Icon name="info" size={14} color={colors.textSecondary} />
-            <Text style={[styles.clientText, { color: colors.textSecondary, fontSize: fonts.sm }]}>
+            <Text style={styles.clientDetailText}>
               {client.email}
             </Text>
           </View>
 
           <View style={styles.clientRow}>
             <Icon name="info" size={14} color={colors.textSecondary} />
-            <Text style={[styles.clientText, { color: colors.textSecondary, fontSize: fonts.sm }]}>
+            <Text style={styles.clientDetailText}>
               {client.phone}
             </Text>
           </View>
@@ -128,21 +128,13 @@ const ClientsListScreen = () => {
 
         <View style={styles.clientStats}>
           <View style={styles.statItem}>
-            <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-              Orders
-            </Text>
-            <Text style={[styles.statValue, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
-              {client.totalOrders}
-            </Text>
+            <Text style={styles.statLabel}>Orders</Text>
+            <Text style={styles.statValue}>{client.totalOrders}</Text>
           </View>
 
           <View style={styles.statItem}>
-            <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-              Total Spent
-            </Text>
-            <Text style={[styles.statValue, { color: colors.textPrimary, fontSize: fonts.base, fontWeight: '500' }]}>
-              {formatCurrency(client.totalSpent)}
-            </Text>
+            <Text style={styles.statLabel}>Total Spent</Text>
+            <Text style={styles.statValue}>{formatCurrency(client.totalSpent)}</Text>
           </View>
         </View>
       </View>
@@ -159,12 +151,8 @@ const ClientsListScreen = () => {
         <View style={styles.statContent}>
           <Icon name="account" size={20} color={colors.primary} />
           <View style={styles.statText}>
-            <Text style={{ fontSize: fonts['2xl'], fontFamily: fonts.bold, color: colors.textPrimary }}>
-              {clients.length}
-            </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-              Total Clients
-            </Text>
+            <Text style={styles.statCardValue}>{clients.length}</Text>
+            <Text style={styles.statCardLabel}>Total Clients</Text>
           </View>
         </View>
       </Card>
@@ -173,12 +161,8 @@ const ClientsListScreen = () => {
         <View style={styles.statContent}>
           <Icon name="dashboard" size={20} color={colors.success} />
           <View style={styles.statText}>
-            <Text style={{ fontSize: fonts['2xl'], fontFamily: fonts.bold, color: colors.textPrimary }}>
-              {formatCurrency(clients.reduce((sum, client) => sum + client.totalSpent, 0))}
-            </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-              Total Revenue
-            </Text>
+            <Text style={styles.statCardValue}>{formatCurrency(clients.reduce((sum, client) => sum + client.totalSpent, 0))}</Text>
+            <Text style={styles.statCardLabel}>Total Revenue</Text>
           </View>
         </View>
       </Card>
@@ -190,7 +174,7 @@ const ClientsListScreen = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left','right','bottom']}>
       <View style={styles.header}>
         <SearchInput
           placeholder="Search clients..."
@@ -213,12 +197,8 @@ const ClientsListScreen = () => {
         {renderStatsCards()}
 
         <Card style={styles.clientsHeader}>
-          <Text style={{ fontSize: fonts.xl, fontFamily: fonts.bold, color: colors.textPrimary }}>
-            All Clients
-          </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-            {filteredClients.length} clients found
-          </Text>
+          <Text style={styles.allClientsTitle}>All Clients</Text>
+          <Text style={styles.allClientsSubtitle}>{filteredClients.length} clients found</Text>
         </Card>
 
         {filteredClients.length === 0 ? (
@@ -249,7 +229,8 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
@@ -263,7 +244,9 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     flexDirection: 'row',
-    padding: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
     gap: 12,
   },
   statCard: {
@@ -277,17 +260,18 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   clientsHeader: {
-    margin: 16,
+    marginHorizontal: 20,
+    marginTop: 6,
     marginBottom: 8,
   },
   clientsList: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
   },
   clientItem: {
     flexDirection: 'row',
     backgroundColor: colors.background,
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     marginBottom: 12,
     shadowColor: colors.cardShadow,
     shadowOffset: {
@@ -317,7 +301,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   clientName: {
-    fontWeight: fonts.medium,
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  clientDate: {
+    color: colors.textLight,
+    fontSize: 13,
+    fontFamily: fonts.regular,
   },
   clientDetails: {
     marginBottom: 12,
@@ -330,6 +321,12 @@ const styles = StyleSheet.create({
   clientText: {
     marginLeft: 8,
   },
+  clientDetailText: {
+    marginLeft: 8,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontFamily: fonts.regular,
+  },
   clientStats: {
     flexDirection: 'row',
     gap: 16,
@@ -337,9 +334,36 @@ const styles = StyleSheet.create({
   statItem: {
     alignItems: 'center',
   },
+  statLabel: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontFamily: fonts.regular,
+  },
   statValue: {
-    fontWeight: fonts.medium,
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontFamily: fonts.bold,
     marginTop: 2,
+  },
+  statCardValue: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  statCardLabel: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontFamily: fonts.regular,
+  },
+  allClientsTitle: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  allClientsSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontFamily: fonts.regular,
   },
   moreButton: {
     padding: 8,

@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
-import { StatusCard, Card } from '../../components/cards/Cards';
+import { StatusCard, Card, EnquiryStatusCard } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
@@ -60,37 +60,91 @@ const DashboardScreen = ({ navigation }) => {
   };
 
   const renderAdminDashboard = () => (
-    <View style={styles.statsGrid}>
-      <StatusCard
-        title="Total Enquiries"
-        value={dashboardData?.totalEnquiries || '0'}
-        icon={<Icon name="enquiry" size={20} color={colors.textWhite} />}
-        color={colors.info}
-      />
-      <StatusCard
-        title="Pending Enquiries"
-        value={dashboardData?.pendingEnquiries || '0'}
-        icon={<Icon name="warning" size={20} color={colors.textWhite} />}
-        color={colors.warning}
-      />
-      <StatusCard
-        title="Completed Enquiries"
-        value={dashboardData?.completedEnquiries || '0'}
-        icon={<Icon name="check" size={20} color={colors.textWhite} />}
-        color={colors.success}
-      />
-      <StatusCard
-        title="Total Clients"
-        value={dashboardData?.totalClients || '0'}
-        icon={<Icon name="account" size={20} color={colors.textWhite} />}
-        color={colors.primary}
-      />
-      <StatusCard
-        title="Revenue"
-        value={formatCurrency(dashboardData?.revenue || 0)}
-        icon={<Icon name="dashboard" size={20} color={colors.textWhite} />}
-        color={colors.success}
-      />
+    <View style={styles.dashboardContent}>
+      {/* Enquiries By Status Section */}
+      <View style={styles.sectionContainer}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Status </Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Enquiries')}>
+            <Text style={styles.viewAllText}>View all</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.enquiryStatusGrid}>
+          <EnquiryStatusCard
+            status="PENDING"
+            value={dashboardData?.pendingEnquiries || '0'}
+            color={colors.warning}
+            icon={<View style={[styles.simpleIcon, { backgroundColor: colors.warning }]} />}
+            style={styles.enquiryStatusItem}
+            onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
+          />
+          <EnquiryStatusCard
+            status="COMPLETED"
+            value={dashboardData?.completedEnquiries || '0'}
+            color={colors.success}
+            icon={<View style={[styles.simpleIcon, { backgroundColor: colors.success }]} />}
+            style={styles.enquiryStatusItem}
+            onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
+          />
+        </View>
+      </View>
+
+      {/* Clients Section */}
+      <View style={styles.clientsSection}>
+        <Text style={styles.clientsHeader}>Clients</Text>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.clientsScroll}
+          contentContainerStyle={styles.clientsScrollContent}
+        >
+          {(dashboardData?.clients || [
+            { id: '1', name: 'Emily Davis', count: 4 },
+            { id: '2', name: 'John Smith', count: 2 },
+            { id: '3', name: 'Lisa Anderson', count: 1 },
+            { id: '4', name: 'Robert Wilson', count: 3 }
+          ]).map(client => (
+            <TouchableOpacity
+              style={styles.clientCard}
+              key={client.id}
+              onPress={() => navigation.navigate('Enquiries', { filterType: 'client', filter: client.name })}
+            >
+              <Text style={styles.clientName} numberOfLines={2}>{client.name}</Text>
+              <Text style={styles.clientCount}>{client.count}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      {/* Overview Section */}
+      <View style={styles.overviewSection}>
+        <Text style={styles.overviewTitle}> Overview</Text>
+      </View>
+
+      {/* Other Stats */}
+      <View style={styles.statsGrid}>
+        <StatusCard
+          title="Total Enquiries"
+          value={dashboardData?.totalEnquiries || '0'}
+          icon={<Icon name="assignment" size={20} color={colors.textWhite} />}
+          color={colors.primary}
+          onPress={() => navigation.navigate('Enquiries')}
+        />
+        <StatusCard
+          title="Total Clients"
+          value={dashboardData?.totalClients || '0'}
+          icon={<Icon name="people" size={20} color={colors.textWhite} />}
+          color={colors.primary}
+          onPress={() => navigation.navigate('ClientsList')}
+        />
+        <StatusCard
+          title="Revenue"
+          value={formatCurrency(dashboardData?.revenue || 0)}
+          icon={<Icon name="currency-rupee" size={20} color={colors.textWhite} />}
+          color={colors.primary}
+          onPress={() => navigation.navigate('RevenueReport')}
+        />
+      </View>
     </View>
   );
 
@@ -100,25 +154,29 @@ const DashboardScreen = ({ navigation }) => {
         title="My Enquiries"
         value={dashboardData?.myEnquiries || '0'}
         icon={<Icon name="assignment" size={20} color={colors.textWhite} />}
-        color={colors.info}
+        color={colors.primary}
+        onPress={() => navigation.navigate('Enquiries')}
       />
       <StatusCard
         title="Pending Approvals"
         value={dashboardData?.pendingApprovals || '0'}
-        icon={<Icon name="warning" size={20} color={colors.textWhite} />}
-        color={colors.warning}
+        icon={<Icon name="schedule" size={20} color={colors.textWhite} />}
+        color={colors.primary}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
       />
       <StatusCard
         title="Completed Orders"
         value={dashboardData?.completedOrders || '0'}
-        icon={<Icon name="check" size={20} color={colors.textWhite} />}
-        color={colors.success}
+        icon={<Icon name="check-circle" size={20} color={colors.textWhite} />}
+        color={colors.primary}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
       />
       <StatusCard
         title="Total Spent"
         value={formatCurrency(dashboardData?.totalSpent || 0)}
-        icon={<Icon name="dashboard" size={20} color={colors.textWhite} />}
+        icon={<Icon name="shopping-cart" size={20} color={colors.textWhite} />}
         color={colors.primary}
+        onPress={() => navigation.navigate('OrderHistory')}
       />
     </View>
   );
@@ -128,26 +186,30 @@ const DashboardScreen = ({ navigation }) => {
       <StatusCard
         title="Assigned Enquiries"
         value={dashboardData?.assignedEnquiries || '0'}
-        icon={<Icon name="assignment" size={20} color={colors.textWhite} />}
-        color={colors.info}
+        icon={<Icon name="work" size={20} color={colors.textWhite} />}
+        color={colors.primary}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'assigned' })}
       />
       <StatusCard
         title="Completed Designs"
         value={dashboardData?.completedDesigns || '0'}
-        icon={<Icon name="check" size={20} color={colors.textWhite} />}
-        color={colors.success}
+        icon={<Icon name="palette" size={20} color={colors.textWhite} />}
+        color={colors.primary}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
       />
       <StatusCard
         title="Pending Designs"
         value={dashboardData?.pendingDesigns || '0'}
-        icon={<Icon name="warning" size={20} color={colors.textWhite} />}
-        color={colors.warning}
+        icon={<Icon name="pending" size={20} color={colors.textWhite} />}
+        color={colors.primary}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
       />
       <StatusCard
         title="Average Rating"
         value={dashboardData?.averageRating || '0.0'}
-        icon={<Icon name="info" size={20} color={colors.textWhite} />}
+        icon={<Icon name="star" size={20} color={colors.textWhite} />}
         color={colors.primary}
+        onPress={() => navigation.navigate('DesignerProfile')}
       />
     </View>
   );
@@ -159,23 +221,13 @@ const DashboardScreen = ({ navigation }) => {
       actions.push(
         {
           title: 'Metal Prices',
-          icon: <Icon name="dashboard" size={20} color={colors.primary} />,
+          icon: 'trending-up',
           onPress: () => navigation.navigate('MetalPrices'),
         },
         {
           title: 'Clients List',
-          icon: <Icon name="account" size={20} color={colors.primary} />,
+          icon: 'people',
           onPress: () => navigation.navigate('ClientsList'),
-        },
-        {
-          title: 'Font Test',
-          icon: <Icon name="info" size={20} color={colors.primary} />,
-          onPress: () => navigation.navigate('FontTest'),
-        },
-        {
-          title: 'Responsive Demo',
-          icon: <Icon name="dashboard" size={20} color={colors.primary} />,
-          onPress: () => navigation.navigate('ResponsiveDemo'),
         }
       );
     }
@@ -183,7 +235,7 @@ const DashboardScreen = ({ navigation }) => {
     if (user?.role === 'client') {
       actions.push({
         title: 'Add New Enquiry',
-        icon: <Icon name="add" size={20} color={colors.primary} />,
+        icon: 'add-circle',
         onPress: () => navigation.navigate('AddEnquiryStep1'),
       });
     }
@@ -192,12 +244,12 @@ const DashboardScreen = ({ navigation }) => {
       actions.push(
         {
           title: 'My Assignments',
-          icon: <Icon name="assignment" size={20} color={colors.primary} />,
+          icon: 'work',
           onPress: () => navigation.navigate('EnquiryList'),
         },
         {
           title: 'Upload Design',
-          icon: <Icon name="cloud-upload" size={20} color={colors.primary} />,
+          icon: 'file-upload',
           onPress: () => navigation.navigate('UploadDesign'),
         }
       );
@@ -205,24 +257,19 @@ const DashboardScreen = ({ navigation }) => {
 
     return (
       <Card style={styles.quickActionsCard}>
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { fontSize: fonts['2xl'], fontFamily: fonts.bold, color: colors.primary }]}>
-            Quick Actions
-          </Text>
-          {/* <View style={styles.sectionAccent}></View> */}
-        </View>
+        <Text style={styles.quickActionsTitle}>Quick Actions</Text>
         <View style={styles.actionsGrid}>
           {actions.map((action, index) => (
             <TouchableOpacity
               key={index}
               style={styles.actionButton}
-              onPress={action.onPress}>
+              onPress={action.onPress}
+              activeOpacity={0.7}
+            >
               <View style={styles.actionIcon}>
-                <Text style={{ fontSize: 20, color: colors.primary }}>{action.icon}</Text>
+                <Icon name={action.icon} size={22} color={colors.primary} />
               </View>
-              <Text style={[styles.actionText, { color: colors.textSecondary, fontSize: fonts.sm, fontFamily: fonts.regular }]}>
-                {action.title}
-              </Text>
+              <Text style={styles.actionText}>{action.title}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -230,21 +277,46 @@ const DashboardScreen = ({ navigation }) => {
     );
   };
 
-  const renderBanner = () => (
-    <View style={styles.bannerSection}>
-      <View style={styles.bannerCard}>
-        <View style={styles.bannerContent}>
-          <View style={styles.bannerIcon}>
-            <Icon name="info" size={20} color={colors.textWhite} />
-          </View>
-          <View style={styles.bannerText}>
-            <Text style={styles.bannerTitle}>
-              Your premium jewelry design platform
-            </Text>
-          </View>
+  const renderRecentActivity = () => (
+    <Card style={styles.recentActivityCard}>
+      <Text style={styles.recentActivityTitle}>Recent Activity</Text>
+      
+      <View style={styles.activityItem}>
+        <View style={styles.activityIcon}>
+          <Icon name="assignment" size={16} color={colors.primary} />
+        </View>
+        <View style={styles.activityTextContainer}>
+          <Text style={styles.activityText}>
+            New enquiry received from John Smith
+          </Text>
+          <Text style={styles.activityTime}>2 hours ago</Text>
         </View>
       </View>
-    </View>
+
+      <View style={styles.activityItem}>
+        <View style={[styles.activityIcon, { backgroundColor: 'rgba(76, 175, 80, 0.1)' }]}>
+          <Icon name="check-circle" size={16} color={colors.primary} />
+        </View>
+        <View style={styles.activityTextContainer}>
+          <Text style={styles.activityText}>
+            Design approved for Diamond Ring
+          </Text>
+          <Text style={styles.activityTime}>1 day ago</Text>
+        </View>
+      </View>
+
+      <View style={styles.activityItem}>
+        <View style={[styles.activityIcon]}>
+          <Icon name="schedule" size={16} color={colors.primary} />
+        </View>
+        <View style={styles.activityTextContainer}>
+          <Text style={styles.activityText}>
+            Payment pending for Gold Necklace
+          </Text>
+          <Text style={styles.activityTime}>2 days ago</Text>
+        </View>
+      </View>
+    </Card>
   );
 
   if (loading) {
@@ -256,80 +328,45 @@ const DashboardScreen = ({ navigation }) => {
       <TopNavbar navigation={navigation} />
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }>
-        
+        }
+      >
         {/* Enhanced Welcome Header */}
         <View style={styles.welcomeSection}>
           <View style={styles.welcomeCard}>
             <View style={styles.welcomeContent}>
               <View style={styles.welcomeText}>
                 <Text style={styles.welcomeGreeting}>
-                  Good {getTimeOfDay()}, {user?.name || 'User'}! 👋
+                  Hi <Text style={styles.userNameHighlight}>{user?.name || 'User'}</Text>,
                 </Text>
                 <Text style={styles.welcomeSubtitle}>
-                  Dashboard
+                  Welcome to Chandra Jewellers
                 </Text>
-                <View style={styles.roleBadge}>
-                  <Icon name="account" size={14} color={colors.textWhite} />
-                  <Text style={styles.roleText}>
-                    {user?.role ? getRoleDisplayName(user.role) : 'User'}
-                  </Text>
-                </View>
               </View>
-              <View style={styles.welcomeIcon}>
-                <View style={styles.iconContainer}>
-                  <Icon name="jewelry" size={28} color={colors.textWhite} />
+              <View style={styles.welcomeIconContainer}>
+                <View style={styles.welcomeIcon}>
+                  <Icon name="diamond" size={26} color={colors.textWhite} />
                 </View>
               </View>
             </View>
           </View>
         </View>
 
-        {/* Banner removed as requested */}
-
+        {/* Role-based Dashboard Content */}
         {user?.role === 'admin' && renderAdminDashboard()}
         {user?.role === 'client' && renderClientDashboard()}
         {(user?.role === 'coral' || user?.role === 'cad') && renderDesignerDashboard(user.role)}
 
-        {/* Enhanced Quick Actions */}
+        {/* Quick Actions */}
         <View style={styles.quickActionsSection}>
-          {/* <Text style={styles.sectionTitle}>
-            Quick Actions
-          </Text> */}
           {renderQuickActions()}
         </View>
 
-        {/* Enhanced Recent Activity */}
+        {/* Recent Activity */}
         <View style={styles.recentActivitySection}>
-          <Text style={styles.sectionTitle}>
-            Recent Activity
-          </Text>
-          <Card style={styles.recentActivityCard}>
-            <View style={styles.activityItem}>
-            <View style={styles.activityIcon}>
-              <Icon name="enquiry" size={16} color={colors.primary} />
-            </View>
-            <Text style={[styles.activityText, { color: colors.textSecondary, fontSize: fonts.base, fontFamily: fonts.regular }]}>
-              New enquiry received from John Smith
-            </Text>
-            <Text style={{ color: colors.textLight, fontSize: fonts.sm, fontFamily: fonts.regular }}>
-              2 hours ago
-            </Text>
-          </View>
-          <View style={styles.activityItem}>
-            <View style={styles.activityIcon}>
-              <Icon name="check" size={16} color={colors.success} />
-            </View>
-            <Text style={[styles.activityText, { color: colors.textSecondary, fontSize: fonts.base, fontFamily: fonts.regular }]}>
-              Design approved for Diamond Ring
-            </Text>
-            <Text style={{ color: colors.textLight, fontSize: fonts.sm, fontFamily: fonts.regular }}>
-              1 day ago
-            </Text>
-          </View>
-          </Card>
+          {renderRecentActivity()}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -344,25 +381,25 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 20,
+  },
   
-  // Enhanced Welcome Section
+  // Welcome Section - Premium Design
   welcomeSection: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
   welcomeCard: {
     backgroundColor: colors.primary,
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: 16,
+    padding: 20,
     shadowColor: colors.primary,
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
     shadowRadius: 12,
-    elevation: 8,
+    elevation: 6,
   },
   welcomeContent: {
     flexDirection: 'row',
@@ -377,180 +414,258 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: colors.textWhite,
     marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  userNameHighlight: {
+    fontFamily: fonts.bold,
+    fontStyle: 'italic',
   },
   welcomeSubtitle: {
-    fontSize: fonts.base,
+    fontSize: fonts.sm,
     fontFamily: fonts.regular,
     color: colors.textWhite,
     opacity: 0.9,
-    marginBottom: 12,
+    letterSpacing: 0.3,
   },
-  roleBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    alignSelf: 'flex-start',
-  },
-  roleText: {
-    fontSize: fonts.sm,
-    fontFamily: fonts.medium,
-    color: colors.textWhite,
-    marginLeft: 6,
+  welcomeIconContainer: {
+    marginLeft: 12,
   },
   welcomeIcon: {
-    marginLeft: 16,
-  },
-  iconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
 
-  // Enhanced Banner Section
-  bannerSection: {
-    paddingHorizontal: 20,
-    paddingBottom: 10,
+  // Dashboard Content
+  dashboardContent: {
+    paddingTop: 4,
   },
-  bannerCard: {
-    backgroundColor: colors.accent,
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: colors.accent,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+  
+  // Section Container
+  sectionContainer: {
+    marginBottom: 20,
+    paddingHorizontal: 16,
   },
-  bannerContent: {
+  sectionHeader: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 14,
   },
-  bannerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  bannerText: {
-    flex: 1,
-  },
-  bannerTitle: {
+  sectionTitle: {
     fontSize: fonts.lg,
     fontFamily: fonts.bold,
-    color: colors.textWhite,
-    marginBottom: 4,
+    color: colors.textPrimary,
+    letterSpacing: 0.3,
   },
-  bannerSubtitle: {
+  viewAllText: {
     fontSize: fonts.sm,
-    fontFamily: fonts.regular,
-    color: colors.textWhite,
-    opacity: 0.9,
+    fontFamily: fonts.medium,
+    color: colors.primary,
+    letterSpacing: 0.2,
+  },
+  
+  // Overview Section
+  overviewSection: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  overviewTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    letterSpacing: 0.3,
+  },
+  
+  // Enquiry Status Grid
+  enquiryStatusGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  enquiryStatusItem: {
+    width: '48%',
+    marginBottom: 12,
+  },
+  simpleIcon: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
 
-  // Enhanced Stats Grid
+  // Stats Grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: responsivePadding.screenHorizontal,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
     justifyContent: 'space-between',
   },
 
-  // Enhanced Quick Actions Section
-  quickActionsSection: {
-    paddingHorizontal: responsivePadding.screenHorizontal,
-    paddingVertical: spacing.lg,
+  // Clients Section
+  clientsSection: {
+    marginBottom: 20,
+    paddingLeft: 16,
   },
-  sectionTitle: {
+  clientsHeader: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 14,
+    letterSpacing: 0.3,
+  },
+  clientsScroll: {
+    flexGrow: 0,
+  },
+  clientsScrollContent: {
+    paddingRight: 16,
+  },
+  clientCard: {
+    width: 95,
+    height: 95,
+    backgroundColor: colors.background,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 8,
+  },
+  clientName: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 6,
+    lineHeight: 14,
+  },
+  clientCount: {
     fontSize: fonts['2xl'],
+    fontFamily: fonts.bold,
+    color: colors.primary,
+    letterSpacing: 0.5,
+  },
+
+  // Quick Actions Section
+  quickActionsSection: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  quickActionsCard: {
+    marginHorizontal: 0,
+    marginVertical: 0,
+    padding: 18,
+  },
+  quickActionsTitle: {
+    fontSize: fonts.lg,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
     marginBottom: 16,
+    letterSpacing: 0.3,
   },
   actionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    gap: 12,
   },
   actionButton: {
+    width: '48%',
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 18,
     alignItems: 'center',
-    marginBottom: 20,
-    width: '30%',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    minHeight: 110,
+    // shadowColor: colors.shadow,
+    // shadowOffset: { width: 0, height: 2 },
+    // shadowOpacity: 0.05,
+    // shadowRadius: 4,
+    // elevation: 2,
   },
   actionIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.textWhite,
+    // width: 48,
+    // height: 48,
+    // borderRadius: 24,
+    // backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
-    shadowColor: colors.textPrimary,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
   },
   actionText: {
     fontSize: fonts.sm,
     fontFamily: fonts.medium,
     color: colors.textPrimary,
     textAlign: 'center',
+    lineHeight: 18,
+    letterSpacing: 0.2,
   },
 
-  // Enhanced Recent Activity Section
+  // Recent Activity Section
   recentActivitySection: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   recentActivityCard: {
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: colors.textPrimary,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    marginHorizontal: 0,
+    marginVertical: 0,
+    padding: 18,
+  },
+  recentActivityTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 16,
+    letterSpacing: 0.3,
   },
   activityItem: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.backgroundSecondary,
   },
   activityIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.backgroundSecondary,
+    // width: 38,
+    // height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(33, 150, 243, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
+  },
+  activityTextContainer: {
+    flex: 1,
+    paddingTop: 2,
   },
   activityText: {
-    flex: 1,
-    fontSize: fonts.base,
+    fontSize: fonts.sm,
     fontFamily: fonts.regular,
-    color: colors.textSecondary,
+    color: colors.textPrimary,
+    lineHeight: 20,
+    marginBottom: 4,
+    letterSpacing: 0.1,
+  },
+  activityTime: {
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    lineHeight: 16,
+    letterSpacing: 0.1,
   },
 });
 

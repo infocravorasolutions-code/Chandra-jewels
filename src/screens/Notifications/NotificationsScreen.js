@@ -103,24 +103,13 @@ const NotificationsScreen = ({ navigation }) => {
 
   const getNotificationIcon = (type) => {
     const icons = {
-      enquiry: 'enquiry',
-      approval: 'check',
-      payment: 'dashboard',
+      enquiry: 'assignment',
+      approval: 'check-circle',
+      payment: 'currency-rupee',
       chat: 'chat',
       system: 'info',
     };
-    return icons[type] || 'notification';
-  };
-
-  const getNotificationColor = (type) => {
-    const notificationColors = {
-      enquiry: colors.info,
-      approval: colors.success,
-      payment: colors.success,
-      chat: colors.primary,
-      system: colors.warning,
-    };
-    return notificationColors[type] || colors.primary;
+    return icons[type] || 'notifications';
   };
 
   const renderNotificationItem = (notification) => (
@@ -135,25 +124,27 @@ const NotificationsScreen = ({ navigation }) => {
       <View style={styles.notificationIcon}>
         <Icon 
           name={getNotificationIcon(notification.type)} 
-          size={20} 
-          color={getNotificationColor(notification.type)} 
+          size={16} 
+          color={colors.primary} 
         />
       </View>
 
       <View style={styles.notificationContent}>
         <View style={styles.notificationHeader}>
           <Text
+            numberOfLines={1}
+            ellipsizeMode="tail"
             style={[
               styles.notificationTitle,
               { 
                 color: colors.textPrimary, 
-                fontSize: fonts.lg, 
+                fontSize: 16, // 12pt = 16px
                 fontFamily: fonts.bold 
               }
             ]}>
             {notification.title}
           </Text>
-          <Text style={{ color: colors.textLight, fontSize: fonts.xs }}>
+          <Text style={{ color: colors.textLight, fontSize: 13, fontFamily: fonts.regular }}>
             {formatDateTime(notification.timestamp)}
           </Text>
         </View>
@@ -162,7 +153,7 @@ const NotificationsScreen = ({ navigation }) => {
             styles.notificationMessage,
             { 
               color: colors.textSecondary, 
-              fontSize: fonts.sm, 
+              fontSize: 13, // 10pt = 13px
               fontFamily: fonts.regular 
             }
           ]}>
@@ -186,13 +177,13 @@ const NotificationsScreen = ({ navigation }) => {
           onPress={() => navigation.goBack()}>
           <Icon name="back" size={24} color={colors.textWhite} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textWhite, fontSize: fonts.xl, fontFamily: fonts.bold }]}>
+        <Text style={[styles.headerTitle, { color: colors.textWhite, fontSize: 16, fontFamily: fonts.bold }]}>
           Notifications
         </Text>
         <TouchableOpacity
           style={styles.markAllButton}
           onPress={markAllAsRead}>
-          <Text style={[styles.markAllText, { color: colors.textWhite, fontSize: fonts.sm, fontFamily: fonts.medium }]}>
+          <Text style={[styles.markAllText, { color: colors.textWhite, fontSize: 13, fontFamily: fonts.medium }]}>
             Mark All Read
           </Text>
         </TouchableOpacity>
@@ -207,10 +198,10 @@ const NotificationsScreen = ({ navigation }) => {
         {notifications.length === 0 ? (
           <Card style={styles.emptyCard}>
             <Icon name="notification" size={40} color={colors.textLight} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.base, fontFamily: fonts.regular }]}>
+            <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 16, fontFamily: fonts.bold }]}>
               No notifications yet
             </Text>
-            <Text style={{ color: colors.textLight, fontSize: fonts.sm, fontFamily: fonts.regular }}>
+            <Text style={{ color: colors.textLight, fontSize: 13, fontFamily: fonts.regular }}>
               You'll see notifications here when you receive them
             </Text>
           </Card>
@@ -280,9 +271,9 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.primary,
   },
   notificationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
