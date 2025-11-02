@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,7 +9,7 @@ import {
   Text,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api } from '../../services/api';
+import { useGetClientsQuery } from '../../store/api';
 import { Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -19,57 +19,38 @@ import Icon from '../../components/common/Icon';
 import { formatCurrency, formatDate } from '../../utils/helpers';
 
 const ClientsListScreen = () => {
-  const [clients, setClients] = useState([]);
-  const [filteredClients, setFilteredClients] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadClients();
-  }, []);
+  // Redux hook
+  const { data: clientsData = [], isLoading: loading, refetch } = useGetClientsQuery();
+  const clients = clientsData || [];
 
-  useEffect(() => {
-    applySearchFilter();
-  }, [clients, searchQuery]);
-
-  const loadClients = async () => {
-    try {
-      setLoading(true);
-      const data = await api.getClients();
-      setClients(data);
-    } catch (error) {
-      console.error('Error loading clients:', error);
-    } finally {
-      setLoading(false);
+  // Filter clients based on search query using useMemo for performance
+  const filteredClients = useMemo(() => {
+    if (!searchQuery) {
+      return clients;
     }
-  };
+
+    const query = searchQuery.toLowerCase();
+    return clients.filter(client =>
+      (client.name && client.name.toLowerCase().includes(query)) ||
+      (client.email && client.email.toLowerCase().includes(query)) ||
+      (client.phone && client.phone.includes(searchQuery))
+    );
+  }, [clients, searchQuery]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadClients();
+    await refetch();
     setRefreshing(false);
   };
 
-  const applySearchFilter = () => {
-    if (!searchQuery) {
-      setFilteredClients(clients);
-      return;
-    }
-
-    const filtered = clients.filter(client =>
-      client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      client.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      client.phone.includes(searchQuery)
-    );
-
-    setFilteredClients(filtered);
-  };
-
   const handleClientPress = (client) => {
+    const lastOrderDate = client.lastOrder ? formatDate(client.lastOrder) : 'No orders yet';
     Alert.alert(
       'Client Details',
-      `Name: ${client.name}\nEmail: ${client.email}\nPhone: ${client.phone}\nTotal Orders: ${client.totalOrders}\nTotal Spent: ${formatCurrency(client.totalSpent)}\nLast Order: ${formatDate(client.lastOrder)}`,
+      `Name: ${client.name || 'N/A'}\nEmail: ${client.email || 'N/A'}\nPhone: ${client.phone || 'N/A'}\nTotal Orders: ${client.totalOrders || 0}\nTotal Spent: ${formatCurrency(client.totalSpent || 0)}\nLast Order: ${lastOrderDate}`,
       [{ text: 'OK' }]
     );
   };
@@ -103,38 +84,44 @@ const ClientsListScreen = () => {
       <View style={styles.clientContent}>
         <View style={styles.clientHeader}>
           <Text style={styles.clientName}>
-            {client.name}
+            {client.name || 'Unknown Client'}
           </Text>
           <Text style={styles.clientDate}>
-            {formatDate(client.lastOrder)}
+            {client.lastOrder ? formatDate(client.lastOrder) : 'No orders'}
           </Text>
         </View>
 
-        <View style={styles.clientDetails}>
-          <View style={styles.clientRow}>
-            <Icon name="info" size={14} color={colors.textSecondary} />
-            <Text style={styles.clientDetailText}>
-              {client.email}
-            </Text>
-          </View>
+        {client.email !== 'N/A' || client.phone !== 'N/A' ? (
+          <View style={styles.clientDetails}>
+            {client.email && client.email !== 'N/A' && (
+              <View style={styles.clientRow}>
+                <Icon name="info" size={14} color={colors.textSecondary} />
+                <Text style={styles.clientDetailText}>
+                  {client.email}
+                </Text>
+              </View>
+            )}
 
-          <View style={styles.clientRow}>
-            <Icon name="info" size={14} color={colors.textSecondary} />
-            <Text style={styles.clientDetailText}>
-              {client.phone}
-            </Text>
+            {client.phone && client.phone !== 'N/A' && (
+              <View style={styles.clientRow}>
+                <Icon name="info" size={14} color={colors.textSecondary} />
+                <Text style={styles.clientDetailText}>
+                  {client.phone}
+                </Text>
+              </View>
+            )}
           </View>
-        </View>
+        ) : null}
 
         <View style={styles.clientStats}>
           <View style={styles.statItem}>
             <Text style={styles.statLabel}>Orders</Text>
-            <Text style={styles.statValue}>{client.totalOrders}</Text>
+            <Text style={styles.statValue}>{client.totalOrders || 0}</Text>
           </View>
 
           <View style={styles.statItem}>
             <Text style={styles.statLabel}>Total Spent</Text>
-            <Text style={styles.statValue}>{formatCurrency(client.totalSpent)}</Text>
+            <Text style={styles.statValue}>{formatCurrency(client.totalSpent || 0)}</Text>
           </View>
         </View>
       </View>
@@ -161,7 +148,7 @@ const ClientsListScreen = () => {
         <View style={styles.statContent}>
           <Icon name="dashboard" size={20} color={colors.success} />
           <View style={styles.statText}>
-            <Text style={styles.statCardValue}>{formatCurrency(clients.reduce((sum, client) => sum + client.totalSpent, 0))}</Text>
+            <Text style={styles.statCardValue}>{formatCurrency(clients.reduce((sum, client) => sum + (client.totalSpent || 0), 0))}</Text>
             <Text style={styles.statCardLabel}>Total Revenue</Text>
           </View>
         </View>

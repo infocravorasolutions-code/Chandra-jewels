@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
+import { useGetChatsQuery, useGetEnquiriesQuery, useGetChatMessagesQuery } from '../../store/api';
 import { Card } from '../../components/cards/Cards';
 import { SearchInput } from '../../components/common';
 // Removed custom Text components to fix crashes
@@ -22,146 +22,110 @@ import { formatDateTime, truncateText } from '../../utils/helpers';
 
 const ChatsScreen = ({ navigation }) => {
   const { user } = useAuth();
-  const [chats, setChats] = useState([]);
-  const [filteredChats, setFilteredChats] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadChats();
-  }, []);
+  // Try to fetch chats - if 404, we'll create from enquiries
+  const { data: chatsFromAPI = [], isLoading: chatsLoading, error: chatsError } = useGetChatsQuery(undefined, {
+    skip: !user,
+    refetchOnFocus: true,
+  });
 
+  // Fetch enquiries to create chats from them if chats API doesn't exist
+  const { data: enquiries = [], isLoading: enquiriesLoading } = useGetEnquiriesQuery(user?.role, {
+    skip: !user,
+  });
+
+  // Check if chats API works, otherwise create chats from enquiries
+  const chats = useMemo(() => {
+    // If chats API returned data, use it
+    if (chatsFromAPI && chatsFromAPI.length > 0) {
+      if (__DEV__) {
+        console.log('Using chats from API:', chatsFromAPI.length);
+      }
+      return chatsFromAPI;
+    }
+
+    // If chats API returned 404, create chats from enquiries
+    if (chatsError?.status === 404 || chatsError?.originalStatus === 404) {
+      if (__DEV__) {
+        console.log('Chats API not found (404), creating chats from enquiries...');
+      }
+      
+      // Create chat summaries from enquiries
+      // Note: Last messages will be fetched on-demand when user opens ChatDetailScreen
+      return enquiries.map(enquiry => ({
+        id: enquiry.id || enquiry._id,
+        enquiryId: enquiry.id || enquiry._id,
+        enquiryTitle: enquiry.title || enquiry.Name || 'Untitled Chat',
+        clientName: enquiry.clientName || enquiry.client || 'Unknown Client',
+        lastMessage: '', // Will be populated when backend adds /api/chats endpoint with last message
+        lastMessageTime: enquiry.updatedAt || enquiry.createdAt || new Date().toISOString(),
+        unreadCount: 0,
+        isGroup: true,
+        participants: [],
+        lastSender: '',
+        status: enquiry.status || 'active',
+        isClient: false,
+      })).sort((a, b) => {
+        // Sort by last message time (newest first)
+        return new Date(b.lastMessageTime) - new Date(a.lastMessageTime);
+      });
+    }
+
+    // Default: empty array
+    return [];
+  }, [chatsFromAPI, chatsError, enquiries]);
+
+  const loading = chatsLoading || enquiriesLoading;
+
+  // Debug logs
   useEffect(() => {
-    applySearchFilter();
+    if (__DEV__) {
+      console.log('========== CHATS SCREEN DEBUG ==========');
+      console.log('Loading:', loading);
+      console.log('Chats API Error:', chatsError);
+      console.log('Chats from API:', chatsFromAPI.length);
+      console.log('Enquiries:', enquiries.length);
+      console.log('Final Chats:', chats.length);
+      console.log('First Chat:', chats[0]);
+      console.log('========================================');
+    }
+  }, [chats, loading, chatsError, chatsFromAPI, enquiries]);
+
+  // Apply search filter
+  const filteredChats = useMemo(() => {
+    if (!searchQuery) {
+      return chats;
+    }
+
+    const query = searchQuery.toLowerCase();
+    return chats.filter(chat =>
+      chat.enquiryTitle?.toLowerCase().includes(query) ||
+      chat.clientName?.toLowerCase().includes(query) ||
+      chat.lastMessage?.toLowerCase().includes(query)
+    );
   }, [chats, searchQuery]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    // Note: RTK Query will auto-refetch on focus, this is just manual trigger
+    setRefreshing(false);
+  };
 
   // Safety check - don't render if user is not loaded
   if (!user) {
     return <AnimatedLogoLoader size={60} />;
   }
 
-  const loadChats = async () => {
-    try {
-      setLoading(true);
-      // Enhanced dummy data for group chats
-      const dummyChats = [
-        {
-          id: '1',
-          enquiryTitle: 'Custom Diamond Ring Design',
-          clientName: 'John Smith',
-          lastMessage: 'Perfect! I love the vintage elements you added.',
-          lastMessageTime: new Date(Date.now() - 1000 * 60 * 5).toISOString(), // 5 minutes ago
-          unreadCount: 3,
-          isGroup: true,
-          participants: [
-            { id: 'client1', name: 'John Smith', role: 'client' },
-            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
-            { id: 'designer1', name: 'Mike Designer', role: 'coral' },
-          ],
-          lastSender: 'John Smith',
-          status: 'active',
-        },
-        {
-          id: '2',
-          enquiryTitle: 'Emerald Necklace Collection',
-          clientName: 'Sarah Johnson',
-          lastMessage: 'The CAD design is ready for review.',
-          lastMessageTime: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
-          unreadCount: 1,
-          isGroup: true,
-          participants: [
-            { id: 'client2', name: 'Sarah Johnson', role: 'client' },
-            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
-            { id: 'designer2', name: 'Lisa CAD', role: 'cad' },
-          ],
-          lastSender: 'Lisa CAD',
-          status: 'active',
-        },
-        {
-          id: '3',
-          enquiryTitle: 'Gold Bracelet Set',
-          clientName: 'Michael Brown',
-          lastMessage: 'Thank you for the beautiful design!',
-          lastMessageTime: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-          unreadCount: 0,
-          isGroup: true,
-          participants: [
-            { id: 'client3', name: 'Michael Brown', role: 'client' },
-            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
-            { id: 'designer1', name: 'Mike Designer', role: 'coral' },
-          ],
-          lastSender: 'Michael Brown',
-          status: 'completed',
-        },
-        {
-          id: '4',
-          enquiryTitle: 'Sapphire Earrings',
-          clientName: 'Emily Davis',
-          lastMessage: 'I need some changes to the design.',
-          lastMessageTime: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), // 4 hours ago
-          unreadCount: 2,
-          isGroup: true,
-          participants: [
-            { id: 'client4', name: 'Emily Davis', role: 'client' },
-            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
-            { id: 'designer1', name: 'Mike Designer', role: 'coral' },
-          ],
-          lastSender: 'Emily Davis',
-          status: 'active',
-        },
-        {
-          id: '5',
-          enquiryTitle: 'Pearl Necklace',
-          clientName: 'Robert Wilson',
-          lastMessage: 'The design is approved. Moving to production.',
-          lastMessageTime: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
-          unreadCount: 0,
-          isGroup: true,
-          participants: [
-            { id: 'client5', name: 'Robert Wilson', role: 'client' },
-            { id: 'admin1', name: 'Sarah Johnson', role: 'admin' },
-            { id: 'designer2', name: 'Lisa CAD', role: 'cad' },
-          ],
-          lastSender: 'Sarah Johnson',
-          status: 'approved',
-        },
-      ];
-      setChats(dummyChats);
-    } catch (error) {
-      console.error('Error loading chats:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadChats();
-    setRefreshing(false);
-  };
-
-  const applySearchFilter = () => {
-    if (!searchQuery) {
-      setFilteredChats(chats);
-      return;
-    }
-
-    const filtered = chats.filter(chat =>
-      chat.enquiryTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      chat.clientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      chat.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    setFilteredChats(filtered);
-  };
-
   const renderChatItem = (chat) => (
     <TouchableOpacity
       key={chat.id}
       style={styles.chatItem}
       onPress={() => {
-        console.log('Navigating to ChatDetail with chat:', chat);
+        if (__DEV__) {
+          console.log('Navigating to ChatDetail with chat:', chat.enquiryId);
+        }
         navigation.navigate('ChatDetail', { chat });
       }}>
       
@@ -181,7 +145,9 @@ const ChatsScreen = ({ navigation }) => {
 
         <View style={styles.chatFooter}>
           <Text style={styles.chatMessage}>
-            {chat.isClient ? chat.clientName : 'You'}: {truncateText(chat.lastMessage, 50)}
+            {chat.lastMessage 
+              ? `${chat.isClient ? chat.clientName : 'You'}: ${truncateText(chat.lastMessage, 50)}`
+              : 'No messages yet'}
           </Text>
           {chat.unreadCount > 0 && (
             <View style={styles.unreadBadge}>

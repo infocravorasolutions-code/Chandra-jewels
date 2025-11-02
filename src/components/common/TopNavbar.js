@@ -27,7 +27,7 @@ const TopNavbar = ({ navigation }) => {
     return null;
   }
   
-  console.log('TopNavbar: User loaded, rendering navbar for user:', user.name);
+  console.log('TopNavbar: User loaded, rendering navbar for user:', user?.name || user?.email || 'Unknown');
 
   const handleNotificationPress = () => {
     navigation.navigate('Notifications');

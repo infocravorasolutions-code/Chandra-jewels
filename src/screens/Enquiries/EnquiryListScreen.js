@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,11 +8,22 @@ import {
   Modal,
   Text,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute } from '@react-navigation/native';
+import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
+import { useFilteredEnquiries } from '../../features/enquiries/enquiriesHooks';
+import { useGetClientsQuery } from '../../store/api';
+import {
+  setFilters,
+  setSearchQuery,
+  setSorting,
+  setSelectedStatus,
+  setSelectedClient,
+  clearFilters,
+} from '../../features/enquiries/enquiriesSlice';
 import { EnquiryCard, Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -20,216 +31,181 @@ import TopNavbar from '../../components/common/TopNavbar';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
+// Import PDF generator module
+import * as pdfGeneratorModule from '../../utils/pdfGenerator';
+
+// Debug: Log module import status
+if (__DEV__) {
+  console.log('EnquiryListScreen: pdfGeneratorModule imported:', {
+    moduleExists: !!pdfGeneratorModule,
+    moduleType: typeof pdfGeneratorModule,
+    hasDownloadAllEnquiriesPDF: pdfGeneratorModule ? typeof pdfGeneratorModule.downloadAllEnquiriesPDF : 'no module',
+    moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
+  });
+}
 
 const { width } = Dimensions.get('window');
 
 const statusList = ['All', 'Pending', 'In Progress', 'Completed'];
 
 const EnquiryListScreen = ({ navigation }) => {
+  const dispatch = useDispatch();
   const { user } = useAuth();
   const route = useRoute();
-  const [enquiries, setEnquiries] = useState([]);
-  const [filteredEnquiries, setFilteredEnquiries] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Redux state
+  const filters = useSelector(state => state.enquiries.filters);
+  const searchQuery = useSelector(state => state.enquiries.searchQuery);
+  const sortBy = useSelector(state => state.enquiries.sortBy);
+  const sortOrder = useSelector(state => state.enquiries.sortOrder);
+  const selectedStatus = useSelector(state => state.enquiries.selectedStatus);
+  const selectedClient = useSelector(state => state.enquiries.selectedClient);
+  
+  // RTK Query hook - replaces loadEnquiries and all filtering logic
+  const { enquiries: filteredEnquiries, allEnquiries: enquiries, isLoading: loading, refetch } = 
+    useFilteredEnquiries(user?.role);
+  
+  // Fetch clients to enrich client names
+  const { data: clientsData = [], isLoading: clientsLoading, error: clientsError } = useGetClientsQuery(undefined, {
+    skip: !user,
+  });
+  
+  const clients = Array.isArray(clientsData) ? clientsData : [];
+  
+  // Debug clients API response (in useEffect to avoid hook order issues)
+  useEffect(() => {
+    if (__DEV__ && clientsData) {
+      console.log('Clients API Response:', {
+        dataLength: Array.isArray(clientsData) ? clientsData.length : 'not array',
+        firstClient: Array.isArray(clientsData) && clientsData.length > 0 ? clientsData[0] : null,
+        error: clientsError
+      });
+    }
+  }, [clientsData, clientsError]);
+  
+  // Local UI state
   const [showFilters, setShowFilters] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
-  const [sortBy, setSortBy] = useState('createdAt'); // Default sort by creation date
-  const [sortOrder, setSortOrder] = useState('desc'); // Default to newest first
-  
-  // Get filter from route params, default to 'all' if not provided
-  const initialFilter = route.params?.filter || 'all';
-  const [filters, setFilters] = useState({
-    status: initialFilter,
-    priority: 'all',
-    client: 'all',
-  });
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [selectedStatus, setSelectedStatus] = useState('All');
-  const [selectedClient, setSelectedClient] = useState('All');
-
-  // Get unique client list
-  const clientList = Array.from(new Set(enquiries.map(e => e.clientName))).sort();
-
-  useEffect(() => {
-    loadEnquiries();
-  }, []);
-
-  // Update filter when route params change
-  useEffect(() => {
-    const newStatus = route.params?.filter || 'all';
-    if (newStatus !== filters.status) {
-      setFilters(prev => ({
-        ...prev,
-        status: newStatus
-      }));
+  // Create a client ID to name lookup map
+  // Handle both string and object ID comparisons
+  const clientNameMap = useMemo(() => {
+    const map = new Map();
+    if (!clients || clients.length === 0) {
+      if (__DEV__) {
+        console.log('No clients data available yet');
+      }
+      return map;
     }
-    if (route.params?.filterType === 'client' && route.params?.filter) {
-      setSelectedClient(route.params.filter);
+    
+    clients.forEach(client => {
+      if (client && client.id && client.name) {
+        // Store both string and normalized versions for lookup
+        const idStr = String(client.id).trim();
+        map.set(idStr, client.name);
+        // Handle MongoDB ObjectId - remove ObjectId wrapper if present
+        const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '');
+        if (cleanId !== idStr) {
+          map.set(cleanId, client.name);
+        }
+        // Also try without any ObjectId formatting
+        map.set(cleanId.trim(), client.name);
+      }
+    });
+    
+    if (__DEV__) {
+      console.log('Client Name Map created with', map.size, 'entries');
+      console.log('Sample client IDs in map:', Array.from(map.keys()).slice(0, 5));
     }
-  }, [route.params?.filterType, route.params?.filter]);
+    
+    return map;
+  }, [clients]);
 
-  useEffect(() => {
-    applyFilters();
-  }, [enquiries, searchQuery, filters, sortBy, sortOrder]);
-
-  // Safety check - don't render if user is not loaded
-  if (!user) {
-    return <AnimatedLogoLoader size={60} />;
-  }
-
-  const loadEnquiries = async () => {
-    try {
-      setLoading(true);
-      // Enhanced dummy data with proper statuses and priorities
-      const dummyEnquiries = [
-        {
-          id: '1',
-          title: 'Custom Diamond Ring Design',
-          clientName: 'John Smith',
-          clientId: 'client1',
-          status: 'pending',
-          priority: 'high',
-          description: 'Looking for a custom diamond engagement ring with vintage style',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-          updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
-          budget: 15000,
-          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(), // 7 days from now
-          category: 'Engagement Ring',
-          metalType: 'Gold',
-          stoneType: 'Diamond',
-        },
-        {
-          id: '2',
-          title: 'Emerald Necklace Collection',
-          clientName: 'Sarah Johnson',
-          clientId: 'client2',
-          status: 'in_progress',
-          priority: 'medium',
-          description: 'Design a luxury emerald necklace for special occasion',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago
-          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), // 4 hours ago
-          budget: 25000,
-          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString(), // 14 days from now
-          category: 'Necklace',
-          metalType: 'Platinum',
-          stoneType: 'Emerald',
-        },
-        {
-          id: '3',
-          title: 'Gold Bracelet Set',
-          clientName: 'Michael Brown',
-          clientId: 'client3',
-          status: 'completed',
-          priority: 'low',
-          description: 'Traditional gold bracelet set for wedding',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(), // 7 days ago
-          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
-          budget: 8000,
-          deadline: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago (completed)
-          category: 'Bracelet',
-          metalType: 'Gold',
-          stoneType: 'Ruby',
-        },
-        {
-          id: '4',
-          title: 'Sapphire Earrings',
-          clientName: 'Emily Davis',
-          clientId: 'client4',
-          status: 'pending',
-          priority: 'high',
-          description: 'Elegant sapphire drop earrings for gala event',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), // 6 hours ago
-          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), // 6 hours ago
-          budget: 12000,
-          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 5).toISOString(), // 5 days from now
-          category: 'Earrings',
-          metalType: 'White Gold',
-          stoneType: 'Sapphire',
-        },
-        {
-          id: '5',
-          title: 'Pearl Necklace',
-          clientName: 'Robert Wilson',
-          clientId: 'client5',
-          status: 'in_progress',
-          priority: 'medium',
-          description: 'Classic pearl necklace with diamond accents',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(), // 3 days ago
-          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-          budget: 18000,
-          deadline: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10).toISOString(), // 10 days from now
-          category: 'Necklace',
-          metalType: 'Gold',
-          stoneType: 'Pearl',
-        },
-        {
-          id: '6',
-          title: 'Ruby Ring',
-          clientName: 'Lisa Anderson',
-          clientId: 'client6',
-          status: 'completed',
-          priority: 'high',
-          description: 'Vintage ruby ring with intricate design',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10).toISOString(), // 10 days ago
-          updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 1).toISOString(), // 1 day ago
-          budget: 22000,
-          deadline: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(), // 3 days ago (completed)
-          category: 'Ring',
-          metalType: 'Gold',
-          stoneType: 'Ruby',
-        },
-      ];
-      
-      setEnquiries(dummyEnquiries);
-    } catch (error) {
-      console.error('Error loading enquiries:', error);
-    } finally {
-      setLoading(false);
+  // Enrich enquiries with client names from the clients API
+  // Use useMemo to prevent unnecessary recomputation
+  const enrichedEnquiries = useMemo(() => {
+    if (!enquiries || enquiries.length === 0) {
+      return [];
     }
-  };
+    
+    return enquiries.map(enquiry => {
+      // If clientName is 'Unknown Client' or missing, try to fetch from clientNameMap
+      let finalClientName = enquiry.clientName;
+      if ((!enquiry.clientName || enquiry.clientName === 'Unknown Client') && enquiry.clientId) {
+        // Try multiple ID formats for matching
+        const clientIdStr = String(enquiry.clientId).trim();
+        let clientName = clientNameMap.get(clientIdStr);
+        
+        // If not found, try without trimming
+        if (!clientName) {
+          clientName = clientNameMap.get(String(enquiry.clientId));
+        }
+        
+        // Try cleaning MongoDB ObjectId format
+        if (!clientName) {
+          const cleanId = clientIdStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').trim();
+          clientName = clientNameMap.get(cleanId);
+        }
+        
+        if (clientName) {
+          finalClientName = clientName;
+          if (__DEV__ && enquiries.indexOf(enquiry) === 0) {
+            console.log('Enriched enquiry with client name:', {
+              clientId: enquiry.clientId,
+              clientName: finalClientName
+            });
+          }
+        }
+      }
+      return { ...enquiry, clientName: finalClientName };
+    });
+  }, [enquiries, clientNameMap]);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadEnquiries();
-    setRefreshing(false);
-  };
+  // Re-apply filtering on enriched enquiries
+  const enrichedFilteredEnquiries = useMemo(() => {
+    if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
+      return filteredEnquiries; // Fallback to original filtered if no enriched data
+    }
 
-  const applyFilters = () => {
-    let filtered = enquiries;
-
-    // Search filter
+    let filtered = [...enrichedEnquiries];
+    
+    // Apply status filter
+    if (filters.status && filters.status !== 'all') {
+      filtered = filtered.filter(e => e.status === filters.status);
+    }
+    
+    // Apply priority filter
+    if (filters.priority && filters.priority !== 'all') {
+      filtered = filtered.filter(e => e.priority === filters.priority);
+    }
+    
+    // Apply client filter - use enriched client names
+    if (filters.client && filters.client !== 'all') {
+      filtered = filtered.filter(e => e.clientName === filters.client);
+    }
+    
+    // Apply search query
     if (searchQuery) {
-      filtered = filtered.filter(enquiry =>
-        enquiry.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        enquiry.clientName.toLowerCase().includes(searchQuery.toLowerCase())
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(e => 
+        e.title?.toLowerCase().includes(query) ||
+        e.clientName?.toLowerCase().includes(query) ||
+        e.description?.toLowerCase().includes(query)
       );
     }
-
-    // Status filter
-    if (filters.status !== 'all') {
-      filtered = filtered.filter(enquiry => enquiry.status === filters.status);
-    }
-
-    // Priority filter
-    if (filters.priority !== 'all') {
-      filtered = filtered.filter(enquiry => enquiry.priority === filters.priority);
-    }
-
-    if (selectedClient !== 'All') {
-      filtered = filtered.filter(enquiry => enquiry.clientName === selectedClient);
-    }
-
-    // Sort the filtered results
+    
+    // Apply sorting (same logic as hook)
     filtered.sort((a, b) => {
       let aValue = a[sortBy];
       let bValue = b[sortBy];
-
-      // Handle different data types
+      
+      if (aValue == null) aValue = '';
+      if (bValue == null) bValue = '';
+      
       if (sortBy === 'createdAt' || sortBy === 'updatedAt') {
-        aValue = new Date(aValue).getTime();
-        bValue = new Date(bValue).getTime();
+        aValue = aValue ? new Date(aValue).getTime() : 0;
+        bValue = bValue ? new Date(bValue).getTime() : 0;
       } else if (sortBy === 'budget') {
         aValue = parseFloat(aValue) || 0;
         bValue = parseFloat(bValue) || 0;
@@ -237,28 +213,135 @@ const EnquiryListScreen = ({ navigation }) => {
         aValue = aValue.toLowerCase();
         bValue = bValue.toLowerCase();
       }
-
+      
       if (sortOrder === 'asc') {
-        return aValue > bValue ? 1 : -1;
+        if (aValue < bValue) return -1;
+        if (aValue > bValue) return 1;
+        return 0;
       } else {
-        return aValue < bValue ? 1 : -1;
+        if (aValue > bValue) return -1;
+        if (aValue < bValue) return 1;
+        return 0;
       }
     });
+    
+    return filtered;
+  }, [enrichedEnquiries, filters, searchQuery, sortBy, sortOrder, filteredEnquiries]);
 
-    setFilteredEnquiries(filtered);
+  // Get unique client list from enriched enquiries
+  const clientList = useMemo(() => {
+    if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
+      return [];
+    }
+    
+    const clients = Array.from(
+      new Set(
+        enrichedEnquiries
+          .map(e => e.clientName)
+          .filter(name => name && name.trim() !== '' && name !== 'Unknown Client')
+      )
+    ).sort();
+    
+    if (__DEV__) {
+      console.log('Client List Generated:', clients);
+      console.log('Total Enquiries:', enrichedEnquiries.length);
+      console.log('Unique Clients Found:', clients.length);
+      console.log('Client Name Map Size:', clientNameMap.size);
+      console.log('Total Clients from API:', clients?.length || 0);
+      console.log('Sample enriched enquiry:', enrichedEnquiries[0]);
+      if (enrichedEnquiries.length > 0) {
+        const sampleClientIds = enrichedEnquiries.slice(0, 5).map(e => e.clientId);
+        console.log('Sample Client IDs from enquiries:', sampleClientIds);
+      }
+    }
+    
+    return clients;
+  }, [enrichedEnquiries, clientNameMap]);
+
+  // Update filter when route params change
+  useEffect(() => {
+    const newStatus = route.params?.filter || 'all';
+    if (newStatus !== filters.status) {
+      dispatch(setFilters({ status: newStatus }));
+    }
+    if (route.params?.filterType === 'client' && route.params?.filter) {
+      dispatch(setSelectedClient(route.params.filter));
+    }
+  }, [route.params?.filterType, route.params?.filter]);
+
+  // Handler for downloading all enquiries as PDF
+  const handleDownloadAllPDF = async () => {
+    try {
+      // Get the function from the module
+      const downloadFn = pdfGeneratorModule?.downloadAllEnquiriesPDF;
+      
+      if (!downloadFn || typeof downloadFn !== 'function') {
+        console.error('downloadAllEnquiriesPDF not available:', {
+          module: pdfGeneratorModule,
+          moduleType: typeof pdfGeneratorModule,
+          moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
+          functionType: typeof downloadFn,
+        });
+        Alert.alert(
+          'Error', 
+          'PDF export function not available. Please restart Metro bundler with: npm start -- --reset-cache'
+        );
+        return;
+      }
+
+      // Use enrichedEnquiries (all enquiries with client names) for the PDF
+      const enquiriesToExport = enrichedEnquiries && enrichedEnquiries.length > 0 
+        ? enrichedEnquiries 
+        : enquiries;
+      
+      if (!enquiriesToExport || enquiriesToExport.length === 0) {
+        Alert.alert('No Data', 'No enquiries available to export.');
+        return;
+      }
+
+      Alert.alert(
+        'Generating PDF',
+        `Generating PDF for ${enquiriesToExport.length} enquiries...`,
+        [],
+        { cancelable: false }
+      );
+
+      await downloadFn(enquiriesToExport);
+      
+      Alert.alert(
+        'Success',
+        `PDF generated successfully for ${enquiriesToExport.length} enquiries! Check your share/download options.`,
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      Alert.alert(
+        'Error',
+        `Failed to generate PDF: ${error.message || 'Unknown error'}. Please try again.`,
+        [{ text: 'OK' }]
+      );
+    }
   };
+
+  // Safety check - don't render if user is not loaded
+  if (!user) {
+    return <AnimatedLogoLoader size={60} />;
+  }
+  
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refetch(); // RTK Query refetch
+    setRefreshing(false);
+  };
+
+  // No need for applyFilters - handled by useFilteredEnquiries hook
 
   const handleFilterChange = (filterType, value) => {
-    setFilters(prev => ({ ...prev, [filterType]: value }));
+    dispatch(setFilters({ [filterType]: value }));
   };
 
-  const clearFilters = () => {
-    setFilters({
-      status: 'all',
-      priority: 'all',
-      client: 'all',
-    });
-    setSearchQuery('');
+  const handleClearFilters = () => {
+    dispatch(clearFilters());
   };
 
   const getStatusOptions = () => {
@@ -284,7 +367,8 @@ const EnquiryListScreen = ({ navigation }) => {
   ];
 
   const getClientOptions = () => {
-    const clients = [...new Set(enquiries.map(e => e.clientName))];
+    // Use the same clientList logic to ensure consistency
+    const clients = clientList; // Use the already filtered and sorted clientList
     return [
       { label: 'All Clients', value: 'all' },
       ...clients.map(client => ({ label: client, value: client })),
@@ -367,10 +451,16 @@ const EnquiryListScreen = ({ navigation }) => {
   const handleSortChange = (newSortBy) => {
     if (newSortBy === sortBy) {
       // Toggle order if same field
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+      const newOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+      dispatch(setSorting({ sortBy, sortOrder: newOrder }));
+      if (__DEV__) {
+        console.log('Sort order toggled:', newOrder);
+      }
     } else {
-      setSortBy(newSortBy);
-      setSortOrder('desc'); // Default to desc for new field
+      dispatch(setSorting({ sortBy: newSortBy, sortOrder: 'desc' })); // Default to desc for new field
+      if (__DEV__) {
+        console.log('Sort changed to:', newSortBy, 'desc');
+      }
     }
     setShowSortModal(false);
   };
@@ -396,7 +486,7 @@ const EnquiryListScreen = ({ navigation }) => {
             </View>
           ))}
         </ScrollView>
-        <TouchableOpacity style={styles.clearAllButton} onPress={clearFilters}>
+        <TouchableOpacity style={styles.clearAllButton} onPress={handleClearFilters}>
           <Text style={styles.clearAllText}>Clear All</Text>
         </TouchableOpacity>
       </View>
@@ -415,7 +505,10 @@ const EnquiryListScreen = ({ navigation }) => {
                 styles.chip,
                 selectedStatus === status && styles.chipActive,
               ]}
-              onPress={() => setSelectedStatus(status)}
+              onPress={() => {
+                dispatch(setSelectedStatus(status));
+                // Filter is automatically updated by setSelectedStatus action
+              }}
             >
               <Text style={[
                 styles.chipText,
@@ -428,8 +521,19 @@ const EnquiryListScreen = ({ navigation }) => {
     )
   );
 
-  const renderClientChips = () => (
-    clientList.length <= 1 ? null : (
+  const renderClientChips = () => {
+    // Always show client chips, even if there's only one client or none
+    // This ensures the UI is consistent
+    if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
+      return null; // Don't show if no enquiries loaded yet
+    }
+    
+    // Don't show if no valid clients found
+    if (!clientList || clientList.length === 0) {
+      return null;
+    }
+    
+    return (
       <View style={styles.chipsGroupRow}>
         <Text style={styles.chipGroupLabel}>Client</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
@@ -440,7 +544,10 @@ const EnquiryListScreen = ({ navigation }) => {
                 styles.chip,
                 selectedClient === client && styles.chipActive,
               ]}
-              onPress={() => setSelectedClient(client)}
+              onPress={() => {
+                dispatch(setSelectedClient(client));
+                // Filter is automatically updated by setSelectedClient action
+              }}
             >
               <Text style={[
                 styles.chipText,
@@ -450,8 +557,8 @@ const EnquiryListScreen = ({ navigation }) => {
           ))}
         </ScrollView>
       </View>
-    )
-  );
+    );
+  };
 
   const renderFilterModal = () => (
     <Modal
@@ -625,8 +732,8 @@ const EnquiryListScreen = ({ navigation }) => {
             <SearchInput
               placeholder="Search enquiries..."
               value={searchQuery}
-              onChangeText={setSearchQuery}
-              onClear={() => setSearchQuery('')}
+              onChangeText={(text) => dispatch(setSearchQuery(text))}
+              onClear={() => dispatch(setSearchQuery(''))}
             />
           </View>
           
@@ -641,17 +748,14 @@ const EnquiryListScreen = ({ navigation }) => {
             onPress={() => setShowFilters(true)}>
             <Icon name="tune" size={20} color={colors.primary} />
           </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={styles.downloadButton}
+            onPress={handleDownloadAllPDF}>
+            <Icon name="download" size={20} color={colors.primary} />
+          </TouchableOpacity>
         </View>
         
-        {user?.role === 'client' && (
-          <View style={styles.addButtonContainer}>
-            <Button
-              title="Add Enquiry"
-              onPress={() => navigation.navigate('AddEnquiryStep1')}
-              size="small"
-            />
-          </View>
-        )}
       </View>
 
       {renderStatusChips()}
@@ -664,7 +768,7 @@ const EnquiryListScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }>
         
-        {filteredEnquiries.length === 0 ? (
+        {enrichedFilteredEnquiries.length === 0 ? (
           <Card style={styles.emptyCard}>
             <Icon name="description" size={40} color={colors.textLight} />
             <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 13 }]}>
@@ -675,7 +779,7 @@ const EnquiryListScreen = ({ navigation }) => {
             </Text>
           </Card>
         ) : (
-          filteredEnquiries.filter(enquiry => enquiry && enquiry.id).map(enquiry => (
+          enrichedFilteredEnquiries.filter(enquiry => enquiry && enquiry.id).map(enquiry => (
             <EnquiryCard
               key={enquiry.id}
               enquiry={enquiry}
@@ -684,7 +788,11 @@ const EnquiryListScreen = ({ navigation }) => {
                 console.log('Enquiry ID:', enquiry?.id);
                 console.log('Enquiry object keys:', enquiry ? Object.keys(enquiry) : 'No enquiry object');
                 try {
-                  navigation.navigate('SingleEnquiry', { enquiryId: enquiry.id, enquiry });
+                  navigation.navigate('SingleEnquiry', { 
+                    enquiryId: enquiry.id, 
+                    enquiry,
+                    shouldRefresh: false,
+                  });
                 } catch (error) {
                   console.error('Navigation error:', error);
                 }
@@ -755,6 +863,16 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
   },
   filterButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  downloadButton: {
     width: 48,
     height: 48,
     borderRadius: 12,
@@ -984,6 +1102,53 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginBottom: 8,
+  },
+  // Quick Actions Section
+  quickActionsSection: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    marginTop: 8,
+  },
+  quickActionsCard: {
+    marginHorizontal: 0,
+    marginVertical: 0,
+    padding: 18,
+  },
+  quickActionsTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 16,
+    letterSpacing: 0.3,
+  },
+  actionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  actionButton: {
+    width: '48%',
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    minHeight: 110,
+  },
+  actionIcon: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  actionText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    lineHeight: 18,
+    letterSpacing: 0.2,
   },
 });
 

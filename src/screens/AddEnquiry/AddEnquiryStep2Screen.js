@@ -6,17 +6,147 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
+import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Button } from '../../components/common';
 import { Heading, CustomText, BodyText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
+import { useUploadImageMutation, useCreateEnquiryMutation, useUpdateEnquiryMutation } from '../../store/api';
+import { useAuth } from '../../context/AuthContext';
 
 const AddEnquiryStep2Screen = ({ route, navigation }) => {
-  const { formData } = route.params;
+  const { formData, enquiry: enquiryToEdit, isEditMode } = route.params;
+  const { user } = useAuth();
   const [selectedImages, setSelectedImages] = useState([]);
-  const [loading, setLoading] = useState(false);
+  
+  // Redux mutations
+  const [uploadImage, { isLoading: isUploading }] = useUploadImageMutation();
+  const [createEnquiry, { isLoading: isCreating }] = useCreateEnquiryMutation();
+  const [updateEnquiry, { isLoading: isUpdating }] = useUpdateEnquiryMutation();
+  
+  const loading = isUploading || isCreating || isUpdating;
+
+  // Request camera permission for Android
+  const requestCameraPermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: 'Camera Permission',
+            message: 'App needs access to your camera to take photos',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (err) {
+        console.warn(err);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Request storage permission for Android
+  const requestStoragePermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        // For Android 13+ (API 33+), use READ_MEDIA_IMAGES
+        // For older versions, use READ_EXTERNAL_STORAGE
+        const androidVersion = Platform.Version;
+        let permission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+        
+        if (androidVersion >= 33) {
+          permission = 'android.permission.READ_MEDIA_IMAGES';
+        }
+        
+        const granted = await PermissionsAndroid.request(
+          permission,
+          {
+            title: 'Storage Permission',
+            message: 'App needs access to your storage to select images',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (err) {
+        console.warn(err);
+        // On newer Android versions, permission might not be needed
+        return true;
+      }
+    }
+    return true;
+  };
+
+  const handleCamera = async () => {
+    const hasPermission = await requestCameraPermission();
+    if (!hasPermission) {
+      Alert.alert('Permission Denied', 'Camera permission is required to take photos');
+      return;
+    }
+
+    const options = {
+      mediaType: 'photo',
+      quality: 0.8,
+      saveToPhotos: true,
+    };
+
+    launchCamera(options, (response) => {
+      if (response.didCancel) {
+        console.log('User cancelled camera picker');
+      } else if (response.errorCode) {
+        Alert.alert('Error', `Camera Error: ${response.errorMessage}`);
+      } else if (response.assets && response.assets.length > 0) {
+        const asset = response.assets[0];
+        if (asset.uri) {
+          setSelectedImages(prev => [...prev, {
+            uri: asset.uri,
+            type: asset.type || 'image/jpeg',
+            name: asset.fileName || `camera_${Date.now()}.jpg`,
+          }]);
+        }
+      }
+    });
+  };
+
+  const handleGallery = async () => {
+    const hasPermission = await requestStoragePermission();
+    if (!hasPermission && Platform.OS === 'android') {
+      Alert.alert('Permission Denied', 'Storage permission is required to select images');
+      return;
+    }
+
+    const options = {
+      mediaType: 'mixed', // Allow both images and videos
+      quality: 0.8,
+      selectionLimit: 10, // Allow multiple selection
+      includeBase64: false,
+    };
+
+    launchImageLibrary(options, (response) => {
+      if (response.didCancel) {
+        console.log('User cancelled image picker');
+      } else if (response.errorCode) {
+        Alert.alert('Error', `Image Picker Error: ${response.errorMessage}`);
+      } else if (response.assets && response.assets.length > 0) {
+        const newImages = response.assets.map(asset => ({
+          uri: asset.uri || '',
+          type: asset.type || 'image/jpeg',
+          name: asset.fileName || `image_${Date.now()}.jpg`,
+        })).filter(img => img.uri);
+        
+        setSelectedImages(prev => [...prev, ...newImages]);
+      }
+    });
+  };
 
   const handleImagePicker = () => {
     Alert.alert(
@@ -26,21 +156,11 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Camera',
-          onPress: () => {
-            // Simulate camera capture
-            const newImage = `camera_${Date.now()}.jpg`;
-            setSelectedImages(prev => [...prev, newImage]);
-            Alert.alert('Success', 'Image captured from camera');
-          },
+          onPress: handleCamera,
         },
         {
           text: 'Gallery',
-          onPress: () => {
-            // Simulate gallery selection
-            const newImage = `gallery_${Date.now()}.jpg`;
-            setSelectedImages(prev => [...prev, newImage]);
-            Alert.alert('Success', 'Image selected from gallery');
-          },
+          onPress: handleGallery,
         },
       ]
     );
@@ -51,29 +171,222 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   };
 
   const handleSubmit = async () => {
+    if (!user?.id) {
+      Alert.alert('Error', 'User not found. Please login again.');
+      return;
+    }
+
     setLoading(true);
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Map Priority from lowercase to capitalized format
+      const priorityMap = {
+        'low': 'Low',
+        'medium': 'Medium',
+        'high': 'High',
+        'urgent': 'Urgent',
+      };
       
-      Alert.alert(
-        'Enquiry Created',
-        'Your enquiry has been submitted successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Navigate back to enquiries list
-              navigation.navigate('MainTabs', { screen: 'Enquiries' });
-            },
+      // Upload images first if any are selected
+      let uploadedImages = [];
+      if (selectedImages.length > 0) {
+        try {
+          if (__DEV__) {
+            console.log('Uploading images:', selectedImages.length);
+            console.log('Selected images:', selectedImages);
+          }
+          
+          // Upload each image
+          for (let i = 0; i < selectedImages.length; i++) {
+            const image = selectedImages[i];
+            try {
+              if (__DEV__) {
+                console.log(`Uploading image ${i + 1}/${selectedImages.length}:`, image);
+              }
+              
+              const uploadedImage = await uploadImage(image).unwrap();
+              if (uploadedImage) {
+                uploadedImages.push(uploadedImage);
+                if (__DEV__) {
+                  console.log(`Image ${i + 1} uploaded successfully:`, uploadedImage);
+                }
+              }
+            } catch (imageError) {
+              console.error(`Error uploading image ${i + 1}:`, imageError.message || imageError);
+              // Continue with other images even if one fails
+              if (__DEV__) {
+                console.error('Full error:', imageError);
+              }
+            }
+          }
+          
+          if (__DEV__) {
+            console.log('All images upload attempts completed. Successfully uploaded:', uploadedImages.length, 'out of', selectedImages.length);
+            if (uploadedImages.length > 0) {
+              console.log('Uploaded images data:', uploadedImages);
+            }
+          }
+          
+          // Warn user if some images failed
+          if (uploadedImages.length < selectedImages.length) {
+            Alert.alert(
+              'Image Upload Warning',
+              `${selectedImages.length - uploadedImages.length} image(s) failed to upload, but the enquiry will still be created with ${uploadedImages.length} image(s).`,
+              [{ text: 'OK' }]
+            );
+          }
+        } catch (uploadError) {
+          console.error('Error during image upload process:', uploadError);
+          // Continue with enquiry creation even if image upload fails
+          Alert.alert(
+            'Image Upload Warning',
+            'Images failed to upload, but the enquiry will still be created without images.',
+            [{ text: 'OK' }]
+          );
+        }
+      }
+      
+      // Prepare enquiry data according to API structure
+      const enquiryData = {
+        Id: enquiryToEdit?.id || null, // Include ID for update
+        Name: formData.title || '',
+        ClientId: enquiryToEdit?.clientId || user.id, // Use existing ClientId if editing
+        AssignedTo: enquiryToEdit?.AssignedTo || null,
+        Status: enquiryToEdit?.status || 'Enquiry Created', // Keep existing status if editing
+        Priority: priorityMap[formData.priority?.toLowerCase()] || 'Medium',
+        Quantity: parseInt(formData.quantity) || 1, // Convert to number as per API
+        Metal: {
+          Color: formData.metalColor || 'Gold',
+          Quality: formData.metalQuality || '10K',
+        },
+        StyleNumber: formData.styleNumber || null,
+        GatiOrderNumber: formData.gatiOrderNumber || null,
+        StoneType: formData.stoneType || 'NaturalRegular',
+        MetalWeight: {
+          From: formData.metalWeightFrom ? formData.metalWeightFrom.toString() : null,
+          To: formData.metalWeightTo ? formData.metalWeightTo.toString() : null,
+          Exact: formData.metalWeightExact ? formData.metalWeightExact.toString() : null,
+        },
+        DiamondWeight: {
+          From: formData.diamondWeightFrom ? formData.diamondWeightFrom.toString() : null,
+          To: formData.diamondWeightTo ? formData.diamondWeightTo.toString() : null,
+          Exact: formData.diamondWeightExact ? formData.diamondWeightExact.toString() : null,
+        },
+        Stamping: formData.stamping || null,
+        Remarks: formData.description || '',
+        ShippingDate: formData.deadline || null,
+        CoralCode: enquiryToEdit?.CoralCode || null,
+        CadCode: enquiryToEdit?.CadCode || null,
+        Category: formData.category || 'Ring',
+      };
+      
+      // Only include ReferenceImages if we have uploaded images
+      // If updating, we might want to preserve existing images, so only add if new images were uploaded
+      if (uploadedImages.length > 0) {
+        enquiryData.ReferenceImages = uploadedImages;
+      }
+
+      if (__DEV__) {
+        console.log(isEditMode ? 'Updating enquiry with data:' : 'Submitting enquiry with data:', enquiryData);
+      }
+
+      if (isEditMode && enquiryToEdit?.id) {
+        await updateEnquiry({ id: enquiryToEdit.id, ...enquiryData }).unwrap();
+        
+        // Construct updated enquiry object from form data since API only returns _id
+        // Normalize priority for display
+        const normalizedPriority = priorityMap[formData.priority?.toLowerCase()] || 'Medium';
+        const priorityForUI = formData.priority || 'medium';
+        
+        const updatedEnquiry = {
+          ...enquiryToEdit,
+          id: enquiryToEdit.id,
+          // UI format fields (for display in cards/list)
+          title: formData.title,
+          description: formData.description,
+          priority: priorityForUI,
+          deadline: formData.deadline || null,
+          category: formData.category,
+          stoneType: formData.stoneType,
+          metalType: `${formData.metalColor || 'Gold'} (${formData.metalQuality || '10K'})`,
+          updatedAt: new Date().toISOString(),
+          // API format fields (for consistency)
+          Name: formData.title,
+          Remarks: formData.description,
+          Priority: normalizedPriority,
+          ShippingDate: formData.deadline || null,
+          Category: formData.category,
+          StoneType: formData.stoneType,
+          Quantity: parseInt(formData.quantity) || 1,
+          Metal: {
+            Color: formData.metalColor || 'Gold',
+            Quality: formData.metalQuality || '10K',
           },
-        ]
-      );
+          MetalWeight: {
+            From: formData.metalWeightFrom || null,
+            To: formData.metalWeightTo || null,
+            Exact: formData.metalWeightExact || null,
+          },
+          DiamondWeight: {
+            From: formData.diamondWeightFrom || null,
+            To: formData.diamondWeightTo || null,
+            Exact: formData.diamondWeightExact || null,
+          },
+          Stamping: formData.stamping || null,
+          StyleNumber: formData.styleNumber || null,
+          GatiOrderNumber: formData.gatiOrderNumber || null,
+          // Preserve original fields
+          ClientId: enquiryToEdit.ClientId || enquiryToEdit.clientId,
+          AssignedTo: enquiryToEdit.AssignedTo || enquiryToEdit.assignedTo,
+          Status: enquiryToEdit.Status || enquiryToEdit.status,
+          CoralCode: enquiryToEdit.CoralCode || enquiryToEdit.coralCode,
+          CadCode: enquiryToEdit.CadCode || enquiryToEdit.cadCode,
+          clientName: enquiryToEdit.clientName,
+          clientId: enquiryToEdit.clientId,
+          createdAt: enquiryToEdit.createdAt,
+          status: enquiryToEdit.status,
+          budget: enquiryToEdit.budget,
+        };
+        
+        Alert.alert(
+          'Enquiry Updated',
+          'Your enquiry has been updated successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Navigate back to single enquiry screen with updated data
+                navigation.navigate('SingleEnquiry', { 
+                  enquiryId: enquiryToEdit.id, 
+                  enquiry: updatedEnquiry,
+                  shouldRefresh: true, // Flag to indicate data was updated
+                });
+              },
+            },
+          ]
+        );
+      } else {
+        await createEnquiry(enquiryData).unwrap();
+        Alert.alert(
+          'Enquiry Created',
+          'Your enquiry has been submitted successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Navigate back to enquiries list
+                navigation.navigate('MainTabs', { screen: 'Enquiries' });
+              },
+            },
+          ]
+        );
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to create enquiry. Please try again.');
-    } finally {
-      setLoading(false);
+      console.error(`Error ${isEditMode ? 'updating' : 'creating'} enquiry:`, error);
+      Alert.alert(
+        'Error',
+        error.data?.error || error.message || `Failed to ${isEditMode ? 'update' : 'create'} enquiry. Please try again.`
+      );
     }
   };
 
@@ -155,7 +468,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           {selectedImages.map((image, index) => (
             <View key={index} style={styles.imageContainer}>
               <Image
-                source={{ uri: `https://via.placeholder.com/100x100?text=${image}` }}
+                source={{ uri: image.uri || image }}
                 style={styles.image}
               />
               <TouchableOpacity
@@ -201,32 +514,32 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
 
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Heading level={3}>Upload References</Heading>
-        <CustomText variant="caption" color="secondary">
-          Step 2 of 2 - Add Reference Materials
-        </CustomText>
-      </View>
+            <View style={styles.header}>
+              <Heading level={3}>{isEditMode ? 'Update References' : 'Upload References'}</Heading>
+              <CustomText variant="caption" color="secondary">
+                {isEditMode ? 'Update reference materials (optional)' : 'Step 2 of 2 - Add Reference Materials'}
+              </CustomText>
+            </View>
 
       {renderFormSummary()}
       {renderImageUpload()}
       {renderInstructions()}
 
-      <View style={styles.footer}>
-        <Button
-          title="Submit Enquiry"
-          onPress={handleSubmit}
-          loading={loading}
-          style={styles.submitButton}
-        />
-        
-        <Button
-          title="Back to Step 1"
-          variant="outline"
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-        />
-      </View>
+            <View style={styles.footer}>
+              <Button
+                title={isEditMode ? "Update Enquiry" : "Submit Enquiry"}
+                onPress={handleSubmit}
+                loading={loading}
+                style={styles.submitButton}
+              />
+              
+              <Button
+                title="Back to Step 1"
+                variant="outline"
+                onPress={() => navigation.goBack()}
+                style={styles.backButton}
+              />
+            </View>
     </ScrollView>
   );
 };

@@ -54,16 +54,16 @@ const StackNavigator = ({ isAuthenticated }) => {
           <Stack.Screen
             name="AddEnquiryStep1"
             component={AddEnquiryStep1Screen}
-            options={{
-              title: 'Add Enquiry - Step 1',
-            }}
+            options={({ route }) => ({
+              title: route.params?.enquiry ? 'Edit Enquiry - Step 1' : 'Add Enquiry - Step 1',
+            })}
           />
           <Stack.Screen
             name="AddEnquiryStep2"
             component={AddEnquiryStep2Screen}
-            options={{
-              title: 'Add Enquiry - Step 2',
-            }}
+            options={({ route }) => ({
+              title: route.params?.isEditMode ? 'Edit Enquiry - Step 2' : 'Add Enquiry - Step 2',
+            })}
           />
           <Stack.Screen
             name="ChatDetail"

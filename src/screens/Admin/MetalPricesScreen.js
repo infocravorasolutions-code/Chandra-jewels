@@ -7,9 +7,10 @@ import {
   RefreshControl,
   Alert,
   Text,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api } from '../../services/api';
+import { useGetMetalPricesQuery, useAddMetalPriceMutation, useUpdateMetalPriceMutation, useDeleteMetalPriceMutation } from '../../store/api';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -19,34 +20,62 @@ import Icon from '../../components/common/Icon';
 import { formatCurrency, formatDate } from '../../utils/helpers';
 
 const MetalPricesScreen = () => {
-  const [metalPrices, setMetalPrices] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [editingPrices, setEditingPrices] = useState({});
+  const [editingDates, setEditingDates] = useState({}); // Store dates for editing
   const [isEditing, setIsEditing] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [showMetalTypeDropdown, setShowMetalTypeDropdown] = useState(false);
+  const [newMetalPrice, setNewMetalPrice] = useState({
+    metalType: 'gold',
+    price: '',
+    date: new Date().toISOString().split('T')[0], // Initialize with today's date
+    unit: 'per gram',
+  });
 
-  useEffect(() => {
-    loadMetalPrices();
-  }, []);
+  // Redux hooks
+  const { data: metalPricesData, isLoading: loading, refetch } = useGetMetalPricesQuery(false);
+  const [addMetalPrice, { isLoading: isAddingPrice }] = useAddMetalPriceMutation();
+  const [updateMetalPrice, { isLoading: isUpdatingPrice }] = useUpdateMetalPriceMutation();
+  const [deleteMetalPrice, { isLoading: isDeletingPrice }] = useDeleteMetalPriceMutation();
 
-  const loadMetalPrices = async () => {
-    try {
-      setLoading(true);
-      const data = await api.getMetalPrices();
-      setMetalPrices(data);
-      setEditingPrices(data);
-    } catch (error) {
-      console.error('Error loading metal prices:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Extract prices and ids from response
+  const metalPrices = metalPricesData?.prices || metalPricesData || null;
+  const metalIds = metalPricesData?.ids || {};
+
+  const metalTypes = [
+    { value: 'gold', label: 'Gold' },
+    { value: 'silver', label: 'Silver' },
+    { value: 'platinum', label: 'Platinum' },
+  ];
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadMetalPrices();
+    await refetch();
     setRefreshing(false);
   };
+
+  // Legacy function kept for compatibility, now uses Redux
+  const loadMetalPrices = async () => {
+    await refetch();
+  };
+  
+  if (__DEV__) {
+    console.log('Loaded metal prices:', metalPrices);
+  }
+
+  // Initialize editing dates with today's date by default
+  useEffect(() => {
+    if (metalPrices) {
+      const today = new Date().toISOString().split('T')[0];
+      const initialDates = {};
+      ['gold', 'silver', 'platinum'].forEach(metal => {
+        initialDates[metal] = today; // Always use today's date
+      });
+      setEditingDates(initialDates);
+      setEditingPrices({ ...metalPrices });
+    }
+  }, [metalPrices]);
 
   const handlePriceChange = (metal, value) => {
     setEditingPrices(prev => ({
@@ -58,35 +87,221 @@ const MetalPricesScreen = () => {
     }));
   };
 
-  const handleSavePrices = () => {
+  const handleDateChange = (metal, value) => {
+    setEditingDates(prev => ({
+      ...prev,
+      [metal]: value,
+    }));
+  };
+
+  const handleSavePrices = async () => {
+    try {
+      // Update all changed prices
+      const updatePromises = [];
+      const metals = ['gold', 'silver', 'platinum'];
+      
+      for (const metal of metals) {
+        const currentPrice = metalPrices[metal]?.price;
+        const newPrice = editingPrices[metal]?.price;
+        const date = editingDates[metal];
+        
+        // Only update if price has changed
+        if (currentPrice !== newPrice && newPrice !== undefined && newPrice !== null) {
+          // Always use today's date when updating (the day of the update)
+          const today = new Date().toISOString().split('T')[0];
+          
+          updatePromises.push(
+            updateMetalPrice({ metal, date: today, price: newPrice || 0 }).unwrap().then(response => ({ metal, response, newPrice, date: today }))
+          );
+        }
+      }
+      
+      if (updatePromises.length > 0) {
+        const results = await Promise.all(updatePromises);
+        
+        // Process the PUT response directly to update UI immediately
+        // The PUT response contains the full document with arrays: { gold: [{date, price}, ...], ... }
+        const updatedPrices = { ...metalPrices };
+        
+        // Get the last response (should contain all metals with their arrays)
+        const lastResponse = results[results.length - 1]?.response;
+        
+        if (lastResponse && typeof lastResponse === 'object') {
+          // Process all metals from the response
+          ['gold', 'silver', 'platinum'].forEach(metalKey => {
+            const metalArray = lastResponse[metalKey];
+            if (Array.isArray(metalArray) && metalArray.length > 0) {
+              // Get the latest entry (most recent date)
+              const sortedByDate = [...metalArray].sort((a, b) => {
+                const dateA = new Date(a.date || a.Date || 0);
+                const dateB = new Date(b.date || b.Date || 0);
+                return dateB - dateA; // Descending order (latest first)
+              });
+              const latestEntry = sortedByDate[0];
+              updatedPrices[metalKey] = {
+                price: latestEntry.price || latestEntry.Price || 0,
+                unit: 'per gram',
+                lastUpdated: latestEntry.date || latestEntry.Date || new Date().toISOString(),
+              };
+            }
+          });
+        }
+        
+        // Also update any metals that were in the results but might not be in the response
+        results.forEach(({ metal, newPrice, date }) => {
+          // If this metal wasn't processed from response, use the values we sent
+          if (!updatedPrices[metal] || updatedPrices[metal].price === metalPrices[metal]?.price) {
+            updatedPrices[metal] = {
+              price: newPrice,
+              unit: 'per gram',
+              lastUpdated: date,
+            };
+          }
+        });
+        
+        // Update editing prices to reflect changes
+        setEditingPrices({ ...updatedPrices });
+        
+        Alert.alert('Success', 'Metal prices updated successfully');
+        
+        // Redux will automatically refetch and update the cache
+        // Also reload from API in the background to ensure sync
+        setTimeout(() => {
+          refetch().catch(err => console.error('Background reload error:', err));
+        }, 500);
+      } else {
+        Alert.alert('Info', 'No changes to save');
+      }
+      
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error saving metal prices:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to update metal prices. Please try again.'
+      );
+    }
+  };
+
+  const handleDeletePrice = (metal) => {
     Alert.alert(
-      'Update Metal Prices',
-      'Are you sure you want to update the metal prices?',
+      'Delete Metal Price',
+      `Are you sure you want to delete the price for ${metal.charAt(0).toUpperCase() + metal.slice(1)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Update',
-          onPress: () => {
-            setMetalPrices(editingPrices);
-            setIsEditing(false);
-            Alert.alert('Success', 'Metal prices updated successfully');
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const date = editingDates[metal] || new Date().toISOString().split('T')[0];
+              await deleteMetalPrice({ metal, date }).unwrap();
+              Alert.alert('Success', 'Metal price deleted successfully');
+              
+              // Wait a moment for the API to process
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Reload prices to get updated data (Redux will refetch automatically)
+              await refetch();
+            } catch (error) {
+              console.error('Error deleting metal price:', error);
+              Alert.alert(
+                'Error',
+                error.message || 'Failed to delete metal price. Please try again.'
+              );
+            }
           },
         },
       ]
     );
   };
 
+  const handleStartEditing = () => {
+    // Always show today's date when entering edit mode
+    // Use a fresh Date object to ensure we get the current date
+    const today = new Date();
+    const todayString = today.toISOString().split('T')[0];
+    
+    console.log('handleStartEditing - Setting dates to:', todayString);
+    
+    const resetDates = {};
+    ['gold', 'silver', 'platinum'].forEach(metal => {
+      resetDates[metal] = todayString; // Always use today's date
+    });
+    
+    // Set dates first, then enable editing mode
+    setEditingDates(resetDates);
+    // Use setTimeout to ensure state update happens before setIsEditing
+    setTimeout(() => {
+      setIsEditing(true);
+    }, 0);
+  };
+
   const handleCancelEdit = () => {
     setEditingPrices(metalPrices);
+    // Reset dates to today's date by default
+    const today = new Date().toISOString().split('T')[0];
+    const resetDates = {};
+    ['gold', 'silver', 'platinum'].forEach(metal => {
+      resetDates[metal] = today;
+    });
+    setEditingDates(resetDates);
     setIsEditing(false);
+    setIsAdding(false);
+    setShowMetalTypeDropdown(false);
+    setNewMetalPrice({ 
+      metalType: 'gold', 
+      price: '', 
+      date: new Date().toISOString().split('T')[0],
+      unit: 'per gram' 
+    });
+  };
+
+  const handleAddMetalPrice = async () => {
+    if (!newMetalPrice.price || parseFloat(newMetalPrice.price) <= 0) {
+      Alert.alert('Error', 'Please enter a valid price');
+      return;
+    }
+
+    if (!newMetalPrice.metalType) {
+      Alert.alert('Error', 'Please select a metal type');
+      return;
+    }
+
+    // Date defaults to today if not provided, so no need to validate
+    try {
+      await addMetalPrice({
+        metal: newMetalPrice.metalType,
+        price: parseFloat(newMetalPrice.price),
+        date: newMetalPrice.date, // Use the date from form
+      }).unwrap();
+
+      Alert.alert('Success', 'Metal price added successfully');
+      setIsAdding(false);
+      setNewMetalPrice({ 
+        metalType: 'gold', 
+        price: '', 
+        date: new Date().toISOString().split('T')[0], // Reset to today
+        unit: 'per gram' 
+      });
+      // Reload prices to get the new data (Redux will refetch automatically)
+      await refetch();
+    } catch (error) {
+      console.error('Error adding metal price:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to add metal price. Please try again.'
+      );
+    }
   };
 
   // Build a compact summary row for Gold, Silver, Platinum
   const renderSummaryRow = () => {
     if (!metalPrices) return null;
     const order = ['gold', 'silver', 'platinum'];
+    // Only show metals that have prices (filter out empty/undefined)
     const items = order
-      .filter(key => metalPrices[key])
+      .filter(key => metalPrices[key] && (metalPrices[key].price !== undefined && metalPrices[key].price !== null))
       .map(key => ({ key, ...metalPrices[key] }));
 
     if (items.length === 0) return null;
@@ -95,9 +310,43 @@ const MetalPricesScreen = () => {
       <View style={styles.summaryRow}>
         {items.map((item, idx) => (
           <Card key={item.key} style={[styles.summaryCard, idx !== items.length - 1 && { marginRight: 8 }]}>
-            <Text style={styles.summaryTitle}>{item.key.charAt(0).toUpperCase() + item.key.slice(1)}</Text>
-            <Text style={styles.summaryPrice}>{(item.price)}</Text>
-            <Text style={styles.summaryUpdated}>Last up: {formatDate(item.lastUpdated)}</Text>
+            <View style={styles.summaryCardHeader}>
+              <Text style={styles.summaryTitle}>{item.key.charAt(0).toUpperCase() + item.key.slice(1)}</Text>
+              {isEditing && (
+                <TouchableOpacity
+                  onPress={() => handleDeletePrice(item.key)}
+                  style={styles.deleteButton}
+                >
+                  <Icon name="delete" size={18} color={colors.error} />
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {isEditing ? (
+              <>
+                <Input
+                  label="Price"
+                  value={editingPrices[item.key]?.price?.toString() || '0'}
+                  onChangeText={(value) => handlePriceChange(item.key, value)}
+                  keyboardType="numeric"
+                  style={styles.editPriceInput}
+                />
+                <Input
+                  label="Date"
+                  value={editingDates[item.key] || new Date().toISOString().split('T')[0]}
+                  onChangeText={(value) => handleDateChange(item.key, value)}
+                  placeholder="YYYY-MM-DD"
+                  style={styles.editDateInput}
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.summaryPrice}>₹{item.price || 0}</Text>
+                <Text style={styles.summaryUpdated}>
+                  {item.lastUpdated ? `Last up: ${formatDate(item.lastUpdated)}` : 'No date'}
+                </Text>
+              </>
+            )}
           </Card>
         ))}
       </View>
@@ -139,11 +388,11 @@ const MetalPricesScreen = () => {
             <View style={{flexDirection:'row', alignItems:'center', justifyContent:'center'}}>
               <Icon name="attach-money" size={24} color={colors.primary} style={{marginRight:4}} />
               <Text style={[styles.priceValue, { fontSize: fonts['2xl'], fontFamily: fonts.bold, color: colors.textPrimary }]}>
-                {(data.price)}
+                ₹{data.price || 0}
               </Text>
             </View>
             <Text style={[styles.priceUnit, { color: colors.textSecondary, fontSize: fonts.sm }]}>
-              {data.unit}
+              {data.unit || 'per gram'}
             </Text>
           </View>
         )}
@@ -158,7 +407,93 @@ const MetalPricesScreen = () => {
       </Text>
       
       <View style={styles.actionButtons}>
-        {isEditing ? (
+        {isAdding ? (
+          <>
+            <Text style={[styles.actionSubtitle, { color: colors.textSecondary, fontSize: fonts.sm, marginBottom: 12 }]}>
+              Add New Metal Price
+            </Text>
+            <View style={styles.dropdownContainer}>
+              <Text style={styles.dropdownLabel}>Metal Type</Text>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => setShowMetalTypeDropdown(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.dropdownText}>
+                  {metalTypes.find(m => m.value === newMetalPrice.metalType)?.label || 'Select Metal Type'}
+                </Text>
+                <Icon name="arrow-drop-down" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Modal
+              visible={showMetalTypeDropdown}
+              transparent={true}
+              animationType="fade"
+              onRequestClose={() => setShowMetalTypeDropdown(false)}
+            >
+              <TouchableOpacity
+                style={styles.modalOverlay}
+                activeOpacity={1}
+                onPress={() => setShowMetalTypeDropdown(false)}
+              >
+                <View style={styles.dropdownModal}>
+                  {metalTypes.map((metal) => (
+                    <TouchableOpacity
+                      key={metal.value}
+                      style={[
+                        styles.dropdownOption,
+                        newMetalPrice.metalType === metal.value && styles.dropdownOptionSelected,
+                      ]}
+                      onPress={() => {
+                        setNewMetalPrice(prev => ({ ...prev, metalType: metal.value }));
+                        setShowMetalTypeDropdown(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.dropdownOptionText,
+                          newMetalPrice.metalType === metal.value && styles.dropdownOptionTextSelected,
+                        ]}
+                      >
+                        {metal.label}
+                      </Text>
+                      {newMetalPrice.metalType === metal.value && (
+                        <Icon name="check" size={20} color={colors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </TouchableOpacity>
+            </Modal>
+            <Input
+              label="Price"
+              value={newMetalPrice.price}
+              onChangeText={(value) => setNewMetalPrice(prev => ({ ...prev, price: value }))}
+              keyboardType="numeric"
+              placeholder="Enter price"
+              style={styles.addInput}
+            />
+            <Input
+              label="Date"
+              value={newMetalPrice.date}
+              onChangeText={(value) => setNewMetalPrice(prev => ({ ...prev, date: value }))}
+              placeholder="YYYY-MM-DD"
+              style={styles.addInput}
+            />
+            <Button
+              title="Add Metal Price"
+              onPress={handleAddMetalPrice}
+              style={styles.saveButton}
+            />
+            <Button
+              title="Cancel"
+              variant="outline"
+              onPress={handleCancelEdit}
+              style={styles.cancelButton}
+            />
+          </>
+        ) : isEditing ? (
           <>
             <Button
               title="Save Changes"
@@ -173,11 +508,19 @@ const MetalPricesScreen = () => {
             />
           </>
         ) : (
-          <Button
-            title="Edit Prices"
-            onPress={() => setIsEditing(true)}
-            style={styles.editButton}
-          />
+          <>
+            <Button
+              title="Edit Prices"
+              onPress={handleStartEditing}
+              style={styles.editButton}
+            />
+            <Button
+              title="Add Metal Price"
+              variant="outline"
+              onPress={() => setIsAdding(true)}
+              style={styles.addButton}
+            />
+          </>
         )}
       </View>
     </Card>
@@ -347,6 +690,75 @@ const styles = StyleSheet.create({
   cancelButton: {
     borderColor: colors.error,
   },
+  addButton: {
+    marginTop: 8,
+  },
+  addInput: {
+    marginBottom: 12,
+  },
+  dropdownContainer: {
+    marginBottom: 16,
+  },
+  dropdownLabel: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginBottom: 8,
+  },
+  dropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 12,
+    minHeight: 48,
+  },
+  dropdownText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dropdownModal: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    minWidth: 200,
+    maxWidth: '80%',
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  dropdownOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  dropdownOptionSelected: {
+    backgroundColor: colors.backgroundSecondary,
+  },
+  dropdownOptionText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
+  },
+  dropdownOptionTextSelected: {
+    fontFamily: fonts.bold,
+    color: colors.primary,
+  },
   historyCard: {
     marginHorizontal: 20,
     marginVertical: 12,
@@ -384,11 +796,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
+  summaryCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   summaryTitle: {
     fontSize: 13,
     fontFamily: fonts.medium,
     color: colors.textSecondary,
-    marginBottom: 6,
   },
   summaryPrice: {
     fontSize: 16,
@@ -400,6 +817,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.regular,
     color: colors.textSecondary,
+  },
+  deleteButton: {
+    padding: 4,
+  },
+  editPriceInput: {
+    marginBottom: 8,
+  },
+  editDateInput: {
+    marginBottom: 4,
   },
 });
 

@@ -7,8 +7,11 @@ import {
   Alert,
   Image,
   Text,
+  Platform,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
+import { useGetEnquiryByIdQuery, useDeleteEnquiryMutation } from '../../store/api';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input, EnquiryImage } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -16,21 +19,61 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
 import { formatCurrency, formatDate, getStatusColor, getPriorityColor, imageSizes, spacing } from '../../utils';
+import { downloadEnquiryPDF } from '../../utils/pdfGenerator';
 
 const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
-  const { enquiry: initialEnquiry } = route.params || {};
-  const [enquiry, setEnquiry] = useState(initialEnquiry || {});
-  const [loading, setLoading] = useState(false);
+  const { enquiry: initialEnquiry, enquiryId: routeEnquiryId, shouldRefresh } = route.params || {};
+  
+  // Use route enquiryId or initialEnquiry id
+  const enquiryId = routeEnquiryId || initialEnquiry?.id || initialEnquiry?._id;
+  
+  // Redux hooks
+  const { 
+    data: enquiryData, 
+    isLoading: loading, 
+    error: queryError,
+    refetch 
+  } = useGetEnquiryByIdQuery(enquiryId, {
+    skip: !enquiryId,
+  });
+
+  const [deleteEnquiry, { isLoading: isDeleting }] = useDeleteEnquiryMutation();
+  
+  // Local UI state
   const [approvalMessage, setApprovalMessage] = useState('');
   const [showApprovalModal, setShowApprovalModal] = useState(false);
 
+  // Use enquiry from query if available, otherwise use initialEnquiry
+  const enquiry = enquiryData || initialEnquiry || {};
+
+  // Refresh enquiry data when screen comes into focus (if needed)
+  useFocusEffect(
+    React.useCallback(() => {
+      if (shouldRefresh && enquiryId) {
+        refetch();
+      }
+    }, [shouldRefresh, enquiryId, refetch])
+  );
+
+  // Handle error state
+  const error = queryError ? (queryError.data?.error || queryError.message || 'Failed to load enquiry') : null;
+
+  // Show loading state
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <AnimatedLogoLoader size={80} />
+      </View>
+    );
+  }
+
   // Safety check - don't render if enquiry is not available
-  if (!enquiry || !enquiry.id) {
+  if (error || !enquiry || !enquiry.id) {
     return (
       <View style={styles.container}>
         <Text style={[styles.errorText, { color: colors.textPrimary, fontSize: fonts.lg }]}>
-          Enquiry not found
+          {error || 'Enquiry not found'}
         </Text>
         <Button
           title="Go Back"
@@ -50,8 +93,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         {
           text: 'Approve',
           onPress: () => {
-            setEnquiry(prev => ({ ...prev, status: 'approved' }));
-            Alert.alert('Success', 'Enquiry approved successfully');
+            // TODO: Implement approve mutation when API is available
+            Alert.alert('Info', 'Approve functionality not yet implemented');
           },
         },
       ]
@@ -68,10 +111,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       return;
     }
 
-    setEnquiry(prev => ({ ...prev, status: 'rejected' }));
+    // TODO: Implement reject mutation when API is available
     setShowApprovalModal(false);
     setApprovalMessage('');
-    Alert.alert('Success', 'Enquiry rejected successfully');
+    Alert.alert('Info', 'Reject functionality not yet implemented');
   };
 
   const handleUploadCoral = () => {
@@ -83,9 +126,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         {
           text: 'Upload',
           onPress: () => {
-            // Simulate upload
-            setEnquiry(prev => ({ ...prev, coralVersion: 'coral_v1.xlsx' }));
-            Alert.alert('Success', 'Coral design uploaded successfully');
+            // TODO: Implement upload mutation when API is available
+            Alert.alert('Info', 'Coral design upload functionality not yet implemented');
           },
         },
       ]
@@ -101,81 +143,245 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         {
           text: 'Upload',
           onPress: () => {
-            // Simulate upload
-            setEnquiry(prev => ({ ...prev, cadVersion: 'cad_v1.xlsx' }));
-            Alert.alert('Success', 'CAD design uploaded successfully');
+            // TODO: Implement upload mutation when API is available
+            Alert.alert('Info', 'CAD design upload functionality not yet implemented');
           },
         },
       ]
     );
   };
 
-  const handleEditPricing = () => {
-    Alert.alert(
-      'Edit Pricing',
-      'This would open pricing calculator',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Edit',
-          onPress: () => {
-            // Simulate pricing update
-            setEnquiry(prev => ({ ...prev, estimatedPrice: 30000 }));
-            Alert.alert('Success', 'Pricing updated successfully');
-          },
-        },
-      ]
+  const renderDetailItem = (icon, label, value, showIfEmpty = false) => {
+    if (!value && !showIfEmpty) return null;
+    return (
+      <View style={styles.detailRow}>
+        <Icon name={icon} size={16} color={colors.primary} />
+        <View style={styles.detailTextContainer}>
+          <Text style={[styles.detailLabel, { color: colors.textSecondary, fontSize: 11 }]}>
+            {label}
+          </Text>
+          <Text style={[styles.detailText, { color: colors.textPrimary, fontSize: 13 }]}>
+            {value || 'N/A'}
+          </Text>
+        </View>
+      </View>
     );
   };
 
-  const renderEnquiryDetails = () => (
-    <Card style={styles.detailsCard}>
-      <View style={styles.detailsHeader}>
-        <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>
-          {enquiry?.title || 'Untitled Enquiry'}
-        </Text>
-        <View style={styles.statusContainer}>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(enquiry?.status || 'pending') }]}>
-            <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
-              {(enquiry?.status || 'pending').toUpperCase()}
+  const renderEnquiryDetails = () => {
+    // Extract metal details
+    const metal = enquiry?.Metal || enquiry?.metal || {};
+    const metalColor = metal.Color || metal.color || 'N/A';
+    const metalQuality = metal.Quality || metal.quality || '';
+    const metalWeight = enquiry?.MetalWeight || enquiry?.metalWeight || {};
+    const diamondWeight = enquiry?.DiamondWeight || enquiry?.diamondWeight || {};
+    
+    // Format metal weight
+    let metalWeightText = 'N/A';
+    if (metalWeight.Exact || metalWeight.exact) {
+      metalWeightText = `${metalWeight.Exact || metalWeight.exact} gms`;
+    } else if (metalWeight.From || metalWeight.from) {
+      const from = metalWeight.From || metalWeight.from || '';
+      const to = metalWeight.To || metalWeight.to || '';
+      metalWeightText = `${from}${to ? ` - ${to}` : ''} gms`;
+    }
+    
+    // Format diamond weight
+    let diamondWeightText = 'N/A';
+    if (diamondWeight.Exact || diamondWeight.exact) {
+      diamondWeightText = `${diamondWeight.Exact || diamondWeight.exact} carats`;
+    } else if (diamondWeight.From || diamondWeight.from) {
+      const from = diamondWeight.From || diamondWeight.from || '';
+      const to = diamondWeight.To || diamondWeight.to || '';
+      diamondWeightText = `${from}${to ? ` - ${to}` : ''} carats`;
+    }
+
+    return (
+      <>
+        {/* Basic Information Card */}
+        <Card style={styles.detailsCard}>
+          <View style={styles.detailsHeader}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 8 }}>
+              {enquiry?.title || enquiry?.Name || 'Untitled Enquiry'}
             </Text>
+            <View style={styles.statusContainer}>
+              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(enquiry?.status || 'pending') }]}>
+                <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
+                  {(enquiry?.status || 'pending').toUpperCase()}
+                </Text>
+              </View>
+              <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(enquiry?.priority || 'medium') }]}>
+                <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
+                  {(enquiry?.priority || enquiry?.Priority || 'medium').toUpperCase()}
+                </Text>
+              </View>
+            </View>
           </View>
-          <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(enquiry?.priority || 'medium') }]}>
-            <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
-              {(enquiry?.priority || 'medium').toUpperCase()}
+
+          <View style={styles.detailsGrid}>
+            {renderDetailItem('person', 'Client', enquiry?.client || enquiry?.clientName || 'Unknown Client')}
+            {renderDetailItem('schedule', 'Created', formatDate(enquiry?.createdAt || new Date().toISOString()))}
+            {renderDetailItem('update', 'Last Updated', formatDate(enquiry?.updatedAt || enquiry?.createdAt || new Date().toISOString()))}
+            {renderDetailItem('calendar-today', 'Shipping Date', enquiry?.deadline || enquiry?.ShippingDate ? formatDate(enquiry.deadline || enquiry.ShippingDate) : 'Not set')}
+            {renderDetailItem('currency-rupee', 'Budget', formatCurrency(enquiry?.estimatedPrice || enquiry?.budget || 0))}
+          </View>
+        </Card>
+
+        {/* Description Card */}
+        {(enquiry?.description || enquiry?.Remarks) && (
+          <Card style={styles.detailsCard}>
+            <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
+              Description
             </Text>
+            <Text style={[styles.descriptionText, { color: colors.textSecondary, fontSize: 13, lineHeight: 20 }]}>
+              {enquiry?.description || enquiry?.Remarks || ''}
+            </Text>
+          </Card>
+        )}
+
+        {/* Product Details Card */}
+        <Card style={styles.detailsCard}>
+          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
+            Product Details
+          </Text>
+          <View style={styles.detailsGrid}>
+            {renderDetailItem('category', 'Category', enquiry?.category || enquiry?.Category)}
+            {renderDetailItem('inventory', 'Quantity', enquiry?.Quantity ? `${enquiry.Quantity}` : 'N/A')}
+            {renderDetailItem('grain', 'Stone Type', enquiry?.stoneType || enquiry?.StoneType)}
+            {renderDetailItem('label', 'Style Number', enquiry?.StyleNumber)}
+            {renderDetailItem('receipt', 'Gati Order Number', enquiry?.GatiOrderNumber)}
+          </View>
+        </Card>
+
+        {/* Metal Details Card */}
+        <Card style={styles.detailsCard}>
+          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
+            Metal Details
+          </Text>
+          <View style={styles.detailsGrid}>
+            {renderDetailItem('palette', 'Metal Color', metalColor)}
+            {renderDetailItem('verified', 'Metal Quality', metalQuality)}
+            {renderDetailItem('scale', 'Metal Weight', metalWeightText)}
+            {renderDetailItem('grain', 'Diamond Weight', diamondWeightText)}
+            {renderDetailItem('label', 'Stamping', enquiry?.Stamping)}
+          </View>
+        </Card>
+
+        {/* Assignment & Codes Card (for admin/viewing) */}
+        {(enquiry?.AssignedTo || enquiry?.CoralCode || enquiry?.CadCode) && (
+          <Card style={styles.detailsCard}>
+            <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
+              Assignment & Codes
+            </Text>
+            <View style={styles.detailsGrid}>
+            {renderDetailItem('person', 'Assigned To', enquiry?.AssignedTo)}
+            {renderDetailItem('description', 'Coral Code', enquiry?.CoralCode || enquiry?.coralVersion)}
+            {renderDetailItem('description', 'CAD Code', enquiry?.CadCode || enquiry?.cadVersion)}
+            </View>
+          </Card>
+        )}
+      </>
+    );
+  };
+
+  // Component to render image with fallback logic
+  const ImageWithFallback = ({ image, imageKey, imageId, index }) => {
+    const [currentUriIndex, setCurrentUriIndex] = useState(0);
+    const [imageUri, setImageUri] = useState(null);
+    const [possibleUris, setPossibleUris] = useState([]);
+    
+    useEffect(() => {
+      // Generate all possible URIs to try
+      const BASE_URL = __DEV__ 
+        ? (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000')
+        : 'http://localhost:3000';
+      
+      const uris = [];
+      
+      // Try Key-based endpoints first (more reliable) - filename-based endpoints often work better
+      if (imageKey) {
+        const encodedKey = encodeURIComponent(imageKey);
+        uris.push(
+          `${BASE_URL}/api/images/${encodedKey}`,
+          `${BASE_URL}/api/files/${encodedKey}`,
+          `${BASE_URL}/uploads/${encodedKey}`,
+          `${BASE_URL}/api/files/download/${encodedKey}`
+        );
+      }
+      
+      // Try ID-based endpoints
+      if (imageId) {
+        uris.push(
+          `${BASE_URL}/api/files/${imageId}`,
+          `${BASE_URL}/api/images/${imageId}`,
+          `${BASE_URL}/api/files/download/${imageId}`
+        );
+      }
+      
+      setPossibleUris(uris);
+      
+      // Set the first URI to try
+      if (uris.length > 0) {
+        setImageUri(uris[0]);
+        setCurrentUriIndex(0);
+      } else {
+        // Fallback to placeholder
+        setImageUri(`https://via.placeholder.com/150x150?text=Image+${index + 1}`);
+      }
+    }, [imageKey, imageId, index]);
+    
+    const handleError = (error) => {
+      // Try next URI
+      const nextIndex = currentUriIndex + 1;
+      if (nextIndex < possibleUris.length) {
+        if (__DEV__) {
+          console.log(`Image[${index}] failed with URI ${currentUriIndex}, trying next:`, possibleUris[nextIndex]);
+        }
+        setCurrentUriIndex(nextIndex);
+        setImageUri(possibleUris[nextIndex]);
+      } else {
+        // All URIs failed, use placeholder
+        if (__DEV__) {
+          console.error(`Image[${index}] - All URIs failed. Key: ${imageKey}, ID: ${imageId}`);
+          console.error(`Tried ${possibleUris.length} different endpoints. Please check your backend configuration.`);
+        }
+        setImageUri(`https://via.placeholder.com/150x150?text=Image+${index + 1}`);
+      }
+    };
+    
+    if (!imageUri) {
+      return (
+        <View style={styles.imageContainer}>
+          <View style={styles.imagePlaceholder}>
+            <Icon name="image" size={24} color={colors.textSecondary} />
           </View>
         </View>
+      );
+    }
+    
+    return (
+      <View key={`${index}-${currentUriIndex}`} style={styles.imageContainer}>
+        <EnquiryImage
+          source={{ uri: imageUri }}
+          onError={handleError}
+          onLoad={() => {
+            if (__DEV__ && currentUriIndex > 0) {
+              console.log(`Image[${index}] loaded successfully on attempt ${currentUriIndex + 1} with URI:`, imageUri);
+            }
+          }}
+        />
       </View>
-
-      <View style={styles.detailsGrid}>
-        <View style={styles.detailRow}>
-          <Icon name="person" size={16} color={colors.primary} />
-          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: 13 }]}>
-            {enquiry?.client || 'Unknown Client'}
-          </Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Icon name="schedule" size={16} color={colors.primary} />
-          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: 13 }]}>
-            {formatDate(enquiry?.createdAt || new Date().toISOString())}
-          </Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Icon name="currency-rupee" size={16} color={colors.primary} />
-          <Text style={[styles.detailText, { color: colors.textSecondary, fontSize: 13 }]}>
-            {formatCurrency(enquiry?.estimatedPrice || enquiry?.budget || 0)}
-          </Text>
-        </View>
-      </View>
-    </Card>
-  );
+    );
+  };
 
   const renderImages = () => {
     // Safety check for images array
     const images = enquiry?.images || [];
+    
+    if (__DEV__) {
+      console.log('renderImages - enquiry images:', images);
+      console.log('renderImages - images length:', images.length);
+    }
     
     if (images.length === 0) {
       return (
@@ -199,13 +405,62 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           Reference Images
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {images.map((image, index) => (
+          {images.map((image, index) => {
+            // Handle image - could be a string URL, image object with Key/Id, or need to construct URL
+            let imageKey = null;
+            let imageId = null;
+            let imageUri = null;
+            
+            if (__DEV__) {
+              console.log(`renderImages - image[${index}]:`, image, 'type:', typeof image);
+            }
+            
+            // Extract key/ID from image object if it's an object
+            if (typeof image === 'object' && image !== null) {
+              imageKey = image.Key || image.key || '';
+              imageId = image.Id || image.id || image._id || '';
+              imageUri = image.Url || image.url || image.URI || image.uri || image.Location || image.location || '';
+              
+              if (__DEV__) {
+                console.log(`renderImages - extracted from object - Key: ${imageKey}, Id: ${imageId}, Url: ${imageUri}`);
+              }
+            } else if (typeof image === 'string') {
+              // If it's already a full URL, use it
+              if (image.startsWith('http') || image.startsWith('https')) {
+                imageUri = image;
+              } else {
+                imageKey = image;
+              }
+            }
+            
+            // If we have a full URL, use ImageWithFallback with that URL
+            if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
+              return (
                 <View key={index} style={styles.imageContainer}>
                   <EnquiryImage
-                    source={{ uri: `https://via.placeholder.com/150x150?text=${image}` }}
+                    source={{ uri: imageUri }}
+                    onError={(error) => {
+                      if (__DEV__) {
+                        console.error(`Image[${index}] load error:`, error.nativeEvent.error);
+                        console.error(`Failed URI:`, imageUri);
+                      }
+                    }}
                   />
                 </View>
-              ))}
+              );
+            }
+            
+            // Use ImageWithFallback component to try multiple endpoints
+            return (
+              <ImageWithFallback
+                key={index}
+                image={image}
+                imageKey={imageKey}
+                imageId={imageId}
+                index={index}
+              />
+            );
+          })}
         </ScrollView>
       </Card>
     );
@@ -263,12 +518,93 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     </Card>
   );
 
+  const handleEditEnquiry = () => {
+    navigation.navigate('AddEnquiryStep1', { enquiry });
+  };
+
+  const handleDownloadPDF = async () => {
+    try {
+      Alert.alert(
+        'Generating PDF',
+        'Please wait while we generate the PDF...',
+        [],
+        { cancelable: false }
+      );
+
+      await downloadEnquiryPDF(enquiry);
+      
+      Alert.alert(
+        'Success',
+        'Enquiry PDF is ready! Check your share/download options.',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      Alert.alert(
+        'Error',
+        'Failed to generate PDF. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const handleDeleteEnquiry = () => {
+    Alert.alert(
+      'Delete Enquiry',
+      `Are you sure you want to delete "${enquiry?.title || 'this enquiry'}"? This action cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Navigate back immediately for better UX (optimistic update handles cache removal)
+              navigation.navigate('MainTabs', { screen: 'Enquiries' });
+              
+              // Delete enquiry (optimistic update removes it from cache immediately)
+              await deleteEnquiry(enquiryId || enquiry?.id).unwrap();
+              
+              // Success - no need for alert since user already navigated
+              if (__DEV__) {
+                console.log('Enquiry deleted successfully');
+              }
+            } catch (error) {
+              console.error('Error deleting enquiry:', error);
+              // Show error alert
+              Alert.alert(
+                'Error',
+                error.data?.error || error.message || 'Failed to delete enquiry. Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderClientActions = () => (
     <Card style={styles.actionsCard}>
       <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
         Actions
         </Text>
       
+      <View style={styles.actionButtons}>
+        <Button
+          title="Edit Enquiry"
+          onPress={handleEditEnquiry}
+          style={[styles.actionButton, styles.editButton]}
+        />
+        <Button
+          title="Download PDF"
+          onPress={handleDownloadPDF}
+          style={[styles.actionButton, styles.downloadButton]}
+        />
+      </View>
+
       <View style={styles.actionButtons}>
         <Button
           title="Approve"
@@ -306,6 +642,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={styles.uploadButton}
       />
 
+      <Button
+        title="Download PDF"
+        onPress={handleDownloadPDF}
+        style={[styles.actionButton, styles.downloadButton]}
+      />
+
       <TouchableOpacity
         style={styles.chatButton}
         onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
@@ -323,11 +665,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         Admin Actions
         </Text>
       
-      <Button
-        title="Edit Pricing"
-        onPress={handleEditPricing}
-        style={styles.editButton}
-      />
+      <View style={styles.actionButtons}>
+        <Button
+          title="Edit Enquiry"
+          onPress={handleEditEnquiry}
+          style={[styles.actionButton, styles.editButton]}
+        />
+        <Button
+          title="Download PDF"
+          onPress={handleDownloadPDF}
+          style={[styles.actionButton, styles.downloadButton]}
+        />
+      </View>
+
+      <View style={styles.actionButtons}>
+        <Button
+          title="Delete Enquiry"
+          onPress={handleDeleteEnquiry}
+          style={[styles.actionButton, styles.deleteButton]}
+        />
+      </View>
 
       <TouchableOpacity
         style={styles.chatButton}
@@ -434,10 +791,23 @@ const styles = StyleSheet.create({
   },
   detailRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  detailTextContainer: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  detailLabel: {
+    marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   detailText: {
-    marginLeft: 12,
+    flex: 1,
+  },
+  descriptionText: {
+    textAlign: 'left',
   },
   imagesCard: {
     marginHorizontal: 16,
@@ -448,6 +818,14 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     marginRight: 12,
+  },
+  imagePlaceholder: {
+    width: 150,
+    height: 150,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   noImagesContainer: {
     alignItems: 'center',
@@ -508,6 +886,12 @@ const styles = StyleSheet.create({
   },
   rejectButton: {
     borderColor: colors.error,
+  },
+  deleteButton: {
+    backgroundColor: colors.error,
+  },
+  downloadButton: {
+    backgroundColor: colors.info || '#2196F3',
   },
   uploadButton: {
     marginBottom: 16,

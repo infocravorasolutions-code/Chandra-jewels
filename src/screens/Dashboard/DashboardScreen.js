@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
+import { useGetDashboardDataQuery, useGetClientsQuery, useGetEnquiriesQuery } from '../../store/api';
 import { StatusCard, Card, EnquiryStatusCard } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -21,34 +21,63 @@ import { formatCurrency, getRoleDisplayName, spacing, responsivePadding, imageSi
 
 const DashboardScreen = ({ navigation }) => {
   const { user } = useAuth();
-  const [dashboardData, setDashboardData] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
+  // Redux hooks for data fetching
+  const { 
+    data: dashboardData, 
+    isLoading: dashboardLoading, 
+    refetch: refetchDashboard 
+  } = useGetDashboardDataQuery(user?.role || 'client', {
+    skip: !user,
+  });
+
+  const { 
+    data: clientsData = [], 
+    isLoading: clientsLoading, 
+    refetch: refetchClients 
+  } = useGetClientsQuery(undefined, {
+    skip: !user || user?.role !== 'admin',
+  });
+
+  const { 
+    data: enquiriesData = [], 
+    isLoading: enquiriesLoading 
+  } = useGetEnquiriesQuery(user?.role || 'admin', {
+    skip: !user || user?.role !== 'admin',
+  });
+
+  // Compute clients with enquiry counts
+  const clients = useMemo(() => {
+    if (user?.role !== 'admin' || !clientsData || clientsData.length === 0) {
+      return [];
+    }
+
+    return clientsData.map(client => {
+      const enquiryCount = enquiriesData.filter(
+        enquiry => enquiry.clientId === client.id || enquiry.clientName === client.name
+      ).length;
+      
+      return {
+        ...client,
+        enquiryCount: enquiryCount,
+      };
+    });
+  }, [clientsData, enquiriesData, user?.role]);
 
   // Safety check - don't render if user is not loaded
   if (!user) {
     return <AnimatedLogoLoader size={60} />;
   }
 
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-      const data = await api.getDashboardData(user?.role || 'client');
-      setDashboardData(data);
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loading = dashboardLoading || clientsLoading || enquiriesLoading;
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadDashboardData();
+    await Promise.all([
+      refetchDashboard(),
+      user?.role === 'admin' && refetchClients(),
+    ]);
     setRefreshing(false);
   };
 
@@ -90,31 +119,33 @@ const DashboardScreen = ({ navigation }) => {
       </View>
 
       {/* Clients Section */}
-      <View style={styles.clientsSection}>
-        <Text style={styles.clientsHeader}>Clients</Text>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
-          style={styles.clientsScroll}
-          contentContainerStyle={styles.clientsScrollContent}
-        >
-          {(dashboardData?.clients || [
-            { id: '1', name: 'Emily Davis', count: 4 },
-            { id: '2', name: 'John Smith', count: 2 },
-            { id: '3', name: 'Lisa Anderson', count: 1 },
-            { id: '4', name: 'Robert Wilson', count: 3 }
-          ]).map(client => (
-            <TouchableOpacity
-              style={styles.clientCard}
-              key={client.id}
-              onPress={() => navigation.navigate('Enquiries', { filterType: 'client', filter: client.name })}
-            >
-              <Text style={styles.clientName} numberOfLines={2}>{client.name}</Text>
-              <Text style={styles.clientCount}>{client.count}</Text>
+      {clients.length > 0 && (
+        <View style={styles.clientsSection}>
+          <View style={styles.clientsHeaderContainer}>
+            <Text style={styles.clientsHeader}>Clients</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('ClientsList')}>
+              <Text style={styles.viewAllText}>View all</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+          </View>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            style={styles.clientsScroll}
+            contentContainerStyle={styles.clientsScrollContent}
+          >
+            {clients.map(client => (
+              <TouchableOpacity
+                style={styles.clientCard}
+                key={client.id}
+                onPress={() => navigation.navigate('Enquiries', { filterType: 'client', filter: client.name })}
+              >
+                <Text style={styles.clientName} numberOfLines={2}>{client.name || 'Unknown Client'}</Text>
+                <Text style={styles.clientCount}>{client.enquiryCount || 0}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Overview Section */}
       <View style={styles.overviewSection}>
@@ -219,6 +250,11 @@ const DashboardScreen = ({ navigation }) => {
 
     if (user?.role === 'admin') {
       actions.push(
+        {
+          title: 'Add New Enquiry',
+          icon: 'add-circle',
+          onPress: () => navigation.navigate('AddEnquiryStep1'),
+        },
         {
           title: 'Metal Prices',
           icon: 'trending-up',
@@ -513,11 +549,17 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     paddingLeft: 16,
   },
+  clientsHeaderContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingRight: 16,
+  },
   clientsHeader: {
     fontSize: fonts.lg,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    marginBottom: 14,
     letterSpacing: 0.3,
   },
   clientsScroll: {

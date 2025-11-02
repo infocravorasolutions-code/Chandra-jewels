@@ -9,7 +9,11 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '../../context/AuthContext';
+import { useDispatch } from 'react-redux';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useLoginMutation } from '../../store/api';
+import { setCredentials } from '../../features/auth/authSlice';
+import { useAuth } from '../../context/AuthContext'; // Keeping for backward compatibility during migration
 import { Input, Button } from '../../components/common';
 import { Heading, BodyText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
@@ -18,7 +22,9 @@ import { images } from '../../constants/images';
 import { validateEmail, validatePassword } from '../../utils/helpers';
 
 const LoginScreen = ({ navigation }) => {
-  const { login, isLoading } = useAuth();
+  const dispatch = useDispatch();
+  const [loginMutation, { isLoading }] = useLoginMutation();
+  const { login: contextLogin } = useAuth(); // For backward compatibility
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -55,12 +61,72 @@ const LoginScreen = ({ navigation }) => {
   const handleLogin = async () => {
     if (!validateForm()) return;
 
-    const result = await login(formData.email, formData.password);
-    
-    if (!result.success) {
-      Alert.alert('Login Failed', result.error || 'Invalid credentials');
+    try {
+      // Call Redux login mutation
+      const result = await loginMutation({
+        email: formData.email,
+        password: formData.password,
+      }).unwrap();
+      
+      if (result.success) {
+        // Console log the login token
+        console.log('========== LOGIN TOKEN ==========');
+        console.log('Token:', result.token);
+        console.log('Token Length:', result.token?.length);
+        console.log('Token Preview:', result.token?.substring(0, 50) + '...');
+        console.log('Full Login Result:', {
+          success: result.success,
+          token: result.token,
+          user: result.user,
+        });
+        console.log('==================================');
+        
+        // Generate display name
+        const getDisplayName = (email, role) => {
+          if (email) {
+            const emailPart = email.split('@')[0];
+            return emailPart.charAt(0).toUpperCase() + emailPart.slice(1);
+          }
+          const roleNames = {
+            admin: 'Administrator',
+            client: 'Client',
+            coral: 'Coral Designer',
+            cad: 'CAD Designer',
+          };
+          return roleNames[role] || 'User';
+        };
+        
+        const userData = {
+          ...result.user,
+          email: formData.email,
+          name: getDisplayName(formData.email, result.user.role),
+        };
+        
+        // Store in AsyncStorage
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+        await AsyncStorage.setItem('token', result.token);
+        
+        // Verify token was stored
+        const storedToken = await AsyncStorage.getItem('token');
+        console.log('Token stored in AsyncStorage:', storedToken?.substring(0, 50) + '...');
+        
+        // Update Redux store
+        dispatch(setCredentials({ user: userData, token: result.token }));
+        
+        // Also update context for backward compatibility during migration
+        await contextLogin(formData.email, formData.password);
+        
+        // Navigation handled by auth state
+      } else {
+        Alert.alert('Login Failed', result.error || 'Invalid credentials');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      Alert.alert(
+        'Login Failed',
+        error.data?.error || error.message || 'Invalid credentials. Please try again.'
+      );
     }
-    // Navigation will be handled automatically by AuthContext
   };
 
   const demoCredentials = [

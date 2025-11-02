@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -13,10 +13,12 @@ import {
   StatusBar,
   ImageBackground,
   Keyboard,
+  Image,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
+import { useGetChatMessagesQuery, useGetClientsQuery } from '../../store/api';
 import { Card } from '../../components/cards/Cards';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
@@ -29,14 +31,114 @@ const { width } = Dimensions.get('window');
 const ChatDetailScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { chat, enquiry } = route.params || {};
-  const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [loading, setLoading] = useState(true);
   const scrollViewRef = useRef(null);
 
+  // Get enquiryId from either chat or enquiry params
+  const enquiryId = chat?.enquiryId || enquiry?.id || enquiry?._id;
+  
+  // Debug logs
   useEffect(() => {
-    loadMessages();
-  }, []);
+    if (__DEV__) {
+      console.log('========== CHAT DETAIL SCREEN DEBUG ==========');
+      console.log('Chat param:', chat);
+      console.log('Enquiry param:', enquiry);
+      console.log('Extracted enquiryId:', enquiryId);
+      console.log('=============================================');
+    }
+  }, [chat, enquiry, enquiryId]);
+  
+  // Fetch chat messages for this enquiry
+  const { data: rawMessages = [], isLoading: loading, error: messagesError, refetch } = useGetChatMessagesQuery(enquiryId, {
+    skip: !enquiryId,
+    refetchOnFocus: true,
+    pollingInterval: 5000, // Poll every 5 seconds for new messages
+  });
+
+  // Debug messages
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('========== MESSAGES DEBUG ==========');
+      console.log('Loading:', loading);
+      console.log('Error:', messagesError);
+      console.log('Raw Messages:', rawMessages);
+      console.log('Raw Messages Count:', rawMessages.length);
+      console.log('First Message:', rawMessages[0]);
+      console.log('====================================');
+    }
+  }, [rawMessages, loading, messagesError]);
+
+  // Fetch clients to resolve sender names
+  const { data: clients = [] } = useGetClientsQuery(undefined, {
+    skip: !user,
+  });
+
+  // Create sender lookup map (senderId -> { name, role })
+  const senderMap = useMemo(() => {
+    const map = new Map();
+    clients.forEach(client => {
+      const idStr = String(client.id).trim();
+      map.set(idStr, { name: client.name, role: 'client' });
+    });
+    // Add current user to map
+    if (user) {
+      const userIdStr = String(user.id).trim();
+      map.set(userIdStr, { 
+        name: user.name || user.email || 'You', 
+        role: user.role || 'user' 
+      });
+    }
+    return map;
+  }, [clients, user]);
+
+  // Enrich messages with sender names from senderMap
+  const messages = useMemo(() => {
+    if (!rawMessages || rawMessages.length === 0) {
+      return [];
+    }
+    
+    const enriched = rawMessages.map(msg => {
+      // If senderName is already present, use it
+      if (msg.senderName && msg.senderName !== 'Unknown') {
+        return msg;
+      }
+      
+      // Otherwise, try to resolve from senderMap
+      const senderIdStr = String(msg.senderId).trim();
+      const senderInfo = senderMap.get(senderIdStr);
+      
+      if (senderInfo) {
+        return {
+          ...msg,
+          senderName: senderInfo.name,
+          senderRole: senderInfo.role,
+        };
+      }
+      
+      // Fallback to current user if senderId matches
+      if (user && String(user.id).trim() === senderIdStr) {
+        return {
+          ...msg,
+          senderName: user.name || user.email || 'You',
+          senderRole: user.role || 'user',
+        };
+      }
+      
+      // Default fallback
+      return {
+        ...msg,
+        senderName: msg.senderName || 'Unknown',
+        senderRole: msg.senderRole || 'user',
+      };
+    });
+    
+    if (__DEV__) {
+      console.log('Enriched Messages:', enriched);
+      console.log('Enriched Messages Count:', enriched.length);
+    }
+    
+    return enriched;
+  }, [rawMessages, senderMap, user]);
 
   useEffect(() => {
     // Scroll to bottom when new messages arrive
@@ -57,110 +159,27 @@ const ChatDetailScreen = ({ route, navigation }) => {
     };
   }, []);
 
-  const loadMessages = async () => {
-    try {
-      setLoading(true);
-      // Enhanced dummy data for group chats
-      const dummyMessages = [
-        {
-          id: '1',
-          text: 'Hello! I have some questions about my diamond ring design.',
-          senderId: 'client1',
-          senderName: 'John Smith',
-          senderRole: 'client',
-          timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-          status: 'delivered',
-          isGroup: true,
-        },
-        {
-          id: '2',
-          text: 'Hi John! I\'m Sarah, your design consultant. I\'d be happy to help with your diamond ring design. What specific questions do you have?',
-          senderId: 'admin1',
-          senderName: 'Sarah Johnson',
-          senderRole: 'admin',
-          timestamp: new Date(Date.now() - 1000 * 60 * 60 * 1.5).toISOString(), // 1.5 hours ago
-          status: 'read',
-          isGroup: true,
-        },
-        {
-          id: '3',
-          text: 'I\'m working on the initial sketches for your ring. Should be ready by tomorrow.',
-          senderId: 'designer1',
-          senderName: 'Mike Designer',
-          senderRole: 'coral',
-          timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
-          status: 'delivered',
-          isGroup: true,
-        },
-        {
-          id: '4',
-          text: 'Perfect! I\'m looking forward to seeing the designs. Can you make sure to include the vintage style elements we discussed?',
-          senderId: 'client1',
-          senderName: 'John Smith',
-          senderRole: 'client',
-          timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(), // 15 minutes ago
-          status: 'sent',
-          isGroup: true,
-        },
-        {
-          id: '5',
-          text: 'Absolutely! I\'ve noted the vintage elements. I\'ll make sure to incorporate them into the design.',
-          senderId: 'designer1',
-          senderName: 'Mike Designer',
-          senderRole: 'coral',
-          timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(), // 5 minutes ago
-          status: 'delivered',
-          isGroup: true,
-        },
-        {
-          id: '6',
-          text: 'Great! Let me know if you need any additional information or references.',
-          senderId: 'admin1',
-          senderName: 'Sarah Johnson',
-          senderRole: 'admin',
-          timestamp: new Date(Date.now() - 1000 * 60 * 2).toISOString(), // 2 minutes ago
-          status: 'read',
-          isGroup: true,
-        },
-      ];
-      
-      setMessages(dummyMessages);
-    } catch (error) {
-      console.error('Error loading messages:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const sendMessage = async () => {
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || !enquiryId) return;
 
-    const message = {
-      id: Date.now().toString(),
-      text: newMessage.trim(),
-      senderId: user.id,
-      senderName: user.name,
-      senderRole: user.role,
-      timestamp: new Date().toISOString(),
-      status: 'sending',
-      isGroup: true,
-    };
-
-    setMessages(prev => [...prev, message]);
+    // TODO: Add sendMessage mutation when backend endpoint is ready
+    // For now, just clear the input - messages will appear via polling
+    // const [sendChatMessage] = useSendChatMessageMutation();
+    // await sendChatMessage({ enquiryId, message: newMessage.trim() });
+    
     setNewMessage('');
-
-    // Simulate message delivery
-    setTimeout(() => {
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.id === message.id ? { ...msg, status: 'delivered' } : msg
-        )
-      );
-    }, 1000);
+    
+    // Refetch messages to show the new one (when backend is ready)
+    // await refetch();
+    
+    Alert.alert('Info', 'Send message functionality will be implemented when backend endpoint is ready');
   };
 
   // Helper functions for message styling
-  const isMyMessage = (message) => message.senderId === user.id;
+  const isMyMessage = (message) => {
+    if (!user || !message.senderId) return false;
+    return String(message.senderId).trim() === String(user.id).trim();
+  };
   const getMessageStatusIcon = (status) => {
     switch (status) {
       case 'sending': return 'schedule';
@@ -205,11 +224,39 @@ const ChatDetailScreen = ({ route, navigation }) => {
     return date.toLocaleDateString();
   };
 
+  const getMediaUrl = (mediaKey) => {
+    if (!mediaKey) return null;
+    // Get base URL from API configuration
+    // Default to common patterns - this will be handled by the backend
+    const baseUrl = 'http://10.0.2.2:3000'; // Android emulator
+    // Try common file serving patterns
+    return `${baseUrl}/api/files/${encodeURIComponent(mediaKey)}`;
+  };
+
+  const handleFilePress = async (mediaKey, mediaName) => {
+    const url = getMediaUrl(mediaKey);
+    if (url) {
+      try {
+        const supported = await Linking.canOpenURL(url);
+        if (supported) {
+          await Linking.openURL(url);
+        } else {
+          Alert.alert('Error', 'Cannot open this file');
+        }
+      } catch (error) {
+        Alert.alert('Error', 'Failed to open file');
+      }
+    }
+  };
+
   const renderMessage = (message, index) => {
     const myMessage = isMyMessage(message);
     const previousMessage = index > 0 ? messages[index - 1] : null;
     const showSenderName = message.isGroup && !myMessage && 
       (!previousMessage || previousMessage.senderId !== message.senderId);
+    
+    const isImage = message.messageType === 'image';
+    const isFile = message.messageType === 'file';
     
     return (
       <View key={message.id} style={styles.messageWrapper}>
@@ -233,13 +280,57 @@ const ChatDetailScreen = ({ route, navigation }) => {
           <View style={[
             styles.messageBubble,
             myMessage ? styles.myMessageBubble : styles.otherMessageBubble,
+            isImage && styles.imageMessageBubble,
+            isFile && styles.fileMessageBubble,
           ]}>
-            <Text style={[
-              styles.messageText,
-              myMessage ? styles.myMessageText : styles.otherMessageText,
-            ]}>
-              {message.text || message.message}
-            </Text>
+            {isImage && message.mediaKey ? (
+              <TouchableOpacity 
+                onPress={() => handleFilePress(message.mediaKey, message.mediaName)}
+                activeOpacity={0.8}>
+                <Image
+                  source={{ uri: getMediaUrl(message.mediaKey) }}
+                  style={styles.messageImage}
+                  resizeMode="cover"
+                />
+                {message.text && (
+                  <Text style={[
+                    styles.messageText,
+                    myMessage ? styles.myMessageText : styles.otherMessageText,
+                    styles.imageCaption,
+                  ]}>
+                    {message.text}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ) : isFile && message.mediaKey ? (
+              <TouchableOpacity 
+                onPress={() => handleFilePress(message.mediaKey, message.mediaName)}
+                style={styles.fileMessageContainer}
+                activeOpacity={0.8}>
+                <Icon name="insert-drive-file" size={24} color={myMessage ? colors.textWhite : colors.primary} />
+                <View style={styles.fileMessageInfo}>
+                  <Text style={[
+                    styles.fileMessageName,
+                    myMessage ? styles.myMessageText : styles.otherMessageText,
+                  ]} numberOfLines={1}>
+                    {message.mediaName || 'File'}
+                  </Text>
+                  <Text style={[
+                    styles.fileMessageSize,
+                    myMessage ? styles.myMessageTime : styles.otherMessageTime,
+                  ]}>
+                    Tap to download
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <Text style={[
+                styles.messageText,
+                myMessage ? styles.myMessageText : styles.otherMessageText,
+              ]}>
+                {message.text || message.message}
+              </Text>
+            )}
             
             <View style={styles.messageFooter}>
               <Text style={[
@@ -296,17 +387,44 @@ const ChatDetailScreen = ({ route, navigation }) => {
     );
   };
 
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <Icon name="chat" size={20} color={colors.textLight} />
-      <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-        Start the conversation
-      </Text>
-      <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
-        Send a message to begin chatting about this enquiry
-      </Text>
-    </View>
-  );
+  const renderEmptyState = () => {
+    // Show different states based on loading/error
+    if (loading) {
+      return (
+        <View style={styles.emptyState}>
+          <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.base }]}>
+            Loading messages...
+          </Text>
+        </View>
+      );
+    }
+    
+    if (messagesError) {
+      return (
+        <View style={styles.emptyState}>
+          <Icon name="error" size={40} color={colors.error} />
+          <Text style={[styles.emptyText, { color: colors.error, fontSize: fonts.base }]}>
+            Error loading messages
+          </Text>
+          <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
+            {messagesError?.data?.error || messagesError?.message || 'Unknown error'}
+          </Text>
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.emptyState}>
+        <Icon name="chat" size={40} color={colors.textLight} />
+        <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.base }]}>
+          Start the conversation
+        </Text>
+        <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
+          Send a message to begin chatting about this enquiry
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <ImageBackground 
@@ -328,10 +446,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
             style={styles.messagesContainer}
             contentContainerStyle={styles.messagesContent}>
             
-            {messages.length === 0 ? (
+            {loading && messages.length === 0 ? (
               renderEmptyState()
-            ) : (
+            ) : !loading && messages.length === 0 && !messagesError ? (
+              renderEmptyState()
+            ) : messages.length > 0 ? (
               messages.map((message, index) => renderMessage(message, index))
+            ) : (
+              renderEmptyState()
             )}
           </ScrollView>
 
@@ -596,6 +718,43 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
+  },
+  // Image message styles
+  imageMessageBubble: {
+    padding: 0,
+    overflow: 'hidden',
+  },
+  messageImage: {
+    width: width * 0.65,
+    height: width * 0.65,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  imageCaption: {
+    padding: 8,
+    marginTop: 4,
+  },
+  // File message styles
+  fileMessageBubble: {
+    padding: 12,
+  },
+  fileMessageContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 200,
+  },
+  fileMessageInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  fileMessageName: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    marginBottom: 4,
+  },
+  fileMessageSize: {
+    fontSize: fonts.sm,
+    opacity: 0.7,
   },
 });
 
