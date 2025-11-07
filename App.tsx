@@ -8,9 +8,8 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Provider, useDispatch } from 'react-redux';
+import { Provider } from 'react-redux';
 import { store } from './src/store';
-import { checkAuthState } from './src/features/auth/authThunks';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import AppNavigator from './src/navigation';
 import SplashScreen from './src/screens/VideoSplashScreen';
@@ -20,12 +19,9 @@ const AppContent = () => {
   const isDarkMode = useColorScheme() === 'dark';
   const { isLoading: authLoading } = useAuth();
   const [splashFinished, setSplashFinished] = useState(false);
-  const dispatch = useDispatch();
-
-  // Check auth state on app start
-  useEffect(() => {
-    dispatch(checkAuthState());
-  }, [dispatch]);
+  
+  // Auth state is now checked by AuthContext on mount
+  // No need to dispatch checkAuthState here
 
   // Show splash screen first
   if (!splashFinished) {

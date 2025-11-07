@@ -175,8 +175,8 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       Alert.alert('Error', 'User not found. Please login again.');
       return;
     }
-
-    setLoading(true);
+    
+    let enquiryData = null; // Declare outside try block for error logging
     
     try {
       // Map Priority from lowercase to capitalized format
@@ -229,26 +229,26 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           
           // Warn user if some images failed
           if (uploadedImages.length < selectedImages.length) {
-            Alert.alert(
-              'Image Upload Warning',
-              `${selectedImages.length - uploadedImages.length} image(s) failed to upload, but the enquiry will still be created with ${uploadedImages.length} image(s).`,
-              [{ text: 'OK' }]
-            );
+            if (__DEV__) {
+              console.warn(`Image upload: ${uploadedImages.length}/${selectedImages.length} images uploaded successfully`);
+            }
+            // Don't show alert for partial failures - just log it
+            // The enquiry will be created with the successfully uploaded images
           }
         } catch (uploadError) {
           console.error('Error during image upload process:', uploadError);
           // Continue with enquiry creation even if image upload fails
-          Alert.alert(
-            'Image Upload Warning',
-            'Images failed to upload, but the enquiry will still be created without images.',
-            [{ text: 'OK' }]
-          );
+          // Don't show alert - images are optional, enquiry creation should proceed
+          if (__DEV__) {
+            console.warn('Image upload failed, but continuing with enquiry creation without images');
+          }
         }
       }
       
       // Prepare enquiry data according to API structure
-      const enquiryData = {
-        Id: enquiryToEdit?.id || null, // Include ID for update
+      enquiryData = {
+        // Only include Id for updates, not for new enquiries
+        ...(isEditMode && enquiryToEdit?.id ? { Id: enquiryToEdit.id } : {}),
         Name: formData.title || '',
         ClientId: enquiryToEdit?.clientId || user.id, // Use existing ClientId if editing
         AssignedTo: enquiryToEdit?.AssignedTo || null,
@@ -263,14 +263,38 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         GatiOrderNumber: formData.gatiOrderNumber || null,
         StoneType: formData.stoneType || 'NaturalRegular',
         MetalWeight: {
-          From: formData.metalWeightFrom ? formData.metalWeightFrom.toString() : null,
-          To: formData.metalWeightTo ? formData.metalWeightTo.toString() : null,
-          Exact: formData.metalWeightExact ? formData.metalWeightExact.toString() : null,
+          From: formData.metalWeightFrom ? (() => {
+            const cleaned = formData.metalWeightFrom.toString().replace(/[^0-9.]/g, '');
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? null : num;
+          })() : null,
+          To: formData.metalWeightTo ? (() => {
+            const cleaned = formData.metalWeightTo.toString().replace(/[^0-9.]/g, '');
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? null : num;
+          })() : null,
+          Exact: formData.metalWeightExact ? (() => {
+            const cleaned = formData.metalWeightExact.toString().replace(/[^0-9.]/g, '');
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? null : num;
+          })() : null,
         },
         DiamondWeight: {
-          From: formData.diamondWeightFrom ? formData.diamondWeightFrom.toString() : null,
-          To: formData.diamondWeightTo ? formData.diamondWeightTo.toString() : null,
-          Exact: formData.diamondWeightExact ? formData.diamondWeightExact.toString() : null,
+          From: formData.diamondWeightFrom ? (() => {
+            const cleaned = formData.diamondWeightFrom.toString().replace(/[^0-9.]/g, '');
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? null : num;
+          })() : null,
+          To: formData.diamondWeightTo ? (() => {
+            const cleaned = formData.diamondWeightTo.toString().replace(/[^0-9.]/g, '');
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? null : num;
+          })() : null,
+          Exact: formData.diamondWeightExact ? (() => {
+            const cleaned = formData.diamondWeightExact.toString().replace(/[^0-9.]/g, '');
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? null : num;
+          })() : null,
         },
         Stamping: formData.stamping || null,
         Remarks: formData.description || '',
@@ -383,9 +407,54 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       }
     } catch (error) {
       console.error(`Error ${isEditMode ? 'updating' : 'creating'} enquiry:`, error);
+      if (__DEV__) {
+        console.error('========== ENQUIRY CREATION ERROR ==========');
+        console.error('Error status:', error.status);
+        console.error('Error data:', error.data);
+        console.error('Error message:', error.message);
+        if (enquiryData) {
+          console.error('Enquiry data that was sent:', JSON.stringify(enquiryData, null, 2));
+        } else {
+          console.error('Enquiry data was not prepared (error occurred before data preparation)');
+        }
+        console.error('===========================================');
+      }
+      
+      // Provide more detailed error message
+      let errorMessage = `Failed to ${isEditMode ? 'update' : 'create'} enquiry.`;
+      
+      // Check if it's a 500 error (backend server error)
+      if (error.status === 500) {
+        errorMessage = 'Server error (500). Please check:\n\n';
+        errorMessage += '1. Backend server is running properly\n';
+        errorMessage += '2. All required fields are provided\n';
+        errorMessage += '3. Data format matches backend expectations\n\n';
+        if (error.data) {
+          if (typeof error.data === 'string') {
+            errorMessage += `Error: ${error.data}`;
+          } else if (error.data.error) {
+            errorMessage += `Error: ${error.data.error}`;
+          } else if (error.data.message) {
+            errorMessage += `Error: ${error.data.message}`;
+          } else {
+            errorMessage += 'Check backend logs for details.';
+          }
+        }
+      } else if (error.data) {
+        if (typeof error.data === 'string') {
+          errorMessage = error.data;
+        } else if (error.data.error) {
+          errorMessage = error.data.error;
+        } else if (error.data.message) {
+          errorMessage = error.data.message;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       Alert.alert(
         'Error',
-        error.data?.error || error.message || `Failed to ${isEditMode ? 'update' : 'create'} enquiry. Please try again.`
+        errorMessage
       );
     }
   };

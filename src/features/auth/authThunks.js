@@ -1,5 +1,6 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { decodeJWT } from '../../utils/helpers';
 
 // Async thunk to check auth state on app start
 export const checkAuthState = createAsyncThunk(
@@ -10,6 +11,28 @@ export const checkAuthState = createAsyncThunk(
       const storedToken = await AsyncStorage.getItem('token');
       
       if (storedUser && storedToken) {
+        // Validate token expiration
+        const decodedToken = decodeJWT(storedToken);
+        if (decodedToken) {
+          const exp = decodedToken.exp || decodedToken.Exp;
+          if (exp) {
+            const currentTime = Math.floor(Date.now() / 1000);
+            if (exp < currentTime) {
+              // Token is expired, clear it
+              console.log('Token expired, clearing auth state');
+              await AsyncStorage.removeItem('user');
+              await AsyncStorage.removeItem('token');
+              return null;
+            }
+          }
+        } else {
+          // Invalid token format, clear it
+          console.log('Invalid token format, clearing auth state');
+          await AsyncStorage.removeItem('user');
+          await AsyncStorage.removeItem('token');
+          return null;
+        }
+        
         const userData = JSON.parse(storedUser);
         
         // Add name if missing (for backward compatibility)
@@ -36,6 +59,13 @@ export const checkAuthState = createAsyncThunk(
       return null;
     } catch (error) {
       console.error('Error checking auth state:', error);
+      // Clear potentially corrupted data
+      try {
+        await AsyncStorage.removeItem('user');
+        await AsyncStorage.removeItem('token');
+      } catch (clearError) {
+        console.error('Error clearing auth data:', clearError);
+      }
       return null;
     }
   }

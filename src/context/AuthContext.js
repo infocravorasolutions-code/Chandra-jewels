@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { decodeJWT } from '../utils/helpers';
+import { checkAuthState, logoutUser } from '../features/auth/authThunks';
 
 const AuthContext = createContext();
 
@@ -12,51 +15,55 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const dispatch = useDispatch();
+  // Get auth state from Redux (single source of truth)
+  const { user: reduxUser, token: reduxToken, isAuthenticated: reduxIsAuthenticated, isLoading: reduxIsLoading } = useSelector((state) => state.auth);
+  
+  // Local state for backward compatibility
+  const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    checkAuthState();
+    // Check auth state on mount
+    initializeAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const checkAuthState = async () => {
+  const initializeAuth = async () => {
     try {
-      // Check auth state quickly, let video splash screen handle timing
-      const storedUser = await AsyncStorage.getItem('user');
+      // Dispatch Redux checkAuthState which will handle validation
+      await dispatch(checkAuthState()).unwrap();
+    } catch (error) {
+      console.error('Error initializing auth:', error);
+      // If checkAuthState fails, clear invalid tokens
+      await clearInvalidAuth();
+    } finally {
+      setIsInitialized(true);
+    }
+  };
+
+  const clearInvalidAuth = async () => {
+    try {
       const storedToken = await AsyncStorage.getItem('token');
-      
-      if (storedUser && storedToken) {
-        const userData = JSON.parse(storedUser);
-        
-        // Add name if missing (for backward compatibility)
-        if (!userData.name) {
-          const getDisplayName = (email, role) => {
-            if (email) {
-              const emailPart = email.split('@')[0];
-              return emailPart.charAt(0).toUpperCase() + emailPart.slice(1);
+      if (storedToken) {
+        // Check if token is expired
+        const decodedToken = decodeJWT(storedToken);
+        if (decodedToken) {
+          const exp = decodedToken.exp || decodedToken.Exp;
+          if (exp) {
+            const currentTime = Math.floor(Date.now() / 1000);
+            if (exp < currentTime) {
+              // Token is expired, clear it
+              console.log('Token expired, clearing auth state');
+              await dispatch(logoutUser()).unwrap();
+              return;
             }
-            const roleNames = {
-              admin: 'Administrator',
-              client: 'Client',
-              coral: 'Coral Designer',
-              cad: 'CAD Designer',
-            };
-            return roleNames[role] || 'User';
-          };
-          userData.name = getDisplayName(userData.email, userData.role);
-          // Update stored user with name
-          await AsyncStorage.setItem('user', JSON.stringify(userData));
+          }
         }
-        
-        setUser(userData);
-        setIsAuthenticated(true);
       }
     } catch (error) {
-      console.error('Error checking auth state:', error);
-    } finally {
-      // Set loading to false immediately - let video splash screen control timing
-      setIsLoading(false);
+      console.error('Error clearing invalid auth:', error);
+      // If we can't decode token, it's invalid - clear it
+      await dispatch(logoutUser()).unwrap();
     }
   };
 
@@ -70,14 +77,17 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('token');
-      setUser(null);
-      setIsAuthenticated(false);
+      await dispatch(logoutUser()).unwrap();
     } catch (error) {
       console.error('Logout error:', error);
     }
   };
+
+  // Use Redux state as single source of truth
+  // Show loading until Redux state is initialized
+  const isLoading = !isInitialized || reduxIsLoading;
+  const isAuthenticated = reduxIsAuthenticated && !!reduxUser && !!reduxToken;
+  const user = reduxUser;
 
   const value = {
     user,

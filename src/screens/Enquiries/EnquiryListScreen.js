@@ -299,6 +299,16 @@ const EnquiryListScreen = ({ navigation }) => {
         return;
       }
 
+      // Debug: Log what we're exporting
+      if (__DEV__) {
+        console.log('========== EXPORTING ENQUIRIES TO PDF ==========');
+        console.log('Total enquiries to export:', enquiriesToExport.length);
+        console.log('Is array:', Array.isArray(enquiriesToExport));
+        console.log('First enquiry keys:', enquiriesToExport[0] ? Object.keys(enquiriesToExport[0]) : 'no data');
+        console.log('Sample enquiry:', enquiriesToExport[0] ? JSON.stringify(enquiriesToExport[0]).substring(0, 300) : 'no data');
+        console.log('================================================');
+      }
+
       Alert.alert(
         'Generating PDF',
         `Generating PDF for ${enquiriesToExport.length} enquiries...`,

@@ -48,12 +48,18 @@ export const getStatusColor = (status) => {
 };
 
 export const getPriorityColor = (priority) => {
+  const priorityLower = (priority || '').toLowerCase();
   const priorityColors = {
-    high: colors.error,
-    medium: colors.warning,
-    low: colors.success,
+    'normal': colors.success,
+    'high': colors.warning,
+    'super high': colors.error,
+    // Legacy support
+    'low': colors.success,
+    'medium': colors.success,
+    'urgent': colors.warning,
+    'super urgent': colors.error,
   };
-  return priorityColors[priority] || colors.textSecondary;
+  return priorityColors[priorityLower] || colors.textSecondary;
 };
 
 export const getRoleDisplayName = (role) => {
@@ -172,6 +178,8 @@ export const mapRoleNumberToString = (roleNumber) => {
   const roleMap = {
     1: 'admin',
     2: 'coral',
+    3: 'cad',
+    4: 'client',
     // Add more role mappings as needed
   };
   return roleMap[roleNumber] || null;

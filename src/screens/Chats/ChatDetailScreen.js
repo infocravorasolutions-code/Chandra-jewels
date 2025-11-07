@@ -228,7 +228,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
     if (!mediaKey) return null;
     // Get base URL from API configuration
     // Default to common patterns - this will be handled by the backend
-    const baseUrl = 'http://10.0.2.2:3000'; // Android emulator
+    // Using localhost for development
+    const baseUrl = __DEV__ && Platform.OS === 'android' 
+      ? 'http://10.0.2.2:3000' 
+      : 'http://localhost:3000';
     // Try common file serving patterns
     return `${baseUrl}/api/files/${encodeURIComponent(mediaKey)}`;
   };

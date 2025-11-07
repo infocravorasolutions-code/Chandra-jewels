@@ -9,10 +9,15 @@ import BottomTabs from './BottomTabs';
 import SingleEnquiryScreen from '../screens/Enquiries/SingleEnquiryScreen';
 import AddEnquiryStep1Screen from '../screens/AddEnquiry/AddEnquiryStep1Screen';
 import AddEnquiryStep2Screen from '../screens/AddEnquiry/AddEnquiryStep2Screen';
+import EditEnquiryStep1Screen from '../screens/EditEnquiry/EditEnquiryStep1Screen';
+import EditEnquiryStep2Screen from '../screens/EditEnquiry/EditEnquiryStep2Screen';
 import ChatDetailScreen from '../screens/Chats/ChatDetailScreen';
 import MetalPricesScreen from '../screens/Admin/MetalPricesScreen';
 import ClientsListScreen from '../screens/Admin/ClientsListScreen';
 import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
+import DesignViewerScreen from '../screens/DesignViewer/DesignViewerScreen';
+import PricingScreen from '../screens/Pricing/PricingScreen';
+import UploadDesignScreen from '../screens/UploadDesign/UploadDesignScreen';
 import FontTest from '../components/FontTest';
 // import ResponsiveDemoScreen from '../components/ResponsiveDemoScreen';
 
@@ -61,9 +66,23 @@ const StackNavigator = ({ isAuthenticated }) => {
           <Stack.Screen
             name="AddEnquiryStep2"
             component={AddEnquiryStep2Screen}
-            options={({ route }) => ({
-              title: route.params?.isEditMode ? 'Edit Enquiry - Step 2' : 'Add Enquiry - Step 2',
-            })}
+            options={{
+              title: 'Add Enquiry - Step 2',
+            }}
+          />
+          <Stack.Screen
+            name="EditEnquiryStep1"
+            component={EditEnquiryStep1Screen}
+            options={{
+              title: 'Edit Enquiry - Step 1',
+            }}
+          />
+          <Stack.Screen
+            name="EditEnquiryStep2"
+            component={EditEnquiryStep2Screen}
+            options={{
+              title: 'Edit Enquiry - Step 2',
+            }}
           />
           <Stack.Screen
             name="ChatDetail"
@@ -85,6 +104,33 @@ const StackNavigator = ({ isAuthenticated }) => {
             options={{
               title: 'Clients',
             }}
+          />
+          <Stack.Screen
+            name="DesignViewer"
+            component={DesignViewerScreen}
+            options={({ route }) => ({
+              title: route.params?.designType === 'coral' 
+                ? (route.params?.versionIndex !== undefined 
+                    ? `Coral Design - Version ${route.params.versionIndex + 1}`
+                    : 'Coral Design')
+                : (route.params?.versionIndex !== undefined
+                    ? `CAD Design - Version ${route.params.versionIndex + 1}`
+                    : 'CAD Design'),
+            })}
+          />
+          <Stack.Screen
+            name="Pricing"
+            component={PricingScreen}
+            options={({ route }) => ({
+              title: route.params?.designType === 'coral' ? 'Coral Pricing' : 'CAD Pricing',
+            })}
+          />
+          <Stack.Screen
+            name="UploadDesign"
+            component={UploadDesignScreen}
+            options={({ route }) => ({
+              title: `Add ${route.params?.designType === 'coral' ? 'Coral' : 'CAD'}`,
+            })}
           />
           <Stack.Screen
             name="Notifications"

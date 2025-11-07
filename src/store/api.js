@@ -3,22 +3,36 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decodeJWT, mapRoleNumberToString } from '../utils/helpers';
 
-// API Configuration - same as current api.js
+// API Configuration
 const getBaseUrl = () => {
+  // You can override this with an environment variable or config
+  // For production, uncomment the line below:
+  // return 'https://workflowapi-quhn.onrender.com';
+  
+  // For development:
   if (__DEV__) {
+    // Android emulator uses 10.0.2.2 to access host machine's localhost
     if (Platform.OS === 'android') {
+      // If you're using a physical Android device, replace with your computer's IP
+      // Example: return 'http://192.168.1.100:3000';
       return 'http://10.0.2.2:3000';
     } else {
+      // iOS simulator or other platforms
       return 'http://localhost:3000';
     }
   }
-  return 'http://localhost:3000';
+  // Production fallback
+  // return 'https://workflowapi-quhn.onrender.com';
 };
 
 const BASE_URL = getBaseUrl();
 
 if (__DEV__) {
+  console.log('========== API CONFIGURATION ==========');
   console.log(`RTK Query API Base URL: ${BASE_URL}`);
+  console.log(`Platform: ${Platform.OS}`);
+  console.log(`__DEV__: ${__DEV__}`);
+  console.log('========================================');
 }
 
 // Base query with auth token injection
@@ -52,13 +66,28 @@ export const api = createApi({
   endpoints: (builder) => ({
     // ==================== AUTH ====================
     login: builder.mutation({
-      query: ({ email, password }) => ({
-        url: '/api/login',
-        method: 'POST',
-        body: { email, password },
-      }),
+      query: ({ email, password }) => {
+        if (__DEV__) {
+          console.log('========== LOGIN REQUEST ==========');
+          console.log('Email:', email);
+          console.log('Password length:', password?.length || 0);
+          console.log('URL:', '/api/login');
+          console.log('===================================');
+        }
+        return {
+          url: '/api/login',
+          method: 'POST',
+          body: { email, password },
+        };
+      },
       transformResponse: async (response, meta, arg) => {
         try {
+          if (__DEV__) {
+            console.log('========== LOGIN RESPONSE DEBUG ==========');
+            console.log('Raw response:', response);
+            console.log('Response type:', typeof response);
+          }
+          
           // Handle different response formats
           let data = response;
           if (typeof response === 'string') {
@@ -74,36 +103,123 @@ export const api = createApi({
             : data.token || data.accessToken || data.access_token;
           
           if (!token) {
-            throw new Error('No token received');
+            if (__DEV__) {
+              console.error('No token in response. Full response:', data);
+            }
+            throw new Error('No token received from server');
+          }
+          
+          if (__DEV__) {
+            console.log('Token received, length:', token.length);
+            console.log('Token preview:', token.substring(0, 50) + '...');
           }
           
           const decodedToken = decodeJWT(token);
           if (!decodedToken) {
+            if (__DEV__) {
+              console.error('Failed to decode JWT token');
+            }
             throw new Error('Failed to decode authentication token');
           }
           
-          const roleString = mapRoleNumberToString(decodedToken.Role);
+          if (__DEV__) {
+            console.log('Decoded token:', decodedToken);
+            console.log('Token Role field:', decodedToken.Role);
+            console.log('Token Id field:', decodedToken.Id);
+            console.log('All token fields:', Object.keys(decodedToken));
+          }
+          
+          // Try different case variations for role
+          const roleNumber = decodedToken.Role || decodedToken.role || decodedToken.RoleNumber || decodedToken.roleNumber;
+          if (__DEV__) {
+            console.log('Extracted role number:', roleNumber);
+          }
+          
+          if (roleNumber === undefined || roleNumber === null) {
+            throw new Error(`Role not found in token. Available fields: ${Object.keys(decodedToken).join(', ')}`);
+          }
+          
+          const roleString = mapRoleNumberToString(roleNumber);
           if (!roleString) {
-            throw new Error(`Unknown role: ${decodedToken.Role}`);
+            if (__DEV__) {
+              console.error('Unknown role number:', roleNumber);
+              console.error('Available role mappings: 1=admin, 2=coral, 3=cad, 4=client');
+            }
+            throw new Error(`Unknown role: ${roleNumber}. Expected 1-4.`);
+          }
+          
+          // Try different case variations for ID
+          const userId = decodedToken.Id || decodedToken.id || decodedToken.userId || decodedToken.UserId;
+          
+          if (__DEV__) {
+            console.log('Mapped role:', roleString);
+            console.log('User ID:', userId);
+            console.log('==========================================');
           }
           
           return {
             success: true,
             token,
             user: {
-              id: decodedToken.Id,
+              id: userId,
               role: roleString,
               iat: decodedToken.iat,
             },
           };
         } catch (error) {
+          if (__DEV__) {
+            console.error('Login transform error:', error);
+            console.error('Error message:', error.message);
+            console.error('Full error:', error);
+          }
           throw new Error(error.message || 'Login failed');
         }
       },
       transformErrorResponse: (response) => {
+        if (__DEV__) {
+          console.error('========== LOGIN ERROR RESPONSE ==========');
+          console.error('Status:', response.status);
+          console.error('Status text:', response.statusText);
+          console.error('Error data:', response.data);
+          console.error('Error:', response.error);
+          console.error('Full response:', response);
+          console.error('Base URL used:', BASE_URL);
+          console.error('===========================================');
+        }
+        
+        // Provide helpful error messages for common network issues
+        let errorMessage = 'Login failed';
+        if (response.status === 'FETCH_ERROR' || response.error?.includes('Network request failed')) {
+          errorMessage = `Cannot connect to server at ${BASE_URL}. Please check:\n\n1. Backend server is running\n2. Server is on port 3000\n3. For Android emulator, use 10.0.2.2:3000\n4. For physical device, use your computer's IP address`;
+        } else {
+          errorMessage = response.data?.message || response.data?.error || response.error || `Login failed (${response.status || 'Unknown error'})`;
+        }
+        
         return {
           success: false,
-          error: response.data?.message || response.data?.error || 'Login failed',
+          error: errorMessage,
+        };
+      },
+    }),
+
+    // Create user/register endpoint
+    createUser: builder.mutation({
+      query: ({ email, password, roleNumber, name }) => ({
+        url: '/api/users',
+        method: 'POST',
+        body: { email, password, roleNumber, name },
+      }),
+      transformResponse: (response) => {
+        return {
+          success: true,
+          user: response.user || response,
+          message: response.message || 'User created successfully',
+        };
+      },
+      transformErrorResponse: (response) => {
+        return {
+          success: false,
+          error: response.data?.message || response.data?.error || 'Failed to create user',
         };
       },
     }),
@@ -521,7 +637,8 @@ export const api = createApi({
         }
         
         return clientsArray.map(client => ({
-          id: client.Id || client.id,
+          id: client.Id || client.id || client._id,
+          _id: client._id || client.Id || client.id, // Also store _id for compatibility
           name: client.Name || client.name || 'Unknown Client',
           email: client.Email || client.email || 'N/A',
           phone: client.Phone || client.phone || 'N/A',
@@ -698,6 +815,215 @@ export const api = createApi({
     }),
 
     // ==================== FILE UPLOAD ====================
+    uploadDesign: builder.mutation({
+      queryFn: async ({ enquiryId, designType, version, images, excel }, { dispatch }, extraOptions, baseQuery) => {
+        // Note: invalidatesTags is set in the mutation definition below
+        try {
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            return {
+              error: {
+                status: 'CUSTOM_ERROR',
+                data: 'Authentication token not found',
+              },
+            };
+          }
+
+          // Create FormData
+          const formData = new FormData();
+          
+          // Add version as text
+          formData.append('version', version.toString());
+          
+          // Add images as files
+          if (images && images.length > 0) {
+            images.forEach((image, index) => {
+              formData.append('images', {
+                uri: image.uri,
+                type: image.type || 'image/jpeg',
+                name: image.name || `image_${index}_${Date.now()}.jpg`,
+              });
+            });
+          }
+          
+          // Add Excel file if provided
+          if (excel) {
+            formData.append('excel', {
+              uri: excel.uri,
+              type: excel.type || 'application/vnd.ms-excel',
+              name: excel.name || `excel_${Date.now()}.xlsx`,
+            });
+          }
+
+          const endpoint = `/api/enquiries/${enquiryId}/upload/${designType}`;
+          
+          if (__DEV__) {
+            console.log(`Uploading ${designType} design for enquiry ${enquiryId}`);
+            console.log(`Version: ${version}`);
+            console.log(`Images: ${images?.length || 0}`);
+            console.log(`Excel: ${excel ? 'Yes' : 'No'}`);
+          }
+
+          const response = await fetch(`${BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              // Don't set Content-Type - let fetch set it with boundary for FormData
+            },
+            body: formData,
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (__DEV__) {
+              console.log(`Design upload successful:`, data);
+            }
+            return { data };
+          } else {
+            const errorText = await response.text().catch(() => '');
+            const errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
+            if (__DEV__) {
+              console.error(`Design upload failed: Status ${response.status}`, errorData);
+            }
+            return {
+              error: {
+                status: response.status,
+                data: errorData,
+              },
+            };
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.error('Design upload error:', error);
+          }
+          return {
+            error: {
+              status: 'CUSTOM_ERROR',
+              data: error.message || 'Failed to upload design',
+            },
+          };
+        }
+      },
+      invalidatesTags: (result, error, { enquiryId }) => [
+        { type: 'Enquiry', id: enquiryId },
+        'Enquiry',
+        'Dashboard',
+      ],
+    }),
+
+    // Update asset image description
+    updateAssetDescription: builder.mutation({
+      query: ({ enquiryId, designType, version, assetId, description }) => {
+        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
+        return {
+          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
+          method: 'PUT',
+          body: {
+            Id: assetId,
+            Description: description,
+          },
+        };
+      },
+      invalidatesTags: (result, error, { enquiryId }) => [
+        { type: 'Enquiry', id: enquiryId },
+        'Enquiry',
+      ],
+      transformResponse: (response) => {
+        if (__DEV__) {
+          console.log('Asset description updated:', response);
+        }
+        return response;
+      },
+      transformErrorResponse: (response) => {
+        if (__DEV__) {
+          console.error('Failed to update asset description:', response);
+        }
+        return {
+          status: response.status,
+          data: response.data,
+          error: response.data?.message || response.data?.error || 'Failed to update asset description',
+        };
+      },
+    }),
+
+    // Approve design version
+    approveDesignVersion: builder.mutation({
+      query: ({ enquiryId, designType, version }) => {
+        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
+        
+        if (__DEV__) {
+          console.log('========== APPROVE DESIGN VERSION API REQUEST ==========');
+          console.log('URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
+          console.log('Method: PUT');
+          console.log('Body:', { IsApprovedVersion: true });
+          console.log('========================================================');
+        }
+        
+        return {
+          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
+          method: 'PUT',
+          body: {
+            IsApprovedVersion: true,
+          },
+        };
+      },
+      invalidatesTags: (result, error, { enquiryId }) => [
+        { type: 'Enquiry', id: enquiryId },
+        'Enquiry',
+      ],
+      transformResponse: (response) => {
+        if (__DEV__) {
+          console.log('Design version approved:', response);
+        }
+        return response;
+      },
+      transformErrorResponse: (response) => {
+        if (__DEV__) {
+          console.error('Failed to approve design version:', response);
+        }
+        return {
+          status: response.status,
+          data: response.data,
+          error: response.data?.message || response.data?.error || 'Failed to approve design version',
+        };
+      },
+    }),
+
+    // Reject design version
+    rejectDesignVersion: builder.mutation({
+      query: ({ enquiryId, designType, version, reason }) => {
+        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
+        return {
+          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
+          method: 'PUT',
+          body: {
+            IsApprovedVersion: false,
+            ReasonForRejection: reason || '',
+          },
+        };
+      },
+      invalidatesTags: (result, error, { enquiryId }) => [
+        { type: 'Enquiry', id: enquiryId },
+        'Enquiry',
+      ],
+      transformResponse: (response) => {
+        if (__DEV__) {
+          console.log('Design version rejected:', response);
+        }
+        return response;
+      },
+      transformErrorResponse: (response) => {
+        if (__DEV__) {
+          console.error('Failed to reject design version:', response);
+        }
+        return {
+          status: response.status,
+          data: response.data,
+          error: response.data?.message || response.data?.error || 'Failed to reject design version',
+        };
+      },
+    }),
+
     uploadImage: builder.mutation({
       queryFn: async (image, { dispatch }, extraOptions, baseQuery) => {
         // Try multiple possible upload endpoints
@@ -887,6 +1213,79 @@ export const api = createApi({
         },
       }),
       invalidatesTags: ['MetalPrice'],
+    }),
+
+    // ==================== PRICING CALCULATION ====================
+    calculatePricing: builder.mutation({
+      query: (data) => {
+        if (__DEV__) {
+          console.log('========== PRICING CALCULATION REQUEST ==========');
+          console.log('URL: /api/enquiries/pricingCalculate');
+          console.log('Payload:', JSON.stringify(data, null, 2));
+          console.log('================================================');
+        }
+        return {
+          url: '/api/enquiries/pricingCalculate',
+          method: 'POST',
+          body: data,
+        };
+      },
+      transformResponse: (response) => {
+        if (__DEV__) {
+          console.log('========== PRICING CALCULATION RESPONSE ==========');
+          console.log('Response:', response);
+          console.log('==================================================');
+        }
+        return response;
+      },
+      transformErrorResponse: (response) => {
+        if (__DEV__) {
+          console.error('========== PRICING CALCULATION ERROR ==========');
+          console.error('Status:', response.status);
+          console.error('Status text:', response.statusText);
+          console.error('Error data:', response.data);
+          console.error('Error status:', response.status);
+          console.error('Full response:', JSON.stringify(response, null, 2));
+          
+          // Try to extract more details from error response
+          if (response.data) {
+            console.error('Error data details:');
+            if (typeof response.data === 'string') {
+              console.error('Error message (string):', response.data);
+            } else if (typeof response.data === 'object') {
+              console.error('Error object keys:', Object.keys(response.data));
+              console.error('Error message:', response.data.message);
+              console.error('Error error:', response.data.error);
+              console.error('Error stack:', response.data.stack);
+              console.error('Error details:', response.data.details);
+            }
+          }
+          
+          // Check for specific backend error pattern
+          if (response.status === 500) {
+            console.error('⚠️ 500 Internal Server Error detected');
+            console.error('This is likely the "Cannot read properties of null (reading \'Pricing\')" error');
+            console.error('Backend location: enquiry.service.js:933');
+            console.error('Solution: Backend needs to add null check for client before accessing client.Pricing');
+          }
+          
+          console.error('===============================================');
+        }
+        
+        // Enhance error message for 500 errors (likely the client.Pricing null error)
+        let errorMessage = response.data?.message || response.data?.error || `Pricing calculation failed (${response.status || 'Unknown error'})`;
+        
+        if (response.status === 500 && (!response.data?.message || response.data?.message === 'Internal server error')) {
+          // Backend is returning generic 500 error, but we know from logs it's likely the client.Pricing null error
+          errorMessage = 'Internal server error: Client configuration issue. The client may not exist or may be missing pricing configuration.';
+        }
+        
+        return {
+          status: response.status,
+          data: response.data,
+          error: errorMessage,
+        };
+      },
     }),
 
     // ==================== CHATS ====================
@@ -1124,6 +1523,7 @@ export const api = createApi({
 export const {
   // Auth
   useLoginMutation,
+  useCreateUserMutation,
   
   // Enquiries
   useGetEnquiriesQuery,
@@ -1144,8 +1544,15 @@ export const {
   useUpdateMetalPriceMutation,
   useDeleteMetalPriceMutation,
   
+  // Pricing
+  useCalculatePricingMutation,
+  
   // File Upload
   useUploadImageMutation,
+  useUploadDesignMutation,
+  useUpdateAssetDescriptionMutation,
+  useApproveDesignVersionMutation,
+  useRejectDesignVersionMutation,
   
   // Chats
   useGetChatsQuery,

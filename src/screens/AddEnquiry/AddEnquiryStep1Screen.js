@@ -15,173 +15,93 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { validateEmail } from '../../utils/helpers';
 import IconComponent from '../../components/common/Icon';
+import { useGetClientsQuery } from '../../store/api';
 
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
-  const enquiryToEdit = route.params?.enquiry || null;
-  const isEditMode = !!enquiryToEdit;
+  // This screen is only for creating new enquiries
+  const isEditMode = false;
   
-  // Map enquiry data to form format if editing
+  // Initialize form data for new enquiry
   const getInitialFormData = () => {
-    if (!enquiryToEdit) {
-      return {
-        title: '',
-        description: '',
-        clientName: '',
-        clientEmail: '',
-        clientPhone: '',
-        estimatedBudget: '',
-        priority: 'medium',
-        deadline: '',
-        category: 'Ring',
-        metalColor: 'Gold',
-        metalQuality: '10K',
-        stoneType: 'NaturalRegular',
-        quantity: '1',
-        metalWeightFrom: '',
-        metalWeightTo: '',
-        metalWeightExact: '',
-        diamondWeightFrom: '',
-        diamondWeightTo: '',
-        diamondWeightExact: '',
-        stamping: '',
-        styleNumber: '',
-        gatiOrderNumber: '',
-      };
-    }
-    
-    // Map API data to form format
-    const priorityMap = {
-      'Low': 'low',
-      'Medium': 'medium',
-      'High': 'high',
-      'Urgent': 'urgent',
-      'Super Urgent': 'urgent',
-      'low': 'low',
-      'medium': 'medium',
-      'high': 'high',
-      'urgent': 'urgent',
-    };
-    
-    // Use original data if available, otherwise use normalized
-    const originalData = enquiryToEdit._originalData || enquiryToEdit;
-    
-    // Helper to safely convert values to string, handling null/undefined
-    const safeToString = (value) => {
-      if (value === null || value === undefined) return '';
-      return value.toString();
-    };
-    
-    // Format date to YYYY-MM-DD
-    const formatDateForInput = (dateValue) => {
-      if (!dateValue) return '';
-      try {
-        const dateStr = dateValue.toString();
-        if (dateStr.includes('T')) {
-          return dateStr.split('T')[0];
-        }
-        return dateStr.substring(0, 10); // Take first 10 chars (YYYY-MM-DD)
-      } catch (e) {
-        return '';
-      }
-    };
-    
-    if (__DEV__) {
-      console.log('getInitialFormData - Mapping enquiry data');
-      console.log('  Title:', enquiryToEdit.title, enquiryToEdit.Name, originalData.Name);
-      console.log('  Budget:', enquiryToEdit.budget, enquiryToEdit.estimatedPrice);
-      console.log('  Metal:', originalData.Metal, enquiryToEdit.Metal);
-      console.log('  MetalWeight:', originalData.MetalWeight, enquiryToEdit.MetalWeight);
-    }
-    
     return {
-      title: enquiryToEdit.title || enquiryToEdit.Name || originalData?.Name || '',
-      description: enquiryToEdit.description || enquiryToEdit.Remarks || originalData?.Remarks || '',
-      clientName: enquiryToEdit.clientName || enquiryToEdit.client || '',
-      clientEmail: '', // Not available in enquiry object
-      clientPhone: '', // Not available in enquiry object
-      estimatedBudget: safeToString(enquiryToEdit.budget || enquiryToEdit.estimatedPrice || ''),
-      priority: priorityMap[originalData?.Priority] || priorityMap[enquiryToEdit.priority] || (enquiryToEdit.priority?.toLowerCase() || 'medium'),
-      deadline: formatDateForInput(enquiryToEdit.deadline || enquiryToEdit.ShippingDate || originalData?.ShippingDate),
-      category: enquiryToEdit.category || enquiryToEdit.Category || originalData?.Category || 'Ring',
-      metalColor: originalData?.Metal?.Color || enquiryToEdit.Metal?.Color || 'Gold',
-      metalQuality: originalData?.Metal?.Quality || enquiryToEdit.Metal?.Quality || '10K',
-      stoneType: enquiryToEdit.stoneType || enquiryToEdit.StoneType || originalData?.StoneType || 'NaturalRegular',
-      quantity: safeToString(originalData?.Quantity || enquiryToEdit.Quantity || enquiryToEdit.quantity || '1'),
-      metalWeightFrom: safeToString(originalData?.MetalWeight?.From || enquiryToEdit.MetalWeight?.From || enquiryToEdit.metalWeightFrom),
-      metalWeightTo: safeToString(originalData?.MetalWeight?.To || enquiryToEdit.MetalWeight?.To || enquiryToEdit.metalWeightTo),
-      metalWeightExact: safeToString(originalData?.MetalWeight?.Exact || enquiryToEdit.MetalWeight?.Exact || enquiryToEdit.metalWeightExact),
-      diamondWeightFrom: safeToString(originalData?.DiamondWeight?.From || enquiryToEdit.DiamondWeight?.From || enquiryToEdit.diamondWeightFrom),
-      diamondWeightTo: safeToString(originalData?.DiamondWeight?.To || enquiryToEdit.DiamondWeight?.To || enquiryToEdit.diamondWeightTo),
-      diamondWeightExact: safeToString(originalData?.DiamondWeight?.Exact || enquiryToEdit.DiamondWeight?.Exact || enquiryToEdit.diamondWeightExact),
-      stamping: safeToString(originalData?.Stamping || enquiryToEdit.stamping || enquiryToEdit.Stamping),
-      styleNumber: safeToString(originalData?.StyleNumber || enquiryToEdit.styleNumber || enquiryToEdit.StyleNumber),
-      gatiOrderNumber: safeToString(originalData?.GatiOrderNumber || enquiryToEdit.gatiOrderNumber || enquiryToEdit.GatiOrderNumber),
+      title: '',
+      description: '',
+      clientId: '',
+      clientName: '',
+      clientEmail: '',
+      clientPhone: '',
+      estimatedBudget: '',
+      priority: 'medium',
+      deadline: '',
+      category: 'Ring',
+      metalColor: 'Gold',
+      metalQuality: '10K',
+      stoneType: 'NaturalRegular',
+      quantity: '1',
+      metalWeightFrom: '',
+      metalWeightTo: '',
+      metalWeightExact: '',
+      diamondWeightFrom: '',
+      diamondWeightTo: '',
+      diamondWeightExact: '',
+      stamping: '',
+      styleNumber: '',
+      gatiOrderNumber: '',
     };
   };
 
-  const [formData, setFormData] = useState(getInitialFormData());
+  // Initialize form data - use empty form initially, will be populated in useEffect
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    clientId: '',
+    clientName: '',
+    clientEmail: '',
+    clientPhone: '',
+    estimatedBudget: '',
+    priority: 'medium',
+    deadline: '',
+    category: 'Ring',
+    metalColor: 'Gold',
+    metalQuality: '10K',
+    stoneType: 'NaturalRegular',
+    quantity: '1',
+    metalWeightFrom: '',
+    metalWeightTo: '',
+    metalWeightExact: '',
+    diamondWeightFrom: '',
+    diamondWeightTo: '',
+    diamondWeightExact: '',
+    stamping: '',
+    styleNumber: '',
+    gatiOrderNumber: '',
+  });
   const [errors, setErrors] = useState({});
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showMetalColorDropdown, setShowMetalColorDropdown] = useState(false);
   const [showMetalQualityDropdown, setShowMetalQualityDropdown] = useState(false);
   const [showStoneTypeDropdown, setShowStoneTypeDropdown] = useState(false);
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
+  
+  // Fetch clients for dropdown
+  const { data: clientsData = [] } = useGetClientsQuery(undefined, {
+    skip: false,
+  });
+  
+  const clients = Array.isArray(clientsData) ? clientsData : [];
+  
+  // Create client options for dropdown
+  const clientOptions = clients.map(client => ({
+    label: client.name || 'Unknown Client',
+    value: client.id || client._id,
+  }));
 
-  // Update form data when enquiry changes (e.g., when navigating from different enquiries)
+
+  // Initialize form on mount (only for creating new enquiries)
   useEffect(() => {
-    // Use a unique identifier to detect changes - use enquiry ID or timestamp
-    const enquiryId = enquiryToEdit?.id || enquiryToEdit?._id;
-    
-    if (enquiryId) {
-      if (__DEV__) {
-        console.log('AddEnquiryStep1 - Editing enquiry ID:', enquiryId);
-        console.log('AddEnquiryStep1 - Editing enquiry:', enquiryToEdit);
-        console.log('AddEnquiryStep1 - Enquiry keys:', Object.keys(enquiryToEdit || {}));
-        console.log('AddEnquiryStep1 - Original data:', enquiryToEdit._originalData);
-      }
-      
-      const initialData = getInitialFormData();
-      setFormData(initialData);
-      
-      if (__DEV__) {
-        console.log('AddEnquiryStep1 - Form data populated:', initialData);
-        console.log('AddEnquiryStep1 - Check form fields:');
-        console.log('  - Title:', initialData.title);
-        console.log('  - Description:', initialData.description);
-        console.log('  - Client:', initialData.clientName);
-        console.log('  - Budget:', initialData.estimatedBudget);
-        console.log('  - Category:', initialData.category);
-        console.log('  - Metal Color:', initialData.metalColor);
-        console.log('  - Metal Quality:', initialData.metalQuality);
-        console.log('  - Quantity:', initialData.quantity);
-      }
-    } else if (!isEditMode) {
-      // Reset form if not in edit mode and no enquiry
-      setFormData({
-        title: '',
-        description: '',
-        clientName: '',
-        clientEmail: '',
-        clientPhone: '',
-        estimatedBudget: '',
-        priority: 'medium',
-        deadline: '',
-        category: 'Ring',
-        metalColor: 'Gold',
-        metalQuality: '10K',
-        stoneType: 'NaturalRegular',
-        quantity: '1',
-        metalWeightFrom: '',
-        metalWeightTo: '',
-        metalWeightExact: '',
-        diamondWeightFrom: '',
-        diamondWeightTo: '',
-        diamondWeightExact: '',
-        stamping: '',
-        styleNumber: '',
-        gatiOrderNumber: '',
-      });
-    }
-  }, [enquiryToEdit?.id, enquiryToEdit?._id]); // Re-run when enquiry ID changes
+    const initialData = getInitialFormData();
+    setFormData(initialData);
+  }, []); // Only run once on mount
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -202,26 +122,19 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       newErrors.description = 'Description is required';
     }
 
-    if (!formData.clientName.trim()) {
-      newErrors.clientName = 'Client name is required';
+    if (!formData.clientId && !formData.clientName.trim()) {
+      newErrors.clientId = 'Client is required';
     }
 
-    // Client email and phone are optional when editing (they might not be in enquiry object)
-    if (!isEditMode) {
-      if (!formData.clientEmail.trim()) {
-        newErrors.clientEmail = 'Client email is required';
-      } else if (!validateEmail(formData.clientEmail)) {
-        newErrors.clientEmail = 'Please enter a valid email';
-      }
+    // Validate client email and phone (required for new enquiries)
+    if (!formData.clientEmail.trim()) {
+      newErrors.clientEmail = 'Client email is required';
+    } else if (!validateEmail(formData.clientEmail)) {
+      newErrors.clientEmail = 'Please enter a valid email';
+    }
 
-      if (!formData.clientPhone.trim()) {
-        newErrors.clientPhone = 'Client phone is required';
-      }
-    } else {
-      // In edit mode, validate email format only if provided
-      if (formData.clientEmail.trim() && !validateEmail(formData.clientEmail)) {
-        newErrors.clientEmail = 'Please enter a valid email';
-      }
+    if (!formData.clientPhone.trim()) {
+      newErrors.clientPhone = 'Client phone is required';
     }
 
     if (!formData.quantity.trim()) {
@@ -293,8 +206,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     if (validateForm()) {
       navigation.navigate('AddEnquiryStep2', { 
         formData,
-        enquiry: enquiryToEdit, // Pass enquiry data for edit mode
-        isEditMode,
+        isEditMode: false,
       });
     }
   };
@@ -372,13 +284,21 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
             Client Information
           </CustomText>
           
-          <Input
-            label="Client Name"
-            placeholder="Enter client name"
-            value={formData.clientName}
-            onChangeText={(value) => handleInputChange('clientName', value)}
-            error={errors.clientName}
-          />
+          {renderDropdown(
+            'Client Name',
+            formData.clientId,
+            clientOptions,
+            (clientId) => {
+              const selectedClient = clients.find(c => (c.id || c._id) === clientId);
+              handleInputChange('clientId', clientId);
+              handleInputChange('clientName', selectedClient?.name || '');
+            },
+            showClientDropdown,
+            () => setShowClientDropdown(!showClientDropdown)
+          )}
+          {errors.clientId && (
+            <Text style={styles.errorText}>{errors.clientId}</Text>
+          )}
 
           <Input
             label="Client Email"

@@ -121,19 +121,26 @@ const LoginScreen = ({ navigation }) => {
         Alert.alert('Login Failed', result.error || 'Invalid credentials');
       }
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('========== LOGIN ERROR ==========');
+      console.error('Error object:', error);
+      console.error('Error message:', error.message);
+      console.error('Error data:', error.data);
+      console.error('Full error:', JSON.stringify(error, null, 2));
+      console.error('==================================');
+      
+      const errorMessage = error.data?.error || error.message || 'Invalid credentials. Please try again.';
       Alert.alert(
         'Login Failed',
-        error.data?.error || error.message || 'Invalid credentials. Please try again.'
+        errorMessage
       );
     }
   };
 
   const demoCredentials = [
-    { role: 'Admin', email: 'admin@chandrajewels.com', password: 'admin123' },
-    { role: 'Client', email: 'john@example.com', password: 'client123' },
-    { role: 'Coral Designer', email: 'coral@chandrajewels.com', password: 'coral123' },
-    { role: 'CAD Designer', email: 'cad@chandrajewels.com', password: 'cad123' },
+    { role: 'Admin', email: 'test@gmail.com', password: 'testing' },
+    { role: 'Client', email: 'test@cl.com', password: '123456' },
+    { role: 'Coral Designer', email: 'pitbull9792@gmail.com', password: 'sourav84206' },
+    { role: 'CAD Designer', email: 'anupampatra386@gmail.com', password: 'anupam97698' },
   ];
 
   const fillDemoCredentials = (email, password) => {
