@@ -22,6 +22,7 @@ import Icon from '../../components/common/Icon';
 import { formatCurrency, formatDate, getStatusColor, getPriorityColor, imageSizes, spacing } from '../../utils';
 import { EnquiryHistoryModal } from '../../components/modals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_BASE_URL } from '../../config/apiConfig';
 
 const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
@@ -641,7 +642,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const [imageDataUri, setImageDataUri] = useState(null);
     const [imageLoading, setImageLoading] = useState(false);
     const [imageError, setImageError] = useState(false);
-    const BASE_URL = 'https://workflowapi-quhn.onrender.com';
     
     // Fetch image with authentication
     const fetchImageWithAuth = async (imageUrl) => {
@@ -812,13 +812,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         }
       } else if (imageKey) {
         const encodedKey = encodeURIComponent(imageKey);
-        imageUrl = `${BASE_URL}/api/enquiries/files/${encodedKey}`;
+        imageUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
         if (__DEV__) {
           console.log(`ImageWithFallback[${index}] - Generated URL from key:`, imageUrl);
           console.log(`ImageWithFallback[${index}] - Original key:`, imageKey);
         }
       } else if (imageId) {
-        imageUrl = `${BASE_URL}/api/enquiries/files/${imageId}`;
+        imageUrl = `${API_BASE_URL}/api/enquiries/files/${imageId}`;
         if (__DEV__) {
           console.log(`ImageWithFallback[${index}] - Generated URL from ID:`, imageUrl);
           console.log(`ImageWithFallback[${index}] - Original ID:`, imageId);

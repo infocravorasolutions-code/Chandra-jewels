@@ -1,9 +1,12 @@
-# Resolve react_native_pods.rb with node to allow for hoisting
-require Pod::Executable.execute_command('node', ['-p',
-  'require.resolve(
-    "react-native/scripts/react_native_pods.rb",
-    {paths: [process.argv[1]]},
-  )', __dir__]).strip
+# React Native 0.82+ Podfile
+# Load React Native pods helper first
+react_native_path = File.expand_path('../node_modules/react-native', __dir__)
+require_relative File.join(react_native_path, 'scripts', 'react_native_pods.rb')
+
+# Define minimum iOS version (React Native 0.82 requires iOS 15.1+)
+def min_ios_version_supported
+  '15.1'
+end
 
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
@@ -15,21 +18,47 @@ if linkage != nil
 end
 
 target 'chandrajewellery' do
-  config = use_native_modules!
-
+  # Use React Native pods
+  # Use relative path from ios directory
   use_react_native!(
-    :path => config[:reactNativePath],
-    # An absolute path to your application root.
-    :app_path => "#{Pod::Config.instance.installation_root}/.."
+    path: '../node_modules/react-native',
+    app_path: '..'
   )
+  
+  config = { reactNativePath: '../node_modules/react-native' }
 
   post_install do |installer|
-    react_native_post_install(
-      installer,
-      config[:reactNativePath],
-      :mac_catalyst_enabled => false,
-      # :ccache_enabled => true
-    )
+    # Only call react_native_post_install if it's defined
+    if defined?(react_native_post_install) && config && config[:reactNativePath]
+      react_native_post_install(
+        installer,
+        config[:reactNativePath],
+        :mac_catalyst_enabled => false,
+      )
+    end
+    
+    # Fix codegen file dependency issues
+    # Disable dependency scanning for targets that use generated files
+    # This prevents Xcode from looking for files before codegen generates them
+    installer.pods_project.targets.each do |target|
+      target_name_lower = target.name.downcase
+      if target_name_lower.include?('rnscreens') || 
+         target_name_lower.include?('rnsvg') || 
+         target_name_lower.include?('rngesturehandler') || 
+         target_name_lower.include?('safeareacontext') ||
+         target_name_lower.include?('react-native-screens') ||
+         target_name_lower.include?('react-native-svg') ||
+         target_name_lower.include?('react-native-gesture-handler') ||
+         target_name_lower.include?('react-native-safe-area-context')
+        target.build_configurations.each do |config|
+          # Disable dependency scanning to prevent "file not found" errors for generated files
+          config.build_settings['CLANG_DEPENDENCY_SCANNING'] = 'NO'
+        end
+      end
+    end
+    
+    # Note: react-native-vector-icons fonts are automatically linked via CocoaPods
+    # Custom fonts (Avenir) need to be manually added in Xcode (see FONT_SETUP_INSTRUCTIONS.md)
     
     # Fix module import issues
     installer.pods_project.targets.each do |target|
@@ -58,24 +87,84 @@ target 'chandrajewellery' do
           config.build_settings['SDKROOT'] = 'iphoneos'
         end
         
-        # Fix react-native-video module map issue
-        if target.name == 'react-native-video'
-          module_map_path = "${PODS_ROOT}/Target Support Files/#{target.name}/#{target.name}.modulemap"
-          # Ensure the module map path is set correctly
-          config.build_settings['MODULEMAP_FILE'] = module_map_path
+        # Fix ReactCodegen target to handle generated files properly
+        if target.name == 'ReactCodegen'
+          # Ensure the generated files directory is properly set
+          generated_path = "#{installer.sandbox.root}/../build/generated/ios"
+          config.build_settings['PODS_TARGET_SRCROOT'] ||= generated_path
           
-          # Ensure the module is defined
-          config.build_settings['DEFINES_MODULE'] = 'YES'
+          # Disable dependency scanner to avoid issues with generated files
+          config.build_settings['CLANG_DEPENDENCY_SCANNING'] = 'NO'
+          
+          # Ensure proper header search paths - CRITICAL for finding ReactCommon and React-Fabric headers
+          header_paths = config.build_settings['HEADER_SEARCH_PATHS'] || []
+          header_paths = header_paths.is_a?(String) ? header_paths.split(' ') : header_paths
+          
+          # Add generated files path
+          unless header_paths.any? { |p| p.to_s.include?('build/generated/ios') }
+            header_paths << "\"#{generated_path}\""
+          end
+          
+          # Add ReactCommon headers path for TurboModule.h (use variable paths for better compatibility)
+          reactcommon_path = "$(PODS_ROOT)/Headers/Public/ReactCommon"
+          unless header_paths.any? { |p| p.to_s.include?('Headers/Public/ReactCommon') }
+            header_paths << reactcommon_path
+          end
+          
+          # Add React-Fabric headers path for react/renderer/core headers
+          reactfabric_path = "$(PODS_ROOT)/Headers/Private/React-Fabric"
+          unless header_paths.any? { |p| p.to_s.include?('Headers/Private/React-Fabric') }
+            header_paths << reactfabric_path
+          end
+          
+          # Add ReactNativeDependencies path (contains react/nativemodule/core)
+          reactnative_deps_path = "$(PODS_ROOT)/ReactNativeDependencies"
+          unless header_paths.any? { |p| p.to_s.include?('ReactNativeDependencies') }
+            header_paths << reactnative_deps_path
+          end
+          
+          # Also add build directory paths for ReactCommon (when using frameworks)
+          reactcommon_build_path = "$(PODS_CONFIGURATION_BUILD_DIR)/ReactCommon"
+          unless header_paths.any? { |p| p.to_s.include?('PODS_CONFIGURATION_BUILD_DIR') && p.to_s.include?('ReactCommon') }
+            header_paths << reactcommon_build_path
+          end
+          
+          # Ensure inherited is first
+          unless header_paths.any? { |p| p.to_s == '$(inherited)' || p.to_s.include?('$(inherited)') }
+            header_paths.unshift('$(inherited)')
+          end
+          
+          config.build_settings['HEADER_SEARCH_PATHS'] = header_paths
+          
         end
         
-        # Fix ReactAppDependencyProvider to include generated headers directory
+        # Fix ReactAppDependencyProvider to include generated headers directory and ReactCodegen
         if target.name == 'ReactAppDependencyProvider'
           config.build_settings['HEADER_SEARCH_PATHS'] ||= []
           generated_header_path = "#{installer.sandbox.root}/../build/generated/ios"
+          react_codegen_path = "#{installer.sandbox.root}/Headers/Public/ReactCodegen"
+          
+          # Convert to array if it's a string
+          header_paths = config.build_settings['HEADER_SEARCH_PATHS']
+          header_paths = header_paths.is_a?(String) ? header_paths.split(' ') : header_paths
+          
           # Add the generated directory if it's not already there
-          unless config.build_settings['HEADER_SEARCH_PATHS'].any? { |p| p.include?('build/generated/ios') }
-            config.build_settings['HEADER_SEARCH_PATHS'] << "\"#{generated_header_path}\""
+          unless header_paths.any? { |p| p.to_s.include?('build/generated/ios') }
+            header_paths << "\"#{generated_header_path}\""
           end
+          
+          # Add ReactCodegen headers path
+          unless header_paths.any? { |p| p.to_s.include?('ReactCodegen') }
+            header_paths << "\"#{react_codegen_path}\""
+          end
+          
+          # Ensure inherited is first
+          unless header_paths.any? { |p| p.to_s == '$(inherited)' || p.to_s.include?('$(inherited)') }
+            header_paths.unshift('$(inherited)')
+          end
+          
+          config.build_settings['HEADER_SEARCH_PATHS'] = header_paths
+          
           # Disable dependency scanner for this target to avoid early scanning issues
           config.build_settings['CLANG_DEPENDENCY_SCANNING'] = 'NO'
         end
@@ -104,6 +193,13 @@ target 'chandrajewellery' do
           unless existing_header_paths.any? { |p| p.to_s.include?('build/generated/ios') }
             existing_header_paths << generated_path
           end
+          
+          # Add ReactCodegen headers path for the main app target
+          react_codegen_path = "$(PODS_ROOT)/Headers/Public/ReactCodegen"
+          unless existing_header_paths.any? { |p| p.to_s.include?('ReactCodegen') }
+            existing_header_paths << react_codegen_path
+          end
+          
           # Ensure inherited paths are preserved
           unless existing_header_paths.any? { |p| p.to_s.include?('$(inherited)') }
             existing_header_paths.unshift('$(inherited)')

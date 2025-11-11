@@ -9,3 +9,4 @@ export { default as CustomTabBar } from './CustomTabBar';
 export { default as ResponsiveImage } from './ResponsiveImage';
 export { AvatarImage, CardImage, BannerImage, EnquiryImage } from './ResponsiveImage';
 export { default as AnimatedLogoLoader } from '../AnimatedLogoLoader';
+export { default as BrandedAlert } from './Alert';

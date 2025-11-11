@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		119F2228A5F139AE2000444E /* libPods-chandrajewellery.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 29CAFE6025B7EE118C68D586 /* libPods-chandrajewellery.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		3ADB4AE2696B7846102036D8 /* libPods-chandrajewellery.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 18F420DADFE26ADA2B52354F /* libPods-chandrajewellery.a */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		F39CC559D9354D77BD1AF205 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
@@ -19,12 +19,12 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = chandrajewellery/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = chandrajewellery/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = chandrajewellery/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		29CAFE6025B7EE118C68D586 /* libPods-chandrajewellery.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-chandrajewellery.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		18F420DADFE26ADA2B52354F /* libPods-chandrajewellery.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-chandrajewellery.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		21AE27A8EC027D6242BE3F2E /* Pods-chandrajewellery.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-chandrajewellery.release.xcconfig"; path = "Target Support Files/Pods-chandrajewellery/Pods-chandrajewellery.release.xcconfig"; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = chandrajewellery/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = chandrajewellery/LaunchScreen.storyboard; sourceTree = "<group>"; };
-		A3D00D9AAAA2A42DBDC3167B /* Pods-chandrajewellery.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-chandrajewellery.debug.xcconfig"; path = "Target Support Files/Pods-chandrajewellery/Pods-chandrajewellery.debug.xcconfig"; sourceTree = "<group>"; };
+		BD11804BA4A3D7DA42B7E06F /* Pods-chandrajewellery.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-chandrajewellery.debug.xcconfig"; path = "Target Support Files/Pods-chandrajewellery/Pods-chandrajewellery.debug.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		F02B59A5BFCFFE7E9B562A1E /* Pods-chandrajewellery.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-chandrajewellery.release.xcconfig"; path = "Target Support Files/Pods-chandrajewellery/Pods-chandrajewellery.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -32,7 +32,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				119F2228A5F139AE2000444E /* libPods-chandrajewellery.a in Frameworks */,
+				3ADB4AE2696B7846102036D8 /* libPods-chandrajewellery.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -55,7 +55,7 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				29CAFE6025B7EE118C68D586 /* libPods-chandrajewellery.a */,
+				18F420DADFE26ADA2B52354F /* libPods-chandrajewellery.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -92,8 +92,8 @@
 		BBD78D7AC51CEA395F1C20DB /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				A3D00D9AAAA2A42DBDC3167B /* Pods-chandrajewellery.debug.xcconfig */,
-				F02B59A5BFCFFE7E9B562A1E /* Pods-chandrajewellery.release.xcconfig */,
+				BD11804BA4A3D7DA42B7E06F /* Pods-chandrajewellery.debug.xcconfig */,
+				21AE27A8EC027D6242BE3F2E /* Pods-chandrajewellery.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -105,13 +105,13 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "chandrajewellery" */;
 			buildPhases = (
-				D05AD8D4F333B530D0B259F6 /* [CP] Check Pods Manifest.lock */,
+				23FAD2BE618C002D575EEE42 /* [CP] Check Pods Manifest.lock */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
-				E729EA3E52784C2B929771A1 /* [CP] Embed Pods Frameworks */,
-				F04DC0DAC09E23762FE29AC6 /* [CP] Copy Pods Resources */,
+				2E0B84537BAB4B7AB195CDDD /* [CP] Embed Pods Frameworks */,
+				6D73E31917BACA7031A8A07E /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -183,7 +183,7 @@
 			shellPath = /bin/sh;
 			shellScript = "set -e\n\nWITH_ENVIRONMENT=\"$REACT_NATIVE_PATH/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"$REACT_NATIVE_PATH/scripts/react-native-xcode.sh\"\n\n/bin/sh -c \"$WITH_ENVIRONMENT $REACT_NATIVE_XCODE\"\n";
 		};
-		D05AD8D4F333B530D0B259F6 /* [CP] Check Pods Manifest.lock */ = {
+		23FAD2BE618C002D575EEE42 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -205,7 +205,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		E729EA3E52784C2B929771A1 /* [CP] Embed Pods Frameworks */ = {
+		2E0B84537BAB4B7AB195CDDD /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -222,7 +222,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-chandrajewellery/Pods-chandrajewellery-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		F04DC0DAC09E23762FE29AC6 /* [CP] Copy Pods Resources */ = {
+		6D73E31917BACA7031A8A07E /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -255,7 +255,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = A3D00D9AAAA2A42DBDC3167B /* Pods-chandrajewellery.debug.xcconfig */;
+			baseConfigurationReference = BD11804BA4A3D7DA42B7E06F /* Pods-chandrajewellery.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_DEPENDENCY_SCANNING = NO;
@@ -299,7 +299,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = F02B59A5BFCFFE7E9B562A1E /* Pods-chandrajewellery.release.xcconfig */;
+			baseConfigurationReference = 21AE27A8EC027D6242BE3F2E /* Pods-chandrajewellery.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_DEPENDENCY_SCANNING = NO;

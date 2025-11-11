@@ -1,6 +1,6 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodeJWT } from '../../utils/helpers';
+import { decodeJWT, mapRoleNumberToString } from '../../utils/helpers';
 
 // Async thunk to check auth state on app start
 export const checkAuthState = createAsyncThunk(
@@ -34,6 +34,17 @@ export const checkAuthState = createAsyncThunk(
         }
         
         const userData = JSON.parse(storedUser);
+        let userDataUpdated = false;
+        
+        // Extract roleId from token if not already in userData (for backward compatibility)
+        if (!userData.roleId && !userData.roleNumber && decodedToken) {
+          const roleNumber = decodedToken.Role || decodedToken.role || decodedToken.RoleNumber || decodedToken.roleNumber;
+          if (roleNumber !== undefined && roleNumber !== null) {
+            userData.roleId = roleNumber;
+            userData.roleNumber = roleNumber; // Alias
+            userDataUpdated = true;
+          }
+        }
         
         // Add name if missing (for backward compatibility)
         if (!userData.name) {
@@ -51,6 +62,11 @@ export const checkAuthState = createAsyncThunk(
             return roleNames[role] || 'User';
           };
           userData.name = getDisplayName(userData.email, userData.role);
+          userDataUpdated = true;
+        }
+        
+        // Save updated userData if any changes were made
+        if (userDataUpdated) {
           await AsyncStorage.setItem('user', JSON.stringify(userData));
         }
         

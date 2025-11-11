@@ -18,6 +18,7 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatCurrency } from '../../utils/helpers';
 import { useGetMetalPricesQuery, useCalculatePricingMutation, useApproveDesignVersionMutation, useRejectDesignVersionMutation } from '../../store/api';
+import { API_BASE_URL } from '../../config/apiConfig';
 
 const PricingScreen = ({ route, navigation }) => {
   const { enquiry, designType } = route.params || {}; // designType: 'coral' or 'cad'
@@ -707,7 +708,7 @@ const PricingScreen = ({ route, navigation }) => {
       return;
     }
     // TODO: Implement Excel download
-    const excelUrl = `https://workflowapi-quhn.onrender.com/api/enquiries/files/${designCode}.xlsx?download=true`;
+    const excelUrl = `${API_BASE_URL}/api/enquiries/files/${designCode}.xlsx?download=true`;
     Alert.alert('Info', 'Download Excel functionality will be implemented');
     if (__DEV__) {
       console.log('Excel URL:', excelUrl);

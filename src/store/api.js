@@ -2,42 +2,11 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decodeJWT, mapRoleNumberToString } from '../utils/helpers';
-
-// API Configuration
-const getBaseUrl = () => {
-  // You can override this with an environment variable or config
-  // For production, uncomment the line below:
-  // return 'https://workflowapi-quhn.onrender.com';
-  
-  // For development:
-  if (__DEV__) {
-    // Android emulator uses 10.0.2.2 to access host machine's localhost
-    if (Platform.OS === 'android') {
-      // If you're using a physical Android device, replace with your computer's IP
-      // Example: return 'http://192.168.1.100:3000';
-      return 'http://10.0.2.2:3000';
-    } else {
-      // iOS simulator or other platforms
-      return 'http://localhost:3000';
-    }
-  }
-  // Production fallback
-  // return 'https://workflowapi-quhn.onrender.com';
-};
-
-const BASE_URL = getBaseUrl();
-
-if (__DEV__) {
-  console.log('========== API CONFIGURATION ==========');
-  console.log(`RTK Query API Base URL: ${BASE_URL}`);
-  console.log(`Platform: ${Platform.OS}`);
-  console.log(`__DEV__: ${__DEV__}`);
-  console.log('========================================');
-}
+import { API_BASE_URL } from '../config/apiConfig';
 
 // Base query with auth token injection
 const baseQuery = fetchBaseQuery({
-  baseUrl: BASE_URL,
+  baseUrl: API_BASE_URL,
   prepareHeaders: async (headers, { getState }) => {
     try {
       const token = await AsyncStorage.getItem('token');
@@ -163,6 +132,8 @@ export const api = createApi({
             user: {
               id: userId,
               role: roleString,
+              roleNumber: roleNumber, // Store role ID for filtering
+              roleId: roleNumber, // Alias for consistency
               iat: decodedToken.iat,
             },
           };
@@ -183,14 +154,14 @@ export const api = createApi({
           console.error('Error data:', response.data);
           console.error('Error:', response.error);
           console.error('Full response:', response);
-          console.error('Base URL used:', BASE_URL);
+          console.error('Base URL used:', API_BASE_URL);
           console.error('===========================================');
         }
         
         // Provide helpful error messages for common network issues
         let errorMessage = 'Login failed';
         if (response.status === 'FETCH_ERROR' || response.error?.includes('Network request failed')) {
-          errorMessage = `Cannot connect to server at ${BASE_URL}. Please check:\n\n1. Backend server is running\n2. Server is on port 3000\n3. For Android emulator, use 10.0.2.2:3000\n4. For physical device, use your computer's IP address`;
+          errorMessage = `Cannot connect to server at ${API_BASE_URL}. Please check:\n\n1. Backend server is running\n2. Server is on port 3000\n3. For Android emulator, use 10.0.2.2:3000\n4. For physical device, use your computer's IP address`;
         } else {
           errorMessage = response.data?.message || response.data?.error || response.error || `Login failed (${response.status || 'Unknown error'})`;
         }
@@ -864,7 +835,7 @@ export const api = createApi({
             console.log(`Excel: ${excel ? 'Yes' : 'No'}`);
           }
 
-          const response = await fetch(`${BASE_URL}${endpoint}`, {
+          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -1063,7 +1034,7 @@ export const api = createApi({
                 headers['Authorization'] = `Bearer ${token}`;
               }
               
-              const response = await fetch(`${BASE_URL}${endpoint}`, {
+              const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 method: 'POST',
                 headers: headers,
                 body: formData,
@@ -1289,17 +1260,49 @@ export const api = createApi({
     }),
 
     // ==================== CHATS ====================
+    // Get chat by enquiry ID with type
+    getChatByEnquiry: builder.query({
+      query: ({ enquiryId, type }) => {
+        if (!enquiryId) {
+          throw new Error('enquiryId is required');
+        }
+        // Determine type based on user role if not provided
+        const chatType = type || 'admin-client';
+        return `/api/chats/enquiry/${enquiryId}?type=${chatType}`;
+      },
+      providesTags: (result, error, { enquiryId }) => [{ type: 'Chat', id: enquiryId }],
+    }),
+
+    // Get all chats (for chat list)
     getChats: builder.query({
-      query: () => '/api/chats',
+      query: ({ page = 1, limit = 10, search = '', type } = {}) => {
+        const params = new URLSearchParams();
+        params.append('page', page.toString());
+        params.append('limit', limit.toString());
+        if (search) {
+          params.append('search', search);
+        }
+        // Add type parameter if provided (admin-client or admin-designer)
+        if (type) {
+          params.append('type', type);
+        }
+        return `/api/chats?${params.toString()}`;
+      },
       providesTags: ['Chat'],
-      transformResponse: (data) => {
+      transformResponse: (data, meta, arg) => {
         if (__DEV__) {
           console.log('getChats API Response (raw):', data);
           console.log('Response type:', typeof data);
           console.log('Is Array?', Array.isArray(data));
+          console.log('Request params:', arg);
+          if (meta?.response) {
+            console.log('Response status:', meta.response.status);
+            console.log('Response URL:', meta.response.url);
+          }
         }
 
         // Handle different response formats
+        // According to the guide, response format is: { Total, page, limit, TotalPages, Data }
         let chatsArray = [];
         if (Array.isArray(data)) {
           // Check if this is an array of messages (need to aggregate) or chats
@@ -1351,12 +1354,25 @@ export const api = createApi({
             // This looks like chats array
             chatsArray = data;
           }
-        } else if (data.chats && Array.isArray(data.chats)) {
-          chatsArray = data.chats;
-        } else if (data.data && Array.isArray(data.data)) {
-          chatsArray = data.data;
+        } else if (data && typeof data === 'object') {
+          // Handle paginated response format from guide: { Total, page, limit, TotalPages, Data }
+          if (data.Data && Array.isArray(data.Data)) {
+            chatsArray = data.Data;
+          } else if (data.chats && Array.isArray(data.chats)) {
+            chatsArray = data.chats;
+          } else if (data.data && Array.isArray(data.data)) {
+            chatsArray = data.data;
+          } else {
+            if (__DEV__) {
+              console.warn('Unexpected response format from /api/chats:', data);
+              console.warn('Expected format: { Total, page, limit, TotalPages, Data } or array');
+            }
+            return [];
+          }
         } else {
-          console.warn('Unexpected response format from /api/chats:', data);
+          if (__DEV__) {
+            console.warn('Unexpected response format from /api/chats:', data);
+          }
           return [];
         }
         
@@ -1392,19 +1408,57 @@ export const api = createApi({
             lastMessageTime = lastMessageTime.Timestamp;
           }
           
+          // Handle LastMessage - it can be an object or a string
+          let lastMessageText = '';
+          const lastMessageObj = chat.LastMessage || chat.lastMessage;
+          if (lastMessageObj) {
+            if (typeof lastMessageObj === 'string') {
+              lastMessageText = lastMessageObj;
+            } else if (typeof lastMessageObj === 'object') {
+              // Extract text from message object
+              lastMessageText = lastMessageObj.Message || 
+                               lastMessageObj.message || 
+                               lastMessageObj.text || 
+                               lastMessageObj.Text || 
+                               '';
+            }
+          } else {
+            lastMessageText = chat.message || '';
+          }
+          
+          // Handle LastSender - it can be an object or a string
+          let lastSenderName = '';
+          const lastSenderObj = chat.LastSender || chat.lastSender;
+          if (lastSenderObj) {
+            if (typeof lastSenderObj === 'string') {
+              lastSenderName = lastSenderObj;
+            } else if (typeof lastSenderObj === 'object') {
+              lastSenderName = lastSenderObj.Name || 
+                              lastSenderObj.name || 
+                              lastSenderObj.SenderName || 
+                              lastSenderObj.senderName || 
+                              '';
+            }
+          } else {
+            lastSenderName = chat.sender || '';
+          }
+          
           return {
             id: chatId,
             enquiryId: enquiryId || chat.Enquiry?.id || chat.enquiry?.id,
             enquiryTitle: chat.EnquiryTitle || chat.enquiryTitle || chat.Enquiry?.Name || chat.Enquiry?.title || 'Untitled Chat',
             clientName: chat.ClientName || chat.clientName || chat.Client?.Name || chat.client?.name || 'Unknown Client',
-            lastMessage: chat.LastMessage || chat.lastMessage || chat.message || '',
+            lastMessage: lastMessageText,
             lastMessageTime: lastMessageTime || new Date().toISOString(),
             unreadCount: chat.UnreadCount || chat.unreadCount || chat.unread || 0,
             isGroup: chat.IsGroup || chat.isGroup || false,
             participants: chat.Participants || chat.participants || [],
-            lastSender: chat.LastSender || chat.lastSender || chat.sender || '',
+            lastSender: lastSenderName,
             status: chat.Status || chat.status || 'active',
             isClient: chat.IsClient || chat.isClient || false,
+            // Preserve chat type for filtering (important for role-based chat visibility)
+            type: chat.Type || chat.type || null,
+            Type: chat.Type || chat.type || null,
             // Preserve original data
             _originalData: chat,
           };
@@ -1420,100 +1474,268 @@ export const api = createApi({
     }),
 
     getChatMessages: builder.query({
-      query: (enquiryId) => {
-        const url = `/api/chats/${enquiryId}`;
-        if (__DEV__) {
-          console.log(`getChatMessages API Request: ${BASE_URL}${url}`);
-          console.log('For enquiryId:', enquiryId);
-        }
-        return url;
-      },
-      providesTags: (result, error, enquiryId) => [{ type: 'Chat', id: enquiryId }],
-      transformResponse: (data, meta, enquiryId) => {
-        if (__DEV__) {
-          console.log('========== getChatMessages API Response ==========');
-          console.log('Full Response:', JSON.stringify(data, null, 2));
-          console.log('Response type:', typeof data);
-          console.log('Is Array?', Array.isArray(data));
-          console.log('Response length:', Array.isArray(data) ? data.length : 'N/A');
-          console.log('EnquiryId requested:', enquiryId);
-          console.log('Response keys:', data && typeof data === 'object' ? Object.keys(data) : 'N/A');
-          console.log('==============================================');
+      queryFn: async ({ chatId, before, limit = 20 } = {}, { getState }, extraOptions, baseQuery) => {
+        if (!chatId) {
+          return { error: { status: 'CUSTOM_ERROR', data: 'chatId is required' } };
         }
 
-        // Handle different response formats
-        let messagesArray = [];
-        if (Array.isArray(data)) {
-          messagesArray = data;
-        } else if (data && data.messages && Array.isArray(data.messages)) {
-          messagesArray = data.messages;
-        } else if (data && data.data && Array.isArray(data.data)) {
-          messagesArray = data.data;
-        } else if (data && typeof data === 'object' && !Array.isArray(data)) {
-          // If it's an object but not an array, check for common message fields
-          console.warn('Response is object but not in expected format:', data);
-          messagesArray = [];
-        } else {
-          console.warn('Unexpected response format from /api/chats/:enquiryId:', data);
-          messagesArray = [];
-        }
-        
-        if (__DEV__) {
-          console.log('Messages Array Length after processing:', messagesArray.length);
-          if (messagesArray.length > 0) {
-            console.log('First message sample:', messagesArray[0]);
+        try {
+          const token = await AsyncStorage.getItem('token');
+          const params = new URLSearchParams();
+          params.append('limit', limit.toString());
+          if (before) {
+            params.append('before', before);
           }
-        }
-        
-        return messagesArray.map((message, index) => {
-          // Handle MongoDB ObjectId format
-          const messageId = message._id?.$oid || message._id || message.id;
-          const senderId = message.senderId?.$oid || message.senderId || message.SenderId;
+
+          const url = `/api/message/${chatId}/messages?${params.toString()}`;
+          if (__DEV__) {
+            console.log(`getChatMessages API Request: ${API_BASE_URL}${url}`);
+            console.log('For chatId:', chatId);
+          }
+
+          const response = await fetch(`${API_BASE_URL}${url}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          // Get response as text first to check if it's HTML
+          const responseText = await response.text();
           
-          // Handle timestamp format (MongoDB $date or ISO string)
-          let timestamp = message.timestamp;
-          if (timestamp?.$date) {
-            timestamp = timestamp.$date;
-          } else if (timestamp?.Timestamp) {
-            timestamp = timestamp.Timestamp;
-          } else if (typeof timestamp === 'string') {
-            timestamp = timestamp;
+          // Check if response is HTML (404 page or error page)
+          if (responseText.includes('<!DOCTYPE') || responseText.includes('<html') || responseText.includes('Cannot GET')) {
+            if (__DEV__) {
+              console.error('❌ Backend returned HTML instead of JSON. This usually means the endpoint does not exist.');
+              console.error('Expected endpoint: /api/message/:chatId/messages');
+              console.error('ChatId:', chatId);
+              console.error('Response preview:', responseText.substring(0, 200));
+            }
+            // Return empty array - messages will be empty but app won't crash
+            return { data: [] };
+          }
+
+          // Try to parse as JSON
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch (parseError) {
+            if (__DEV__) {
+              console.error('❌ Failed to parse response as JSON:', parseError);
+              console.error('Response text:', responseText.substring(0, 500));
+            }
+            // Return empty array if JSON parsing fails
+            return { data: [] };
+          }
+
+          // Handle different response formats
+          let messagesArray = [];
+          let nextCursor = null;
+          
+          if (data && data.Data && Array.isArray(data.Data)) {
+            // New format from guide
+            messagesArray = data.Data;
+            nextCursor = data.NextCursor || null;
+          } else if (Array.isArray(data)) {
+            messagesArray = data;
+          } else if (data && data.messages && Array.isArray(data.messages)) {
+            messagesArray = data.messages;
+          } else if (data && data.data && Array.isArray(data.data)) {
+            messagesArray = data.data;
           } else {
-            timestamp = new Date().toISOString();
+            if (__DEV__) {
+              console.warn('Unexpected response format from /api/message/:chatId/messages:', data);
+            }
+            messagesArray = [];
           }
 
-          // Handle message type and content
-          const messageType = message.messageType || message.MessageType || message.type || 'text';
-          let text = message.message || message.Message || message.text || '';
-          let mediaKey = message.mediaKey || message.mediaUrl || '';
-          let mediaName = message.mediaName || message.filename || '';
+          if (__DEV__) {
+            console.log('Messages Array Length after processing:', messagesArray.length);
+            if (messagesArray.length > 0) {
+              console.log('First message sample:', messagesArray[0]);
+            }
+          }
+
+          // Transform messages to consistent format
+          const transformedMessages = messagesArray.map((message, index) => {
+            // Handle MongoDB ObjectId format
+            const messageId = message._id?.$oid || message._id || message.id;
+            const senderId = message.senderId?.$oid || message.senderId || message.SenderId;
+            
+            // Handle timestamp format (MongoDB $date or ISO string)
+            let timestamp = message.timestamp;
+            if (timestamp?.$date) {
+              timestamp = timestamp.$date;
+            } else if (timestamp?.Timestamp) {
+              timestamp = timestamp.Timestamp;
+            } else if (typeof timestamp === 'string') {
+              timestamp = timestamp;
+            } else {
+              timestamp = new Date().toISOString();
+            }
+
+            // Handle message type and content
+            const messageType = message.messageType || message.MessageType || message.type || 'text';
+            let text = message.message || message.Message || message.text || '';
+            let mediaKey = message.mediaKey || message.mediaUrl || '';
+            let mediaName = message.mediaName || message.filename || '';
+            
+            // For image/file messages, set appropriate text
+            if (messageType === 'image' && !text) {
+              text = '📷 Image';
+            } else if (messageType === 'file' && !text) {
+              text = mediaName || '📎 File';
+            }
+            
+            return {
+              _id: messageId || `msg-${index}`,
+              id: messageId || `msg-${index}`,
+              Message: text,
+              message: text,
+              text: text,
+              SenderId: senderId,
+              senderId: senderId,
+              SenderName: message.senderName || message.SenderName || message.sender?.name || 'Unknown',
+              senderName: message.senderName || message.SenderName || message.sender?.name || 'Unknown',
+              SenderRole: message.senderRole || message.SenderRole || message.sender?.role || 'user',
+              senderRole: message.senderRole || message.SenderRole || message.sender?.role || 'user',
+              Timestamp: timestamp,
+              timestamp: timestamp,
+              MessageType: messageType,
+              messageType: messageType,
+              Media: message.Media || (message.mediaUrl ? { Url: message.mediaUrl, Size: message.mediaSize } : null),
+              media: message.Media || (message.mediaUrl ? { url: message.mediaUrl, size: message.mediaSize } : null),
+              mediaUrl: message.Media?.Url || message.media?.url || message.mediaUrl,
+              mediaSize: message.Media?.Size || message.media?.size || message.mediaSize,
+              IsRead: message.IsRead || message.isRead || false,
+              isRead: message.IsRead || message.isRead || false,
+              ReplyTo: message.ReplyTo || message.replyTo || null,
+              replyTo: message.ReplyTo || message.replyTo || null,
+              ChatId: message.ChatId || message.chatId || chatId,
+              chatId: message.ChatId || message.chatId || chatId,
+              status: message.status || message.Status || 'sent',
+              isGroup: message.isGroup || message.IsGroup || false,
+              // Preserve original data
+              _originalData: message,
+            };
+          }).sort((a, b) => {
+            // Sort by timestamp ascending (oldest first)
+            return new Date(a.Timestamp || a.timestamp || 0) - new Date(b.Timestamp || b.timestamp || 0);
+          });
+
+          // Return messages with pagination info
+          // RTK Query doesn't support returning extra metadata directly,
+          // so we'll attach it to the first message for now
+          // The hook will extract it
+          const result = transformedMessages.length > 0 
+            ? transformedMessages.map((msg, index) => ({
+                ...msg,
+                _nextCursor: index === 0 ? nextCursor : undefined, // Attach to first message
+                _hasMore: nextCursor !== null && nextCursor !== undefined,
+              }))
+            : [];
+
+          return { 
+            data: result,
+            // Also return metadata separately (though RTK Query will ignore this)
+            meta: { nextCursor, hasMore: nextCursor !== null && nextCursor !== undefined }
+          };
+        } catch (error) {
+          // Handle different types of errors
+          const errorMessage = error.message || error.toString();
+          const isNetworkError = 
+            errorMessage.includes('Network request failed') ||
+            errorMessage.includes('Failed to fetch') ||
+            errorMessage.includes('network') ||
+            errorMessage.includes('ECONNREFUSED') ||
+            errorMessage.includes('timeout');
           
-          // For image/file messages, set appropriate text
-          if (messageType === 'image' && !text) {
-            text = '📷 Image';
-          } else if (messageType === 'file' && !text) {
-            text = mediaName || '📎 File';
+          if (__DEV__) {
+            if (isNetworkError) {
+              console.warn('⚠️ Network error fetching messages (server may be unreachable):', errorMessage);
+            } else {
+              console.error('❌ Error in getChatMessages queryFn:', error);
+            }
           }
           
+          // Return empty array on any error - app continues to work
+          // WebSocket messages will still be received if connection is active
+          return { data: [] };
+        }
+      },
+      providesTags: (result, error, args) => {
+        const chatId = args?.chatId || args;
+        return [{ type: 'Chat', id: chatId }];
+      },
+    }),
+
+    // Upload media for chat messages
+    uploadChatMedia: builder.mutation({
+      queryFn: async (file, { dispatch }, extraOptions, baseQuery) => {
+        try {
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            return {
+              error: {
+                status: 'CUSTOM_ERROR',
+                data: 'Authentication token not found',
+              },
+            };
+          }
+
+          // Create FormData
+          const formData = new FormData();
+          formData.append('file', {
+            uri: file.uri,
+            type: file.type || 'image/jpeg',
+            name: file.name || `file_${Date.now()}.jpg`,
+          });
+
+          const endpoint = '/api/message/upload';
+
+          if (__DEV__) {
+            console.log(`Uploading chat media: ${file.name || 'unnamed'}`);
+          }
+
+          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              // Don't set Content-Type - let fetch set it with boundary for FormData
+            },
+            body: formData,
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (__DEV__) {
+              console.log(`Chat media upload successful:`, data);
+            }
+            return { data };
+          } else {
+            const errorText = await response.text().catch(() => '');
+            const errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
+            if (__DEV__) {
+              console.error(`Chat media upload failed: Status ${response.status}`, errorData);
+            }
+            return {
+              error: {
+                status: response.status,
+                data: errorData,
+              },
+            };
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.error('Chat media upload error:', error);
+          }
           return {
-            id: messageId || `msg-${index}`,
-            text: text,
-            senderId: senderId,
-            senderName: message.senderName || message.SenderName || message.sender?.name || 'Unknown',
-            senderRole: message.senderRole || message.SenderRole || message.sender?.role || 'user',
-            timestamp: timestamp,
-            messageType: messageType,
-            mediaKey: mediaKey,
-            mediaName: mediaName,
-            status: message.status || message.Status || 'sent',
-            isGroup: message.isGroup || message.IsGroup || false,
-            // Preserve original data
-            _originalData: message,
+            error: {
+              status: 'CUSTOM_ERROR',
+              data: error.message || 'Failed to upload media',
+            },
           };
-        }).sort((a, b) => {
-          // Sort by timestamp ascending (oldest first)
-          return new Date(a.timestamp) - new Date(b.timestamp);
-        });
+        }
       },
     }),
   }),
@@ -1556,6 +1778,8 @@ export const {
   
   // Chats
   useGetChatsQuery,
+  useGetChatByEnquiryQuery,
   useGetChatMessagesQuery,
+  useUploadChatMediaMutation,
 } = api;
 

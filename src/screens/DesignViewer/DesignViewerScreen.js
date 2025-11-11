@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery } from '../../store/api';
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
+import { API_BASE_URL } from '../../config/apiConfig';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const IMAGE_CONTAINER_HEIGHT = SCREEN_HEIGHT * 0.5;
@@ -392,9 +393,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
     const currentImage = images[currentImageIndex];
     console.log('Current image object:', JSON.stringify(currentImage, null, 2));
     
-    // Using production URL for development
-    const BASE_URL = 'https://workflowapi-quhn.onrender.com';
-    console.log('BASE_URL:', BASE_URL);
+    // Use centralized API base URL
+    console.log('API_BASE_URL:', API_BASE_URL);
 
     if (typeof currentImage === 'object' && currentImage !== null) {
       const imageKey = currentImage.Key || currentImage.key || '';
@@ -420,10 +420,10 @@ const DesignViewerScreen = ({ route, navigation }) => {
         
         // Try multiple endpoint patterns
         const possibleUrls = [
-          `${BASE_URL}/api/enquiries/files/${encodedKey}`,
-          `${BASE_URL}/api/files/${encodedKey}`,
-          `${BASE_URL}/api/images/${encodedKey}`,
-          `${BASE_URL}/api/enquiries/${enquiry?.id || enquiry?._id}/files/${encodedKey}`,
+          `${API_BASE_URL}/api/enquiries/files/${encodedKey}`,
+          `${API_BASE_URL}/api/files/${encodedKey}`,
+          `${API_BASE_URL}/api/images/${encodedKey}`,
+          `${API_BASE_URL}/api/enquiries/${enquiry?.id || enquiry?._id}/files/${encodedKey}`,
         ];
         
         console.log('Possible URLs to try:');
@@ -440,9 +440,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
       // Try ID-based endpoints
       if (imageId) {
         const possibleUrls = [
-          `${BASE_URL}/api/files/${imageId}`,
-          `${BASE_URL}/api/images/${imageId}`,
-          `${BASE_URL}/api/enquiries/files/${imageId}`,
+          `${API_BASE_URL}/api/files/${imageId}`,
+          `${API_BASE_URL}/api/images/${imageId}`,
+          `${API_BASE_URL}/api/enquiries/files/${imageId}`,
         ];
         
         console.log('Possible URLs (using Id):');
@@ -467,7 +467,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
       
       // Try enquiries/files endpoint for string keys
       const encodedKey = encodeURIComponent(currentImage);
-      const url = `${BASE_URL}/api/enquiries/files/${encodedKey}`;
+      const url = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
       console.log('✅ Generated image URL (from string):', url);
       return url;
     }
@@ -482,12 +482,11 @@ const DesignViewerScreen = ({ route, navigation }) => {
   const getExcelDownloadUrl = () => {
     if (!designCode) return null;
     
-    const BASE_URL = 'https://workflowapi-quhn.onrender.com';
     const excelFilename = designCode.includes('.xlsx') 
       ? designCode 
       : `${designCode}.xlsx`;
     
-    return `${BASE_URL}/api/enquiries/files/${excelFilename}?download=true`;
+    return `${API_BASE_URL}/api/enquiries/files/${excelFilename}?download=true`;
   };
 
   const handleDownloadImage = async () => {
@@ -529,14 +528,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
         throw new Error('Authentication token not found');
       }
 
-      // Get base URL (use same logic as getCurrentImageUrl)
-      const BASE_URL = __DEV__ 
-        ? (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000')
-        : 'https://workflowapi-quhn.onrender.com';
-
       // Build download URL with ?download=true parameter
       const encodedKey = encodeURIComponent(imageKey);
-      const downloadUrl = `${BASE_URL}/api/enquiries/files/${encodedKey}?download=true`;
+      const downloadUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}?download=true`;
 
       if (__DEV__) {
         console.log('========== DOWNLOADING IMAGE ==========');

@@ -9,64 +9,97 @@ import {
   Platform,
   Text,
   Dimensions,
-  Alert,
   StatusBar,
   ImageBackground,
   Keyboard,
   Image,
   Linking,
+  Modal,
 } from 'react-native';
+import Video from 'react-native-video';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
-import { useGetChatMessagesQuery, useGetClientsQuery } from '../../store/api';
+import { useGetClientsQuery } from '../../store/api';
+import { useChat } from '../../hooks/useChat';
+import { useAlert } from '../../context/AlertContext';
 import { Card } from '../../components/cards/Cards';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
 import { formatDateTime, spacing, responsivePadding } from '../../utils';
+import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
+import { FILE_BASE_URL } from '../../config/apiConfig';
 
 const { width } = Dimensions.get('window');
 
 const ChatDetailScreen = ({ route, navigation }) => {
   const { user } = useAuth();
-  const { chat, enquiry } = route.params || {};
+  const { chat: routeChat, enquiry } = route.params || {};
+  const alert = useAlert();
+  
+  // Get enquiryId from route params
+  const enquiryId = routeChat?.enquiryId || routeChat?.id || enquiry?.id || enquiry?._id;
+  
+  // Determine chat type based on user role
+  const getChatType = () => {
+    if (!user) return 'admin-client';
+    const role = user.role?.toLowerCase();
+    if (role === 'client') return 'admin-client';
+    if (role === 'coral' || role === 'cad' || role === 'worker' || role === 'designer') return 'admin-designer';
+    // Admin can use either, default to admin-client
+    return 'admin-client';
+  };
+
+  // Use the custom chat hook - this handles everything!
+  const {
+    chat,
+    messages,
+    isLoadingChat,
+    messagesLoading,
+    chatError,
+    isTyping,
+    isUploading,
+    sendMessage: sendChatMessage,
+    sendMedia,
+    sendTyping,
+    refetchMessages,
+    refetchChat,
+  } = useChat(enquiryId, getChatType());
+
+  // Force refetch when screen is focused (user revisits)
+  useFocusEffect(
+    React.useCallback(() => {
+      if (chat?._id && !messagesLoading) {
+        if (__DEV__) {
+          console.log('🔄 Screen focused - refetching messages for chat:', chat._id);
+        }
+        // Small delay to ensure screen is fully mounted
+        const timer = setTimeout(() => {
+          refetchMessages();
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }, [chat?._id, refetchMessages, messagesLoading])
+  );
+
   const [newMessage, setNewMessage] = useState('');
+  const [showMediaModal, setShowMediaModal] = useState(false);
   const scrollViewRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
 
-  // Get enquiryId from either chat or enquiry params
-  const enquiryId = chat?.enquiryId || enquiry?.id || enquiry?._id;
-  
-  // Debug logs
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('========== CHAT DETAIL SCREEN DEBUG ==========');
-      console.log('Chat param:', chat);
-      console.log('Enquiry param:', enquiry);
-      console.log('Extracted enquiryId:', enquiryId);
-      console.log('=============================================');
-    }
-  }, [chat, enquiry, enquiryId]);
-  
-  // Fetch chat messages for this enquiry
-  const { data: rawMessages = [], isLoading: loading, error: messagesError, refetch } = useGetChatMessagesQuery(enquiryId, {
-    skip: !enquiryId,
-    refetchOnFocus: true,
-    pollingInterval: 5000, // Poll every 5 seconds for new messages
-  });
+  const loading = isLoadingChat || messagesLoading;
+  const messagesError = chatError;
 
-  // Debug messages
+  // Scroll to bottom when new messages arrive
   useEffect(() => {
-    if (__DEV__) {
-      console.log('========== MESSAGES DEBUG ==========');
-      console.log('Loading:', loading);
-      console.log('Error:', messagesError);
-      console.log('Raw Messages:', rawMessages);
-      console.log('Raw Messages Count:', rawMessages.length);
-      console.log('First Message:', rawMessages[0]);
-      console.log('====================================');
+    if (messages && messages.length > 0) {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
-  }, [rawMessages, loading, messagesError]);
+  }, [messages]);
 
   // Fetch clients to resolve sender names
   const { data: clients = [] } = useGetClientsQuery(undefined, {
@@ -92,24 +125,41 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }, [clients, user]);
 
   // Enrich messages with sender names from senderMap
-  const messages = useMemo(() => {
-    if (!rawMessages || rawMessages.length === 0) {
+  const enrichedMessages = useMemo(() => {
+    if (!messages || messages.length === 0) {
       return [];
     }
     
-    const enriched = rawMessages.map(msg => {
-      // If senderName is already present, use it
-      if (msg.senderName && msg.senderName !== 'Unknown') {
-        return msg;
+    return messages.map(msg => {
+      // Normalize message format (handle both API and WebSocket formats)
+      const normalizedMsg = {
+        id: msg._id || msg.id,
+        text: msg.Message || msg.message || msg.text || '',
+        senderId: msg.SenderId || msg.senderId,
+        senderName: msg.SenderName || msg.senderName,
+        senderRole: msg.SenderRole || msg.senderRole,
+        timestamp: msg.Timestamp || msg.timestamp,
+        messageType: msg.MessageType || msg.messageType || 'text',
+        mediaKey: msg.Media?.Url || msg.media?.url || msg.mediaKey,
+        mediaName: msg.Media?.Name || msg.media?.name || msg.mediaName,
+        mediaUrl: msg.Media?.Url || msg.media?.url || msg.mediaUrl,
+        isRead: msg.IsRead || msg.isRead || false,
+        replyTo: msg.ReplyTo || msg.replyTo || null,
+        ...msg, // Preserve any other fields
+      };
+
+      // If senderName is already present and not 'Unknown', use it
+      if (normalizedMsg.senderName && normalizedMsg.senderName !== 'Unknown') {
+        return normalizedMsg;
       }
       
       // Otherwise, try to resolve from senderMap
-      const senderIdStr = String(msg.senderId).trim();
+      const senderIdStr = String(normalizedMsg.senderId).trim();
       const senderInfo = senderMap.get(senderIdStr);
       
       if (senderInfo) {
         return {
-          ...msg,
+          ...normalizedMsg,
           senderName: senderInfo.name,
           senderRole: senderInfo.role,
         };
@@ -118,7 +168,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       // Fallback to current user if senderId matches
       if (user && String(user.id).trim() === senderIdStr) {
         return {
-          ...msg,
+          ...normalizedMsg,
           senderName: user.name || user.email || 'You',
           senderRole: user.role || 'user',
         };
@@ -126,25 +176,20 @@ const ChatDetailScreen = ({ route, navigation }) => {
       
       // Default fallback
       return {
-        ...msg,
-        senderName: msg.senderName || 'Unknown',
-        senderRole: msg.senderRole || 'user',
+        ...normalizedMsg,
+        senderName: normalizedMsg.senderName || 'Unknown',
+        senderRole: normalizedMsg.senderRole || 'user',
       };
     });
-    
-    if (__DEV__) {
-      console.log('Enriched Messages:', enriched);
-      console.log('Enriched Messages Count:', enriched.length);
-    }
-    
-    return enriched;
-  }, [rawMessages, senderMap, user]);
+  }, [messages, senderMap, user]);
 
+  // Scroll to bottom when new messages arrive
   useEffect(() => {
-    // Scroll to bottom when new messages arrive
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    if (messages && messages.length > 0) {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -160,25 +205,149 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }, []);
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !enquiryId) return;
+    if (!newMessage.trim() || !chat) return;
 
-    // TODO: Add sendMessage mutation when backend endpoint is ready
-    // For now, just clear the input - messages will appear via polling
-    // const [sendChatMessage] = useSendChatMessageMutation();
-    // await sendChatMessage({ enquiryId, message: newMessage.trim() });
-    
+    const messageText = newMessage.trim();
     setNewMessage('');
+
+    // Send via the hook (now async)
+    const sent = await sendChatMessage(messageText);
     
-    // Refetch messages to show the new one (when backend is ready)
-    // await refetch();
+    if (!sent) {
+      alert.error('Error', 'Failed to send message. Please check your connection and try again.');
+      setNewMessage(messageText); // Restore message on error
+    }
+  };
+
+  const handleTyping = (text) => {
+    setNewMessage(text);
     
-    Alert.alert('Info', 'Send message functionality will be implemented when backend endpoint is ready');
+    // Send typing indicator
+    if (text.trim() && chat) {
+      sendTyping(true);
+      
+      // Clear typing indicator after 2 seconds of no typing
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      typingTimeoutRef.current = setTimeout(() => {
+        sendTyping(false);
+      }, 2000);
+    }
+  };
+
+  const handleAttachFile = () => {
+    setShowMediaModal(true);
+  };
+
+  const handleCloseMediaModal = () => {
+    setShowMediaModal(false);
+  };
+
+  const handleMediaOption = (source, mediaType) => {
+    setShowMediaModal(false);
+    // Small delay to ensure modal closes smoothly
+    setTimeout(() => {
+      handleImagePicker(source, mediaType);
+    }, 300);
+  };
+
+  const handleImagePicker = (source, mediaType = 'photo') => {
+    const options = {
+      mediaType: mediaType === 'video' ? 'video' : 'photo',
+      quality: mediaType === 'video' ? 0.7 : 0.8,
+      includeBase64: false,
+      videoQuality: 'high',
+      durationLimit: 300, // 5 minutes max for videos
+      maxWidth: 1920,
+      maxHeight: 1920,
+      allowsEditing: false,
+    };
+
+    const picker = source === 'camera' ? launchCamera : launchImageLibrary;
+
+    picker(options, async (response) => {
+      if (response.didCancel) {
+        if (__DEV__) {
+          console.log('User cancelled media picker');
+        }
+        return;
+      }
+
+      if (response.errorCode) {
+        console.error('ImagePicker Error:', response.errorMessage);
+        alert.error('Error', response.errorMessage || 'Failed to pick media');
+        return;
+      }
+
+      const asset = response.assets?.[0];
+      if (!asset || !chat) {
+        if (__DEV__) {
+          console.warn('No asset selected or chat not available');
+        }
+        return;
+      }
+
+      // Validate file size (50 MB max)
+      const maxSize = 50 * 1024 * 1024; // 50 MB
+      if (asset.fileSize && asset.fileSize > maxSize) {
+        alert.warning(
+          'File Too Large',
+          'File size exceeds 50 MB limit. Please choose a smaller file.'
+        );
+        return;
+      }
+
+      try {
+        if (__DEV__) {
+          console.log('📤 Sending media:', {
+            uri: asset.uri,
+            type: asset.type,
+            name: asset.fileName,
+            size: asset.fileSize,
+            mediaType: mediaType,
+          });
+        }
+
+        // Determine message type
+        let messageType = 'file';
+        if (asset.type?.startsWith('image/')) {
+          messageType = 'image';
+        } else if (asset.type?.startsWith('video/')) {
+          messageType = 'video';
+        }
+
+        // Send media via the hook
+        const sent = await sendMedia({
+          uri: asset.uri,
+          type: asset.type || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
+          name: asset.fileName || asset.uri.split('/').pop() || `${mediaType}_${Date.now()}.${mediaType === 'video' ? 'mp4' : 'jpg'}`,
+          size: asset.fileSize || 0,
+          messageType: messageType,
+        });
+
+        if (!sent) {
+          alert.error('Error', 'Failed to send media. Please try again.');
+        } else {
+          if (__DEV__) {
+            console.log('✅ Media sent successfully');
+          }
+        }
+      } catch (error) {
+        console.error('Error sending media:', error);
+        alert.error(
+          'Error',
+          error.message || 'Failed to send media. Please try again.'
+        );
+      }
+    });
   };
 
   // Helper functions for message styling
   const isMyMessage = (message) => {
-    if (!user || !message.senderId) return false;
-    return String(message.senderId).trim() === String(user.id).trim();
+    if (!user || !message.SenderId && !message.senderId) return false;
+    const senderId = message.SenderId || message.senderId;
+    return String(senderId).trim() === String(user.id).trim();
   };
   const getMessageStatusIcon = (status) => {
     switch (status) {
@@ -226,14 +395,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   const getMediaUrl = (mediaKey) => {
     if (!mediaKey) return null;
-    // Get base URL from API configuration
-    // Default to common patterns - this will be handled by the backend
-    // Using localhost for development
-    const baseUrl = __DEV__ && Platform.OS === 'android' 
-      ? 'http://10.0.2.2:3000' 
-      : 'http://localhost:3000';
-    // Try common file serving patterns
-    return `${baseUrl}/api/files/${encodeURIComponent(mediaKey)}`;
+    // If mediaKey is already a full URL (from S3), return it directly
+    if (typeof mediaKey === 'string' && (mediaKey.startsWith('http://') || mediaKey.startsWith('https://'))) {
+      return mediaKey;
+    }
+    // Use centralized file base URL
+    return `${FILE_BASE_URL}/api/files/${encodeURIComponent(mediaKey)}`;
   };
 
   const handleFilePress = async (mediaKey, mediaName) => {
@@ -244,10 +411,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
         if (supported) {
           await Linking.openURL(url);
         } else {
-          Alert.alert('Error', 'Cannot open this file');
+          alert.error('Error', 'Cannot open this file');
         }
       } catch (error) {
-        Alert.alert('Error', 'Failed to open file');
+        alert.error('Error', 'Failed to open file');
       }
     }
   };
@@ -259,6 +426,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       (!previousMessage || previousMessage.senderId !== message.senderId);
     
     const isImage = message.messageType === 'image';
+    const isVideo = message.messageType === 'video';
     const isFile = message.messageType === 'file';
     
     return (
@@ -284,6 +452,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
             styles.messageBubble,
             myMessage ? styles.myMessageBubble : styles.otherMessageBubble,
             isImage && styles.imageMessageBubble,
+            isVideo && styles.videoMessageBubble,
             isFile && styles.fileMessageBubble,
           ]}>
             {isImage && message.mediaKey ? (
@@ -291,7 +460,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 onPress={() => handleFilePress(message.mediaKey, message.mediaName)}
                 activeOpacity={0.8}>
                 <Image
-                  source={{ uri: getMediaUrl(message.mediaKey) }}
+                  source={{ uri: message.mediaUrl || getMediaUrl(message.mediaKey) }}
                   style={styles.messageImage}
                   resizeMode="cover"
                 />
@@ -305,6 +474,25 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   </Text>
                 )}
               </TouchableOpacity>
+            ) : isVideo && message.mediaKey ? (
+              <View style={styles.videoContainer}>
+                <Video
+                  source={{ uri: message.mediaUrl || getMediaUrl(message.mediaKey) }}
+                  style={styles.messageVideo}
+                  controls={true}
+                  resizeMode="contain"
+                  paused={false}
+                />
+                {message.text && (
+                  <Text style={[
+                    styles.messageText,
+                    myMessage ? styles.myMessageText : styles.otherMessageText,
+                    styles.videoCaption,
+                  ]}>
+                    {message.text}
+                  </Text>
+                )}
+              </View>
             ) : isFile && message.mediaKey ? (
               <TouchableOpacity 
                 onPress={() => handleFilePress(message.mediaKey, message.mediaName)}
@@ -331,7 +519,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 styles.messageText,
                 myMessage ? styles.myMessageText : styles.otherMessageText,
               ]}>
-                {message.text || message.message}
+                {message.text || message.Message || message.message || ''}
               </Text>
             )}
             
@@ -340,7 +528,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 styles.messageTime,
                 myMessage ? styles.myMessageTime : styles.otherMessageTime,
               ]}>
-                {formatMessageTime(message.timestamp)}
+                {formatMessageTime(message.timestamp || message.Timestamp)}
               </Text>
               
               {myMessage && (
@@ -359,33 +547,88 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   const renderChatHeader = () => {
-    const title = chat?.enquiryTitle || enquiry?.title || 'Chat';
-    const clientName = chat?.clientName || enquiry?.client || 'Client';
+    // Get chat/enquiry title - prioritize actual enquiry name
+    const enquiryTitle = enquiry?.title || enquiry?.Name || enquiry?.name;
+    const chatTitle = chat?.EnquiryName || chat?.enquiryTitle || chat?.enquiryName;
+    const title = enquiryTitle || chatTitle || 'New Chat';
+    
+    // Get client name - try multiple sources
+    const clientName = 
+      chat?.ClientName || 
+      chat?.clientName || 
+      enquiry?.clientName || 
+      enquiry?.client?.name || 
+      enquiry?.Client?.Name ||
+      enquiry?.Client?.name ||
+      'Client';
+
+    // Get client initial for avatar
+    const clientInitial = clientName?.charAt(0)?.toUpperCase() || 'C';
 
     return (
       <View style={styles.headerContainer}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity 
+          style={styles.backButton} 
+          onPress={() => navigation.goBack()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <Icon name="arrow-left" size={24} color={colors.textWhite} />
         </TouchableOpacity>
         
-        <View style={styles.headerAvatar}>
-          <Text style={styles.headerAvatarText}>
-            {clientName?.charAt(0)?.toUpperCase() || 'C'}
-          </Text>
-        </View>
+        <TouchableOpacity 
+          style={styles.headerAvatarContainer}
+          activeOpacity={0.7}
+        >
+          <View style={styles.headerAvatar}>
+            <Text style={styles.headerAvatarText}>
+              {clientInitial}
+            </Text>
+          </View>
+        </TouchableOpacity>
         
         <View style={styles.headerText}>
-          <Text style={styles.chatTitle}>
+          <Text style={styles.chatTitle} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={styles.clientName}>
+          <Text style={styles.clientName} numberOfLines={1}>
             {clientName}
           </Text>
         </View>
         
-        <TouchableOpacity style={styles.headerMenuButton}>
-          <Icon name="dots-vertical" size={20} color={colors.textWhite} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.headerIconButton}
+            onPress={() => {
+              // TODO: Add call functionality
+              alert.info('Info', 'Call functionality coming soon');
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Icon name="phone" size={20} color={colors.textWhite} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.headerIconButton}
+            onPress={() => {
+              // TODO: Add video call functionality
+              alert.info('Info', 'Video call functionality coming soon');
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Icon name="videocam" size={20} color={colors.textWhite} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.headerIconButton}
+            onPress={() => {
+              // TODO: Add chat info/options
+              alert.info('Chat Info', `Chat: ${title}\nClient: ${clientName}`);
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Icon name="info" size={20} color={colors.textWhite} />
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -449,12 +692,19 @@ const ChatDetailScreen = ({ route, navigation }) => {
             style={styles.messagesContainer}
             contentContainerStyle={styles.messagesContent}>
             
-            {loading && messages.length === 0 ? (
+            {loading && enrichedMessages.length === 0 ? (
               renderEmptyState()
-            ) : !loading && messages.length === 0 && !messagesError ? (
+            ) : !loading && enrichedMessages.length === 0 && !messagesError ? (
               renderEmptyState()
-            ) : messages.length > 0 ? (
-              messages.map((message, index) => renderMessage(message, index))
+            ) : enrichedMessages.length > 0 ? (
+              <>
+                {enrichedMessages.map((message, index) => renderMessage(message, index))}
+                {isTyping && (
+                  <View style={styles.typingIndicator}>
+                    <Text style={styles.typingText}>Someone is typing...</Text>
+                  </View>
+                )}
+              </>
             ) : (
               renderEmptyState()
             )}
@@ -462,8 +712,15 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
           <View style={styles.inputContainer}>
             <View style={styles.inputWrapper}>
-              <TouchableOpacity style={styles.attachButton}>
-                <Icon name="attach-file" size={20} color={colors.textSecondary} />
+              <TouchableOpacity 
+                style={styles.attachButton}
+                onPress={handleAttachFile}
+                disabled={isUploading}>
+                <Icon 
+                  name={isUploading ? "hourglass-empty" : "attach-file"} 
+                  size={20} 
+                  color={isUploading ? colors.textLight : colors.textSecondary} 
+                />
               </TouchableOpacity>
               
               <View style={styles.textInputContainer}>
@@ -472,7 +729,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   placeholder="Type a message..."
                   placeholderTextColor={colors.textLight}
                   value={newMessage}
-                  onChangeText={setNewMessage}
+                  onChangeText={handleTyping}
                   multiline
                   maxLength={500}
                 />
@@ -491,6 +748,88 @@ const ChatDetailScreen = ({ route, navigation }) => {
           </View>
         </KeyboardAvoidingView>
       </View>
+
+      {/* Custom Media Selection Modal */}
+      <Modal
+        visible={showMediaModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseMediaModal}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={handleCloseMediaModal}
+        >
+          <View style={styles.modalContainer}>
+            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+              <View style={styles.modalContent}>
+                {/* Modal Header */}
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Attach Media</Text>
+                  <TouchableOpacity
+                    onPress={handleCloseMediaModal}
+                    style={styles.modalCloseButton}
+                  >
+                    <Icon name="close" size={24} color={colors.textPrimary} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Modal Options */}
+                <View style={styles.modalOptions}>
+                  {/* Camera Option */}
+                  <TouchableOpacity
+                    style={styles.modalOption}
+                    onPress={() => handleMediaOption('camera', 'photo')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.modalOptionIcon, { backgroundColor: colors.primary + '15' }]}>
+                      <Icon name="camera" size={32} color={colors.primary} />
+                    </View>
+                    <Text style={styles.modalOptionText}>Camera</Text>
+                    <Text style={styles.modalOptionSubtext}>Take a photo</Text>
+                  </TouchableOpacity>
+
+                  {/* Photo from Gallery */}
+                  <TouchableOpacity
+                    style={styles.modalOption}
+                    onPress={() => handleMediaOption('gallery', 'photo')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.modalOptionIcon, { backgroundColor: colors.accent + '15' }]}>
+                      <Icon name="image" size={32} color={colors.accent} />
+                    </View>
+                    <Text style={styles.modalOptionText}>Photo</Text>
+                    <Text style={styles.modalOptionSubtext}>Choose from gallery</Text>
+                  </TouchableOpacity>
+
+                  {/* Video from Gallery */}
+                  <TouchableOpacity
+                    style={styles.modalOption}
+                    onPress={() => handleMediaOption('gallery', 'video')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.modalOptionIcon, { backgroundColor: colors.primaryLight + '15' }]}>
+                      <Icon name="video-library" size={32} color={colors.primaryLight} />
+                    </View>
+                    <Text style={styles.modalOptionText}>Video</Text>
+                    <Text style={styles.modalOptionSubtext}>Choose from gallery</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Cancel Button */}
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={handleCloseMediaModal}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ImageBackground>
   );
 };
@@ -523,38 +862,53 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 8,
     marginRight: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerAvatarContainer: {
+    marginRight: 12,
   },
   headerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    borderWidth: 2,
+    borderColor: colors.textWhite + '30',
   },
   headerAvatarText: {
-    fontSize: 13,
+    fontSize: 16,
     fontFamily: fonts.bold,
     color: colors.primary,
   },
   headerText: {
     flex: 1,
+    justifyContent: 'center',
   },
   chatTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontFamily: fonts.bold,
     color: colors.textWhite,
     marginBottom: 2,
   },
   clientName: {
     fontSize: 13,
+    fontFamily: fonts.regular,
     color: colors.textWhite,
-    opacity: 0.8,
+    opacity: 0.85,
   },
-  headerMenuButton: {
-    padding: 8,
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginLeft: 8,
+  },
+  headerIconButton: {
+    padding: 8,
+    marginLeft: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   messagesContainer: {
     flex: 1,
@@ -733,6 +1087,27 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: colors.backgroundSecondary,
   },
+  videoMessageBubble: {
+    padding: 0,
+    overflow: 'hidden',
+  },
+  videoContainer: {
+    width: width * 0.65,
+    maxHeight: width * 0.8,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundSecondary,
+    overflow: 'hidden',
+  },
+  messageVideo: {
+    width: '100%',
+    height: width * 0.65,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  videoCaption: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
   imageCaption: {
     padding: 8,
     marginTop: 4,
@@ -758,6 +1133,113 @@ const styles = StyleSheet.create({
   fileMessageSize: {
     fontSize: fonts.sm,
     opacity: 0.7,
+  },
+  loadMoreButton: {
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  loadMoreText: {
+    color: colors.primary,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+  },
+  typingIndicator: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  typingText: {
+    color: colors.textLight,
+    fontSize: fonts.sm,
+    fontStyle: 'italic',
+  },
+  // Media Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    paddingTop: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modalTitle: {
+    fontSize: fonts.xl,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+  },
+  modalOption: {
+    alignItems: 'center',
+    flex: 1,
+    paddingHorizontal: 8,
+  },
+  modalOptionIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalOptionText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  modalOptionSubtext: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  modalCancelButton: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    paddingVertical: 16,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
   },
 });
 
