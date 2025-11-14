@@ -75,7 +75,7 @@ const ChatsScreen = ({ navigation }) => {
     { page: 1, limit: 50, search: searchQuery, type: chatType1 },
     {
       skip: !user,
-      refetchOnFocus: true,
+      refetchOnFocus: false, // Disabled to prevent excessive refetching - WebSocket handles updates
     }
   );
 
@@ -89,7 +89,7 @@ const ChatsScreen = ({ navigation }) => {
     { page: 1, limit: 50, search: searchQuery, type: chatType2 },
     {
       skip: !user || !isAdmin || !chatType2,
-      refetchOnFocus: true,
+      refetchOnFocus: false, // Disabled to prevent excessive refetching - WebSocket handles updates
     }
   );
 
@@ -177,9 +177,12 @@ const ChatsScreen = ({ navigation }) => {
   }, [refetchChats1, refetchChats2, isAdmin, chatType2]);
 
   // Fetch enquiries to create chats from them if chats API doesn't exist
-  const { data: enquiries = [], isLoading: enquiriesLoading } = useGetEnquiriesQuery(user?.role, {
+  const { data: enquiriesResponse, isLoading: enquiriesLoading } = useGetEnquiriesQuery(user?.role, {
     skip: !user,
   });
+  
+  // Extract enquiries array from response (new API returns { data, pagination })
+  const enquiries = enquiriesResponse?.data || [];
 
   // Check if chats API works, otherwise create chats from enquiries
   const chats = useMemo(() => {
@@ -469,6 +472,12 @@ const ChatsScreen = ({ navigation }) => {
   }, [chats, searchQuery]);
 
   // WebSocket listener for new messages (to refresh chat list)
+  // Use ref to store latest refetch function to avoid recreating listener
+  const refetchChatsRef = React.useRef(refetchChats);
+  React.useEffect(() => {
+    refetchChatsRef.current = refetchChats;
+  }, [refetchChats]);
+
   useEffect(() => {
     if (!user) return;
 
@@ -477,23 +486,31 @@ const ChatsScreen = ({ navigation }) => {
       socketService.connect(user.id);
     }
 
-    // Listen for new messages to refresh chat list
+    // Debounce refetch to prevent excessive API calls
+    let refetchTimeout = null;
     const handleNewMessage = (message) => {
       if (__DEV__) {
         console.log('New message received, refreshing chat list...');
       }
-      // Refresh chat list when new message arrives (with a small delay to avoid too many requests)
-      setTimeout(() => {
-        refetchChats();
-      }, 500);
+      // Clear existing timeout to debounce multiple rapid messages
+      if (refetchTimeout) {
+        clearTimeout(refetchTimeout);
+      }
+      // Refresh chat list when new message arrives (with debounce to avoid too many requests)
+      refetchTimeout = setTimeout(() => {
+        refetchChatsRef.current();
+      }, 1000); // Increased delay to 1 second for better debouncing
     };
 
     socketService.on('newMessage', handleNewMessage);
 
     return () => {
+      if (refetchTimeout) {
+        clearTimeout(refetchTimeout);
+      }
       socketService.off('newMessage', handleNewMessage);
     };
-  }, [user, refetchChats]);
+  }, [user?.id]); // Only depend on user.id, not the entire user object or refetchChats
 
   const onRefresh = async () => {
     setRefreshing(true);

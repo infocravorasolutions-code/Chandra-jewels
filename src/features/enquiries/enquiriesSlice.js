@@ -12,6 +12,12 @@ const initialState = {
   selectedEnquiryId: null,
   selectedStatus: 'All',
   selectedClient: 'All',
+  pagination: {
+    currentPage: 1,
+    totalPages: 1,
+    total: 0,
+    limit: 25,
+  },
 };
 
 const enquiriesSlice = createSlice({
@@ -52,6 +58,13 @@ const enquiriesSlice = createSlice({
       state.searchQuery = '';
       state.selectedStatus = 'All';
       state.selectedClient = 'All';
+      state.pagination.currentPage = 1;
+    },
+    setPage: (state, action) => {
+      state.pagination.currentPage = action.payload;
+    },
+    setPagination: (state, action) => {
+      state.pagination = { ...state.pagination, ...action.payload };
     },
   },
 });
@@ -64,6 +77,8 @@ export const {
   setSelectedStatus,
   setSelectedClient,
   clearFilters,
+  setPage,
+  setPagination,
 } = enquiriesSlice.actions;
 
 export default enquiriesSlice.reducer;

@@ -184,3 +184,212 @@ export const mapRoleNumberToString = (roleNumber) => {
   };
   return roleMap[roleNumber] || null;
 };
+
+/**
+ * Format enquiry history details for display
+ * Parses "from X to Y" patterns and formats JSON objects
+ * @param {string} details - Raw details string from history
+ * @returns {string} Formatted, user-friendly details
+ */
+export const formatHistoryDetails = (details) => {
+  if (!details || details === '-') return '-';
+  
+  // Handle simple messages (no "from/to" pattern)
+  if (!details.includes('from') && !details.includes('to')) {
+    return details;
+  }
+  
+  try {
+    // Extract quoted values that may contain JSON
+    const extractQuotedString = (str, startIndex) => {
+      if (str[startIndex] !== '"') return null;
+      
+      let i = startIndex + 1;
+      let braceCount = 0;
+      
+      while (i < str.length) {
+        const char = str[i];
+        const prevChar = i > 0 ? str[i - 1] : '';
+        
+        if (char === '{') braceCount++;
+        if (char === '}') braceCount--;
+        
+        // Found closing quote - but only if we're not inside JSON braces
+        // or if the JSON is complete (braceCount === 0)
+        if (char === '"' && prevChar !== '\\') {
+          // Check if this is the closing quote for the entire value
+          // Look ahead to see if there's a "to" keyword
+          const remaining = str.substring(i + 1).trim();
+          if (braceCount === 0 || remaining.startsWith('to') || remaining.startsWith(',') || remaining === '') {
+            return {
+              value: str.substring(startIndex + 1, i),
+              endIndex: i + 1
+            };
+          }
+        }
+        
+        i++;
+      }
+      
+      return null;
+    };
+    
+    // Parse a single change: "FieldName: from "value" to "value""
+    const parseChange = (text, startPos = 0) => {
+      const fromIndex = text.indexOf('from', startPos);
+      if (fromIndex === -1) return null;
+      
+      // Get field name (everything before "from" up to the last colon)
+      const beforeFrom = text.substring(0, fromIndex);
+      const colonIndex = beforeFrom.lastIndexOf(':');
+      if (colonIndex === -1) return null;
+      
+      // Get field name - handle comma-separated fields
+      const commaIndex = beforeFrom.lastIndexOf(',', colonIndex);
+      const fieldNameStart = commaIndex >= 0 ? commaIndex + 1 : 0;
+      const fieldName = text.substring(fieldNameStart, colonIndex).trim();
+      
+      // Extract "from" value
+      const fromQuoteIndex = text.indexOf('"', fromIndex);
+      if (fromQuoteIndex === -1) return null;
+      
+      const fromResult = extractQuotedString(text, fromQuoteIndex);
+      if (!fromResult) return null;
+      
+      // Find "to"
+      const toIndex = text.indexOf('to', fromResult.endIndex);
+      if (toIndex === -1) return null;
+      
+      // Extract "to" value
+      const toQuoteIndex = text.indexOf('"', toIndex);
+      if (toQuoteIndex === -1) return null;
+      
+      const toResult = extractQuotedString(text, toQuoteIndex);
+      if (!toResult) return null;
+      
+      return {
+        fieldName,
+        fromValue: fromResult.value,
+        toValue: toResult.value,
+        endIndex: toResult.endIndex
+      };
+    };
+    
+    // Parse all changes in the string
+    const changes = [];
+    let pos = 0;
+    
+    while (pos < details.length) {
+      const change = parseChange(details, pos);
+      if (!change) break;
+      
+      changes.push(change);
+      pos = change.endIndex;
+      
+      // Skip to next potential change (after comma if present)
+      const nextComma = details.indexOf(',', pos);
+      if (nextComma !== -1) {
+        pos = nextComma + 1;
+      } else {
+        break;
+      }
+    }
+    
+    if (changes.length > 0) {
+      return changes.map(({ fieldName, fromValue, toValue }) => 
+        formatFieldChange(fieldName, fromValue, toValue)
+      ).join('\n');
+    }
+    
+    return details;
+  } catch (error) {
+    return details;
+  }
+};
+
+/**
+ * Format a single field change
+ * @param {string} fieldName - Name of the field
+ * @param {string} fromValue - Old value
+ * @param {string} toValue - New value
+ * @returns {string} Formatted change description
+ */
+const formatFieldChange = (fieldName, fromValue, toValue) => {
+  // Try to parse JSON values
+  let formattedFrom = fromValue;
+  let formattedTo = toValue;
+  
+  // Check if values are JSON objects
+  try {
+    if (fromValue.startsWith('{') && fromValue.endsWith('}')) {
+      const parsed = JSON.parse(fromValue);
+      formattedFrom = formatJsonValue(parsed);
+    }
+  } catch (e) {
+    // Not valid JSON, use as-is
+  }
+  
+  try {
+    if (toValue.startsWith('{') && toValue.endsWith('}')) {
+      const parsed = JSON.parse(toValue);
+      formattedTo = formatJsonValue(parsed);
+    }
+  } catch (e) {
+    // Not valid JSON, use as-is
+  }
+  
+  // Handle empty/null values
+  if (!formattedFrom || formattedFrom === 'null' || formattedFrom === '""') {
+    formattedFrom = '(empty)';
+  }
+  if (!formattedTo || formattedTo === 'null' || formattedTo === '""') {
+    formattedTo = '(empty)';
+  }
+  
+  return `${fieldName}: ${formattedFrom} → ${formattedTo}`;
+};
+
+/**
+ * Format JSON object to readable string
+ * @param {object} obj - JSON object
+ * @returns {string} Formatted string
+ */
+const formatJsonValue = (obj) => {
+  if (typeof obj !== 'object' || obj === null) {
+    return String(obj || '(empty)');
+  }
+  
+  // Handle common object structures
+  if (obj.Color && obj.Quality) {
+    // Metal object
+    const color = obj.Color || '';
+    const quality = obj.Quality || '';
+    if (color && quality) {
+      return `${color} ${quality}`;
+    } else if (color) {
+      return color;
+    } else if (quality) {
+      return quality;
+    }
+    return '(empty)';
+  }
+  
+  if (obj.From !== undefined || obj.To !== undefined || obj.Exact !== undefined) {
+    // Weight object
+    const parts = [];
+    if (obj.Exact) {
+      parts.push(`Exact: ${obj.Exact}`);
+    } else {
+      if (obj.From) parts.push(`From: ${obj.From}`);
+      if (obj.To) parts.push(`To: ${obj.To}`);
+    }
+    return parts.length > 0 ? parts.join(', ') : '(empty)';
+  }
+  
+  // Generic object - format key-value pairs
+  const pairs = Object.entries(obj)
+    .filter(([_, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${key}: ${value}`);
+  
+  return pairs.length > 0 ? pairs.join(', ') : '(empty)';
+};

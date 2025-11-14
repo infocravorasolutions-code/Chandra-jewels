@@ -32,6 +32,8 @@ export const api = createApi({
   reducerPath: 'api',
   baseQuery,
   tagTypes: ['Enquiry', 'Client', 'MetalPrice', 'Dashboard', 'Chat'],
+  // Prevent memory buildup by removing unused data after 60 seconds
+  keepUnusedDataFor: 60,
   endpoints: (builder) => ({
     // ==================== AUTH ====================
     login: builder.mutation({
@@ -120,9 +122,15 @@ export const api = createApi({
           // Try different case variations for ID
           const userId = decodedToken.Id || decodedToken.id || decodedToken.userId || decodedToken.UserId;
           
+          // Try different case variations for name
+          const userName = decodedToken.Name || decodedToken.name || decodedToken.username || decodedToken.Username || 
+                          decodedToken.fullName || decodedToken.FullName || decodedToken.firstName || decodedToken.FirstName;
+          
           if (__DEV__) {
             console.log('Mapped role:', roleString);
             console.log('User ID:', userId);
+            console.log('User Name:', userName);
+            console.log('All token fields:', Object.keys(decodedToken));
             console.log('==========================================');
           }
           
@@ -134,6 +142,7 @@ export const api = createApi({
               role: roleString,
               roleNumber: roleNumber, // Store role ID for filtering
               roleId: roleNumber, // Alias for consistency
+              name: userName, // Extract name from token
               iat: decodedToken.iat,
             },
           };
@@ -195,47 +204,110 @@ export const api = createApi({
       },
     }),
 
-    // ==================== ENQUIRIES ====================
-    getEnquiries: builder.query({
-      query: (role) => '/api/enquiries',
-      providesTags: ['Enquiry'],
-      transformResponse: (data) => {
+    // Get user by ID endpoint
+    getUserById: builder.query({
+      query: (userId) => `/api/users/${userId}`,
+      transformResponse: (response) => {
         // Handle different response formats
-        let enquiriesArray = [];
+        const user = response.user || response;
+        return {
+          id: user._id || user.id,
+          name: user.name || user.Name,
+          email: user.email || user.Email,
+          phone: user.phone || user.Phone,
+          role: user.role || user.Role,
+          ...user,
+        };
+      },
+      transformErrorResponse: (response) => {
+        return {
+          error: response.data?.message || response.data?.error || 'Failed to fetch user',
+        };
+      },
+    }),
+
+    // Get users list endpoint
+    getUsers: builder.query({
+      query: () => '/api/users',
+      transformResponse: (data) => {
+        let usersArray = [];
         if (Array.isArray(data)) {
-          enquiriesArray = data;
-        } else if (data.enquiries && Array.isArray(data.enquiries)) {
-          enquiriesArray = data.enquiries;
+          usersArray = data;
+        } else if (data.users && Array.isArray(data.users)) {
+          usersArray = data.users;
         } else if (data.data && Array.isArray(data.data)) {
-          enquiriesArray = data.data;
+          usersArray = data.data;
         } else {
-          console.warn('Unexpected response format from /api/enquiries:', data);
+          console.warn('Unexpected response format from /api/users:', data);
           return [];
         }
+
+        return usersArray.map(user => ({
+          id: user._id || user.id || user.Id,
+          name: user.name || user.Name || 'Unnamed User',
+          email: user.email || user.Email || 'N/A',
+          phone: user.phone || user.Phone || 'N/A',
+          role: user.role || user.Role || 'user',
+          ...user,
+        }));
+      },
+    }),
+
+    // ==================== ENQUIRIES ====================
+    getEnquiries: builder.query({
+      query: (arg) => {
+        // Support both object format { role, page } and simple role string
+        const role = typeof arg === 'object' ? arg?.role : arg;
+        const page = typeof arg === 'object' ? (arg?.page || 1) : 1;
+        return `/api/enquiries/search?page=${page}`;
+      },
+      providesTags: ['Enquiry'],
+      transformResponse: (data, meta, arg) => {
+        // Handle paginated response format from new aggregated endpoint
+        // Response structure: { data: [...], total: number, page: number, limit: number }
+        let enquiriesArray = [];
+        let pagination = {
+          total: 0,
+          page: 1,
+          limit: 25,
+          totalPages: 1,
+        };
         
-        // Normalize enquiry data (exact logic from current api.js)
-        return enquiriesArray.map(enquiry => {
-          // Extract current status from StatusHistory
-          let currentStatus = 'pending';
-          let createdAt = new Date().toISOString();
-          let updatedAt = new Date().toISOString();
-          
-          if (enquiry.StatusHistory && Array.isArray(enquiry.StatusHistory) && enquiry.StatusHistory.length > 0) {
-            const sortedHistory = [...enquiry.StatusHistory].sort((a, b) => 
-              new Date(b.Timestamp || b.timestamp || 0) - new Date(a.Timestamp || a.timestamp || 0)
-            );
-            const latestStatus = sortedHistory[0];
-            currentStatus = latestStatus.Status || latestStatus.status || 'pending';
-            updatedAt = latestStatus.Timestamp || latestStatus.timestamp || updatedAt;
-            
-            const firstStatus = sortedHistory[sortedHistory.length - 1];
-            createdAt = firstStatus.Timestamp || firstStatus.timestamp || createdAt;
+        if (data && typeof data === 'object') {
+          if (data.data && Array.isArray(data.data)) {
+            enquiriesArray = data.data;
+            pagination = {
+              total: data.total || data.Total || 0,
+              page: data.page || data.Page || 1,
+              limit: data.limit || data.Limit || 25,
+              totalPages: Math.ceil((data.total || data.Total || 0) / (data.limit || data.Limit || 25)),
+            };
+          } else if (Array.isArray(data)) {
+            enquiriesArray = data;
+          } else if (data.enquiries && Array.isArray(data.enquiries)) {
+            enquiriesArray = data.enquiries;
+          } else {
+            console.warn('Unexpected response format from /api/enquiries/search:', data);
+            return { data: [], pagination };
           }
+        } else if (Array.isArray(data)) {
+          enquiriesArray = data;
+        } else {
+          console.warn('Unexpected response format from /api/enquiries/search:', data);
+          return { data: [], pagination };
+        }
+        
+        // Normalize enquiry data from aggregated endpoint
+        const normalizedEnquiries = enquiriesArray.map(enquiry => {
+          // Use CurrentStatus directly from aggregated response
+          const currentStatus = enquiry.CurrentStatus || enquiry.Status || 'pending';
+          const createdAt = enquiry.CreatedDate || enquiry.CreatedAt || new Date().toISOString();
+          const updatedAt = enquiry.AssignedDate || enquiry.UpdatedAt || createdAt;
           
           // Normalize priority
           let normalizedPriority = 'medium';
           const priority = (enquiry.Priority || enquiry.priority || '').toLowerCase();
-          if (priority.includes('urgent') || priority === 'high') {
+          if (priority.includes('urgent') || priority === 'high' || priority === 'super high') {
             normalizedPriority = 'high';
           } else if (priority === 'low') {
             normalizedPriority = 'low';
@@ -243,12 +315,12 @@ export const api = createApi({
             normalizedPriority = 'medium';
           }
           
-          // Normalize status
+          // Normalize status from CurrentStatus field
           let normalizedStatus = 'pending';
           const status = currentStatus.toLowerCase();
-          if (status === 'enquiry created' || status === 'pending') {
+          if (status === 'enquiry created' || status === 'pending' || status.includes('pending')) {
             normalizedStatus = 'pending';
-          } else if (status.includes('progress') || status === 'coral' || status === 'cad') {
+          } else if (status.includes('progress') || status === 'coral' || status === 'cad' || status === 'design approval pending') {
             normalizedStatus = 'in_progress';
           } else if (status.includes('completed') || status.includes('approved')) {
             normalizedStatus = 'completed';
@@ -261,7 +333,7 @@ export const api = createApi({
           const metalQuality = enquiry.Metal?.Quality || enquiry.metal?.quality || '';
           const metalType = metalColor ? `${metalColor}${metalQuality ? ` (${metalQuality})` : ''}` : 'N/A';
           
-          // Get budget from Coral pricing
+          // Get budget from Coral pricing (if available in aggregated response)
           let budget = 0;
           if (enquiry.Coral && Array.isArray(enquiry.Coral) && enquiry.Coral.length > 0) {
             const latestCoral = enquiry.Coral[enquiry.Coral.length - 1];
@@ -270,11 +342,14 @@ export const api = createApi({
             }
           }
           
+          // Extract client name if available (may need to be enriched from clients API)
+          const clientName = enquiry.ClientName || enquiry.clientName || 'Unknown Client';
+          
           return {
             id: enquiry._id || enquiry.id,
             title: enquiry.Name || enquiry.name || enquiry.title || 'Untitled Enquiry',
             clientId: enquiry.ClientId || enquiry.clientId || '',
-            clientName: enquiry.ClientName || enquiry.clientName || 'Unknown Client',
+            clientName: clientName,
             status: normalizedStatus,
             priority: normalizedPriority,
             description: enquiry.Remarks || enquiry.remarks || enquiry.description || '',
@@ -301,11 +376,21 @@ export const api = createApi({
             ShippingDate: enquiry.ShippingDate,
             ClientId: enquiry.ClientId,
             AssignedTo: enquiry.AssignedTo,
+            AssignedDate: enquiry.AssignedDate,
+            CurrentStatus: enquiry.CurrentStatus,
+            CreatedDate: enquiry.CreatedDate,
+            ReferenceImages: enquiry.ReferenceImages || [],
             CoralCode: enquiry.CoralCode,
             CadCode: enquiry.CadCode,
             _originalData: enquiry,
           };
         });
+        
+        // Return both data and pagination metadata
+        return {
+          data: normalizedEnquiries,
+          pagination,
+        };
       },
     }),
 
@@ -616,6 +701,7 @@ export const api = createApi({
           totalOrders: client.TotalOrders || client.totalOrders || 0,
           totalSpent: client.TotalSpent || client.totalSpent || 0,
           lastOrder: client.LastOrder || client.lastOrder || null,
+          imageUrl: client.ImageUrl || client.imageUrl || client.Image || client.image || client.Logo || client.logo || null,
         }));
       },
     }),
@@ -626,15 +712,85 @@ export const api = createApi({
     getDashboardData: builder.query({
       queryFn: async (role, { dispatch, getState }, extraOptions, baseQuery) => {
         try {
-          // Fetch enquiries and clients in parallel
-          const [enquiriesResult, clientsResult] = await Promise.all([
-            baseQuery('/api/enquiries'),
+          // Fetch status aggregates, enquiries, and clients in parallel
+          // Use new aggregate endpoint for status counts
+          const [statusAggregateResult, enquiriesResult, clientsResult] = await Promise.all([
+            baseQuery('/api/enquiries/aggregate?groupBy=status'),
+            baseQuery('/api/enquiries/search?page=1'),
             role === 'admin' ? baseQuery('/api/clients') : Promise.resolve({ data: [] }),
           ]);
 
+          // Handle status aggregate response
+          let statusCounts = {
+            pending: 0,
+            completed: 0,
+            in_progress: 0,
+            rejected: 0,
+            total: 0,
+          };
+          
+          if (statusAggregateResult.data && !statusAggregateResult.error) {
+            const aggregateData = statusAggregateResult.data;
+            
+            if (__DEV__) {
+              console.log('Status Aggregate API Response:', aggregateData);
+            }
+            
+            // Handle different response formats
+            if (Array.isArray(aggregateData)) {
+              aggregateData.forEach(item => {
+                const status = (item.status || item.Status || item._id || item.group || '').toLowerCase();
+                const count = item.count || item.Count || item.value || item.total || 0;
+                
+                if (__DEV__) {
+                  console.log('Processing status aggregate item:', { status, count });
+                }
+                
+                // Map backend status to normalized status
+                if (status === 'pending' || status === 'enquiry created' || status.includes('pending') || status === 'design approval pending') {
+                  statusCounts.pending += count;
+                } else if (status === 'completed' || status.includes('completed') || status.includes('approved')) {
+                  statusCounts.completed += count;
+                } else if (status === 'in_progress' || status.includes('progress') || status === 'coral' || status === 'cad') {
+                  statusCounts.in_progress += count;
+                } else if (status === 'rejected' || status.includes('rejected')) {
+                  statusCounts.rejected += count;
+                }
+                statusCounts.total += count;
+              });
+            } else if (typeof aggregateData === 'object') {
+              // Handle object format { pending: 10, completed: 5, ... }
+              Object.keys(aggregateData).forEach(key => {
+                const normalizedKey = key.toLowerCase();
+                const value = aggregateData[key];
+                
+                if (normalizedKey === 'pending' || normalizedKey.includes('pending')) {
+                  statusCounts.pending = value || 0;
+                } else if (normalizedKey === 'completed' || normalizedKey.includes('completed')) {
+                  statusCounts.completed = value || 0;
+                } else if (normalizedKey === 'in_progress' || normalizedKey.includes('progress')) {
+                  statusCounts.in_progress = value || 0;
+                } else if (normalizedKey === 'rejected' || normalizedKey.includes('rejected')) {
+                  statusCounts.rejected = value || 0;
+                } else if (normalizedKey === 'total') {
+                  statusCounts.total = value || 0;
+                }
+              });
+            }
+            
+            if (__DEV__) {
+              console.log('Parsed status counts:', statusCounts);
+            }
+          } else if (statusAggregateResult.error) {
+            if (__DEV__) {
+              console.warn('Status aggregate API error, falling back to counting from enquiries:', statusAggregateResult.error);
+            }
+          }
+
+          // Handle paginated response from new aggregated endpoint
           const enquiries = Array.isArray(enquiriesResult.data) 
             ? enquiriesResult.data 
-            : (enquiriesResult.data?.enquiries || enquiriesResult.data?.data || []);
+            : (enquiriesResult.data?.data || enquiriesResult.data?.enquiries || []);
 
           const clients = role === 'admin' && clientsResult.data
             ? (Array.isArray(clientsResult.data) 
@@ -642,27 +798,16 @@ export const api = createApi({
                 : (clientsResult.data?.clients || clientsResult.data?.data || []))
             : [];
 
-          // Normalize enquiries (same logic as getEnquiries)
+          // Normalize enquiries (updated for aggregated endpoint response)
           const normalizedEnquiries = enquiries.map(enquiry => {
-            let currentStatus = 'pending';
-            let createdAt = new Date().toISOString();
-            let updatedAt = new Date().toISOString();
-            
-            if (enquiry.StatusHistory && Array.isArray(enquiry.StatusHistory) && enquiry.StatusHistory.length > 0) {
-              const sortedHistory = [...enquiry.StatusHistory].sort((a, b) => 
-                new Date(b.Timestamp || b.timestamp || 0) - new Date(a.Timestamp || a.timestamp || 0)
-              );
-              const latestStatus = sortedHistory[0];
-              currentStatus = latestStatus.Status || latestStatus.status || 'pending';
-              updatedAt = latestStatus.Timestamp || latestStatus.timestamp || updatedAt;
-              
-              const firstStatus = sortedHistory[sortedHistory.length - 1];
-              createdAt = firstStatus.Timestamp || firstStatus.timestamp || createdAt;
-            }
+            // Use CurrentStatus directly from aggregated response
+            const currentStatus = enquiry.CurrentStatus || enquiry.Status || 'pending';
+            const createdAt = enquiry.CreatedDate || enquiry.CreatedAt || new Date().toISOString();
+            const updatedAt = enquiry.AssignedDate || enquiry.UpdatedAt || createdAt;
             
             let normalizedPriority = 'medium';
             const priority = (enquiry.Priority || enquiry.priority || '').toLowerCase();
-            if (priority.includes('urgent') || priority === 'high') {
+            if (priority.includes('urgent') || priority === 'high' || priority === 'super high') {
               normalizedPriority = 'high';
             } else if (priority === 'low') {
               normalizedPriority = 'low';
@@ -670,9 +815,9 @@ export const api = createApi({
             
             let normalizedStatus = 'pending';
             const status = currentStatus.toLowerCase();
-            if (status === 'enquiry created' || status === 'pending') {
+            if (status === 'enquiry created' || status === 'pending' || status.includes('pending')) {
               normalizedStatus = 'pending';
-            } else if (status.includes('progress') || status === 'coral' || status === 'cad') {
+            } else if (status.includes('progress') || status === 'coral' || status === 'cad' || status === 'design approval pending') {
               normalizedStatus = 'in_progress';
             } else if (status.includes('completed') || status.includes('approved')) {
               normalizedStatus = 'completed';
@@ -696,10 +841,11 @@ export const api = createApi({
           });
 
           // Calculate dashboard stats based on role
+          // Use status aggregate data for status counts (more efficient)
           if (role === 'admin') {
-            const totalEnquiries = normalizedEnquiries.length;
-            const pendingEnquiries = normalizedEnquiries.filter(e => e.status === 'pending').length;
-            const completedEnquiries = normalizedEnquiries.filter(e => e.status === 'completed').length;
+            const totalEnquiries = statusCounts.total || normalizedEnquiries.length;
+            const pendingEnquiries = statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
+            const completedEnquiries = statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
             const totalClients = clients.length;
             const revenue = normalizedEnquiries
               .filter(e => e.status === 'completed')
@@ -715,9 +861,9 @@ export const api = createApi({
               },
             };
           } else if (role === 'client') {
-            const myEnquiries = normalizedEnquiries.length;
-            const pendingApprovals = normalizedEnquiries.filter(e => e.status === 'pending').length;
-            const completedOrders = normalizedEnquiries.filter(e => e.status === 'completed').length;
+            const myEnquiries = statusCounts.total || normalizedEnquiries.length;
+            const pendingApprovals = statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
+            const completedOrders = statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
             const totalSpent = normalizedEnquiries
               .filter(e => e.status === 'completed')
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
@@ -731,9 +877,9 @@ export const api = createApi({
               },
             };
           } else if (role === 'coral' || role === 'cad') {
-            const assignedEnquiries = normalizedEnquiries.length;
-            const completedDesigns = normalizedEnquiries.filter(e => e.status === 'completed').length;
-            const pendingDesigns = normalizedEnquiries.filter(e => e.status === 'pending' || e.status === 'in_progress').length;
+            const assignedEnquiries = statusCounts.total || normalizedEnquiries.length;
+            const completedDesigns = statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
+            const pendingDesigns = (statusCounts.pending + statusCounts.in_progress) || normalizedEnquiries.filter(e => e.status === 'pending' || e.status === 'in_progress').length;
             const averageRating = 4.8; // TODO: Fetch from API when available
             
             return {
@@ -1746,6 +1892,8 @@ export const {
   // Auth
   useLoginMutation,
   useCreateUserMutation,
+  useGetUserByIdQuery,
+  useGetUsersQuery,
   
   // Enquiries
   useGetEnquiriesQuery,

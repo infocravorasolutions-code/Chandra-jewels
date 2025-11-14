@@ -4,6 +4,7 @@ import authReducer from '../features/auth/authSlice';
 import enquiriesReducer from '../features/enquiries/enquiriesSlice';
 import clientsReducer from '../features/clients/clientsSlice';
 import metalPricesReducer from '../features/metalPrices/metalPricesSlice';
+import usersReducer from '../features/users/usersSlice';
 
 export const store = configureStore({
   reducer: {
@@ -12,6 +13,7 @@ export const store = configureStore({
     enquiries: enquiriesReducer,
     clients: clientsReducer,
     metalPrices: metalPricesReducer,
+    users: usersReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

@@ -11,87 +11,16 @@ import { Card } from '../../components/cards/Cards';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
-import { formatDateTime } from '../../utils/helpers';
-import { useGetClientsQuery } from '../../store/api';
-import { useAuth } from '../../context/AuthContext';
+import { formatDateTime, formatHistoryDetails } from '../../utils/helpers';
+import { useUsers } from '../../features/users/usersHooks';
+import { getUserName } from '../../utils/userUtils';
 
 const EnquiryHistoryModal = ({ visible, onClose, enquiry }) => {
-  const { user } = useAuth();
-  
-  // Fetch clients for name lookup
-  const { data: clientsData = [] } = useGetClientsQuery(undefined, {
-    skip: !visible, // Only fetch when modal is visible
-  });
+  // Fetch and cache users
+  useUsers();
 
   // Extract StatusHistory from enquiry
   const statusHistory = enquiry?.StatusHistory || enquiry?._originalData?.StatusHistory || [];
-  
-  // Create a user ID to name lookup map
-  const userNameMap = useMemo(() => {
-    const map = new Map();
-    
-    // Add clients to map
-    if (Array.isArray(clientsData)) {
-      clientsData.forEach(client => {
-        if (client && client.id && client.name) {
-          const idStr = String(client.id).trim();
-          map.set(idStr, client.name);
-          // Handle MongoDB ObjectId format variations
-          const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
-          if (cleanId !== idStr) {
-            map.set(cleanId, client.name);
-          }
-          // Try with spaces removed
-          map.set(idStr.replace(/\s/g, ''), client.name);
-        }
-      });
-    }
-    
-    // Add current user to map
-    if (user && user.id) {
-      const userIdStr = String(user.id).trim();
-      const userName = user.name || user.email || 'You';
-      map.set(userIdStr, userName);
-      const cleanId = userIdStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
-      if (cleanId !== userIdStr) {
-        map.set(cleanId, userName);
-      }
-      map.set(userIdStr.replace(/\s/g, ''), userName);
-    }
-    
-    return map;
-  }, [clientsData, user]);
-
-  // Helper function to get user name from ID
-  const getUserName = (userId) => {
-    if (!userId) return '-';
-    
-    const idStr = String(userId).trim();
-    
-    // Try exact match
-    if (userNameMap.has(idStr)) {
-      return userNameMap.get(idStr);
-    }
-    
-    // Try with spaces removed (for IDs like "68717c58079 8b31bfa7fe5ef")
-    const noSpacesId = idStr.replace(/\s/g, '');
-    if (userNameMap.has(noSpacesId)) {
-      return userNameMap.get(noSpacesId);
-    }
-    
-    // Try ObjectId format cleanup
-    const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
-    if (userNameMap.has(cleanId)) {
-      return userNameMap.get(cleanId);
-    }
-    
-    // If it looks like an ObjectId but we don't have a name, return a truncated version
-    if (noSpacesId.length > 12) {
-      return `User ${noSpacesId.substring(0, 8)}...`;
-    }
-    
-    return userId; // Fallback to original ID if short
-  };
   
   // Sort history by timestamp (oldest first, newest last)
   const sortedHistory = useMemo(() => {
@@ -104,12 +33,15 @@ const EnquiryHistoryModal = ({ visible, onClose, enquiry }) => {
 
   const renderHistoryItem = (item, index) => {
     const status = item.Status || item.status || 'N/A';
-    const details = item.Details || item.details || '';
+    const rawDetails = item.Details || item.details || '';
     const assignedToId = item.AssignedTo || item.assignedTo || '';
     const addedById = item.AddedBy || item.addedBy || '';
     const timestamp = item.Timestamp || item.timestamp || '';
     
-    // Get names from IDs
+    // Format details for better readability
+    const formattedDetails = formatHistoryDetails(rawDetails);
+    
+    // Get names from IDs using cached users
     const assignedToName = getUserName(assignedToId);
     const addedByName = getUserName(addedById);
     
@@ -125,12 +57,12 @@ const EnquiryHistoryModal = ({ visible, onClose, enquiry }) => {
             </Text>
           </View>
           
-          <View style={styles.column}>
+          <View style={[styles.column, styles.detailsColumn]}>
             <Text style={[styles.columnLabel, { color: colors.textSecondary, fontSize: 11 }]}>
               Details
             </Text>
-            <Text style={[styles.columnValue, { color: colors.textSecondary, fontSize: 13 }]}>
-              {details || '-'}
+            <Text style={[styles.columnValue, styles.detailsValue, { color: colors.textSecondary, fontSize: 13 }]}>
+              {formattedDetails || '-'}
             </Text>
           </View>
           
@@ -277,6 +209,10 @@ const styles = StyleSheet.create({
     minWidth: 100,
     marginBottom: 4,
   },
+  detailsColumn: {
+    flex: 1.5,
+    minWidth: 150,
+  },
   columnLabel: {
     marginBottom: 4,
     textTransform: 'uppercase',
@@ -284,6 +220,10 @@ const styles = StyleSheet.create({
   },
   columnValue: {
     lineHeight: 18,
+  },
+  detailsValue: {
+    flexWrap: 'wrap',
+    lineHeight: 20,
   },
   emptyCard: {
     margin: 16,

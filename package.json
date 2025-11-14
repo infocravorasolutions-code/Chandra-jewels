@@ -3,12 +3,15 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "android": "export JAVA_HOME=\"/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home\" && export ANDROID_HOME=\"$HOME/Library/Android/sdk\" && export PATH=\"$PATH:$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin\" && react-native run-android",
+    "android": "export JAVA_HOME=\"/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home\" && export ANDROID_HOME=\"$HOME/Library/Android/sdk\" && export PATH=\"$PATH:$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin\" && react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "build:android:release": "cd android && ./gradlew assembleRelease",
+    "build:android:bundle": "cd android && ./gradlew bundleRelease",
+    "build:android": "npm run build:android:release && npm run build:android:bundle"
   },
   "dependencies": {
     "@babel/runtime": "^7.25.0",
@@ -18,6 +21,7 @@
     "@react-navigation/native": "^7.1.18",
     "@react-navigation/stack": "^7.5.0",
     "@reduxjs/toolkit": "^2.9.2",
+    "@sentry/react-native": "^5.34.0",
     "react": "^19.1.1",
     "react-native": "0.82.1",
     "react-native-document-picker": "^9.3.1",
@@ -33,7 +37,8 @@
     "react-native-video": "^6.17.0",
     "react-native-webview": "^13.16.0",
     "react-redux": "^9.2.0",
-    "socket.io-client": "^4.7.5"
+    "socket.io-client": "^4.7.5",
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

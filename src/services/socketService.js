@@ -24,6 +24,7 @@ class SocketService {
    * @param {string} userId - Current user ID
    */
   async connect(userId) {
+    // Prevent multiple connection attempts
     if (this.socket?.connected) {
       if (__DEV__) {
         console.log('Socket already connected');
@@ -36,6 +37,22 @@ class SocketService {
         console.log('Socket connection already in progress');
       }
       return;
+    }
+
+    // Clean up any existing socket before creating a new one
+    if (this.socket && !this.socket.connected) {
+      if (__DEV__) {
+        console.log('Cleaning up disconnected socket before reconnecting');
+      }
+      try {
+        this.socket.removeAllListeners();
+        this.socket.disconnect();
+      } catch (error) {
+        if (__DEV__) {
+          console.warn('Error cleaning up socket:', error);
+        }
+      }
+      this.socket = null;
     }
 
     try {
@@ -53,11 +70,11 @@ class SocketService {
       }
 
       this.socket = io(SOCKET_URL, {
-        transports: ['websocket', 'polling'],
+        transports: ['websocket'], // Use only websocket to avoid polling overhead
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        reconnectionAttempts: Infinity, // Keep trying to reconnect
+        reconnectionDelayMax: 10000, // Max 10 seconds between attempts
+        reconnectionAttempts: 5, // Limit to 5 attempts to prevent resource exhaustion
         timeout: 20000,
         auth: {
           token: token ? `Bearer ${token}` : null,

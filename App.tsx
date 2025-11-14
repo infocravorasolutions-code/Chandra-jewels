@@ -15,6 +15,7 @@ import AppNavigator from './src/navigation';
 import SplashScreen from './src/screens/VideoSplashScreen';
 import { AnimatedLogoLoader } from './src/components/common';
 import { AlertProvider } from './src/context/AlertContext';
+import UsersProvider from './src/components/providers/UsersProvider';
 
 const AppContent = () => {
   const isDarkMode = useColorScheme() === 'dark';
@@ -37,9 +38,11 @@ const AppContent = () => {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AlertProvider>
-        <AppNavigator />
-      </AlertProvider>
+      <UsersProvider>
+        <AlertProvider>
+          <AppNavigator />
+        </AlertProvider>
+      </UsersProvider>
     </SafeAreaProvider>
   );
 };

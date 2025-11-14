@@ -1,10 +1,12 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Image } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { spacing, responsivePadding, imageSizes } from '../../utils';
 import { formatCount } from '../../utils/helpers';
 import Icon from '../common/Icon';
+import { FILE_BASE_URL, API_BASE_URL } from '../../config/apiConfig';
 
 export const Card = ({ children, style, onPress, ...props }) => {
   const CardComponent = onPress ? TouchableOpacity : View;
@@ -53,6 +55,657 @@ export const EnquiryStatusCard = ({ status, value, color, icon, onPress, style }
     <Text style={styles.statusValue}>{formatCount(value)}</Text>
   </Card>
 );
+
+// Compact Enquiry Card - 2 per row design
+export const CompactEnquiryCard = ({
+  enquiry,
+  onPress,
+  getStatusColor,
+  getStatusIcon,
+  getPriorityColor,
+  getPriorityIcon,
+  formatCurrency,
+  formatDate,
+  userRole,
+}) => {
+  // Hooks must be called at the top level, before any conditional returns
+  const [imageError, setImageError] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+
+  // Safety checks to prevent undefined errors
+  if (!enquiry) {
+    return null;
+  }
+
+  const statusColor = getStatusColor ? getStatusColor(enquiry.status || 'pending') : colors.primary;
+  const priorityColor = getPriorityColor ? getPriorityColor(enquiry.priority || 'medium') : colors.textSecondary;
+  
+  // Extract metal color and quality
+  const metalColor = enquiry.Metal?.Color || enquiry.metal?.color || enquiry.metalColor || 'Gold';
+  const metalQuality = enquiry.Metal?.Quality || enquiry.metal?.quality || enquiry.metalQuality || '';
+  const metalDisplay = metalQuality ? `${metalColor} ${metalQuality}` : metalColor;
+  
+  // Get assigned to
+  const assignedTo = enquiry.AssignedTo || enquiry.assignedTo || enquiry.assignedToName || 'Unassigned';
+  
+  // Get stone type
+  const stoneType = enquiry.StoneType || enquiry.stoneType || 'N/A';
+  
+  // Get category
+  const category = enquiry.Category || enquiry.category || 'N/A';
+  
+  // Format dates
+  const createdDate = formatDate ? formatDate(enquiry.createdAt || new Date().toISOString()) : (enquiry.createdAt ? new Date(enquiry.createdAt).toLocaleDateString() : 'N/A');
+  const shippingDate = formatDate && enquiry.deadline ? formatDate(enquiry.deadline) : (enquiry.ShippingDate || enquiry.deadline ? new Date(enquiry.ShippingDate || enquiry.deadline).toLocaleDateString() : 'N/A');
+  
+  // Format price (only for client role)
+  const showPrice = userRole === 'client';
+  const price = formatCurrency ? formatCurrency(enquiry.budget || 0) : `₹${enquiry.budget || 0}`;
+  
+  // Check design progress stages
+  const hasDesign = enquiry.Coral && Array.isArray(enquiry.Coral) && enquiry.Coral.length > 0;
+  const hasCAD = enquiry.Cad && Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0;
+  const hasOrder = enquiry.status === 'completed' || enquiry.status === 'in_progress';
+
+  // Get reference image - fetch latest from ReferenceImages array
+  const getReferenceImage = () => {
+    let referenceImages = [];
+    
+    // Priority 1: Check original data structure (before normalization) - most reliable
+    if (enquiry?._originalData?.ReferenceImages && Array.isArray(enquiry._originalData.ReferenceImages)) {
+      referenceImages = enquiry._originalData.ReferenceImages;
+    }
+    // Priority 2: Check direct ReferenceImages property
+    else if (enquiry?.ReferenceImages && Array.isArray(enquiry.ReferenceImages)) {
+      referenceImages = enquiry.ReferenceImages;
+    }
+    // Priority 3: Check normalized images (from API transform)
+    else if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
+      // Normalized images might be strings or objects
+      referenceImages = enquiry.images;
+    }
+    // Priority 4: Check Images property (fallback)
+    else if (enquiry?.Images && Array.isArray(enquiry.Images)) {
+      referenceImages = enquiry.Images;
+    }
+    
+    if (referenceImages.length === 0) {
+      if (__DEV__) {
+        console.log('No ReferenceImages found for enquiry:', enquiry?.id, {
+          hasOriginalData: !!enquiry?._originalData,
+          hasReferenceImages: !!enquiry?.ReferenceImages,
+          hasImages: !!enquiry?.images,
+          enquiryKeys: enquiry ? Object.keys(enquiry).slice(0, 15) : [],
+        });
+      }
+      return null;
+    }
+    
+    // Get the latest image (last item in array)
+    const latestImage = referenceImages[referenceImages.length - 1];
+    
+    if (__DEV__) {
+      console.log('Found ReferenceImages for enquiry:', enquiry?.id, {
+        totalImages: referenceImages.length,
+        latestImage: latestImage,
+        imageType: typeof latestImage,
+      });
+    }
+    
+    // Handle object format (most common - has Key, Id, etc.)
+    if (typeof latestImage === 'object' && latestImage !== null) {
+      // Priority 1: Use Key property (most reliable)
+      const imageKey = latestImage.Key || latestImage.key || latestImage.KeyName || latestImage.keyName || '';
+      
+      if (imageKey) {
+        // Construct URL from key: /api/enquiries/files/{key}
+        const encodedKey = encodeURIComponent(imageKey);
+        const url = `${FILE_BASE_URL}/api/enquiries/files/${encodedKey}`;
+        if (__DEV__) console.log('Constructed URL from Key:', url, 'Original Key:', imageKey);
+        return url;
+      }
+      
+      // Priority 2: Use Id property as fallback
+      const imageId = latestImage.Id || latestImage.id || latestImage._id || latestImage.FileId || latestImage.fileId || '';
+      if (imageId) {
+        const url = `${FILE_BASE_URL}/api/enquiries/files/${imageId}`;
+        if (__DEV__) console.log('Constructed URL from Id:', url);
+        return url;
+      }
+      
+      // Priority 3: Check for URL properties
+      const imageUrl = latestImage.Url || latestImage.url || latestImage.URI || latestImage.uri || 
+                      latestImage.Location || latestImage.location || latestImage.UrlPath || latestImage.urlPath || '';
+      if (imageUrl) {
+        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+          if (__DEV__) console.log('Using full URL from object:', imageUrl);
+          return imageUrl;
+        }
+        if (imageUrl.startsWith('/')) {
+          const url = `${FILE_BASE_URL}${imageUrl}`;
+          if (__DEV__) console.log('Constructed URL from object path:', url);
+          return url;
+        }
+        const url = `${FILE_BASE_URL}/${imageUrl}`;
+        if (__DEV__) console.log('Constructed URL from object relative path:', url);
+        return url;
+      }
+      
+      if (__DEV__) {
+        console.warn('Image object has no Key/Id/Url:', JSON.stringify(latestImage));
+      }
+      return null;
+    }
+    
+    // Handle string format
+    if (typeof latestImage === 'string') {
+      // If it's already a full URL, use it directly
+      if (latestImage.startsWith('http://') || latestImage.startsWith('https://')) {
+        if (__DEV__) console.log('Using full URL:', latestImage);
+        return latestImage;
+      }
+      // If it starts with /, it's a path - construct full URL
+      if (latestImage.startsWith('/')) {
+        const url = `${FILE_BASE_URL}${latestImage}`;
+        if (__DEV__) console.log('Constructed URL from path:', url);
+        return url;
+      }
+      // Otherwise, treat as file key
+      const encodedKey = encodeURIComponent(latestImage);
+      const url = `${FILE_BASE_URL}/api/enquiries/files/${encodedKey}`;
+      if (__DEV__) console.log('Constructed URL from string key:', url);
+      return url;
+    }
+    
+    if (__DEV__) {
+      console.warn('Could not extract image URL from:', latestImage, 'Type:', typeof latestImage);
+    }
+    return null;
+  };
+
+  // Memoize the reference image URI to prevent unnecessary recalculations
+  const referenceImageUri = useMemo(() => getReferenceImage(), [
+    enquiry?._originalData?.ReferenceImages,
+    enquiry?.ReferenceImages,
+    enquiry?.images,
+    enquiry?.Images,
+  ]);
+  
+  const [imageDataUri, setImageDataUri] = useState(null);
+  const fetchAbortController = useRef(null);
+  
+  // Log when referenceImageUri changes
+  useEffect(() => {
+    if (__DEV__ && enquiry?.id) {
+      console.log('🔍 referenceImageUri changed:', {
+        enquiryId: enquiry.id,
+        referenceImageUri: referenceImageUri,
+        willFetch: !!referenceImageUri,
+      });
+    }
+  }, [referenceImageUri, enquiry?.id]);
+
+  // Debug logging in development
+  useEffect(() => {
+    if (__DEV__ && enquiry?.id) {
+      const originalRefImages = enquiry._originalData?.ReferenceImages;
+      const directRefImages = enquiry?.ReferenceImages;
+      
+      console.log('📸 CompactEnquiryCard - Image Debug:', {
+        enquiryId: enquiry.id,
+        hasOriginalData: !!enquiry._originalData,
+        originalRefImagesCount: originalRefImages?.length || 0,
+        originalRefImages: originalRefImages,
+        hasDirectRefImages: !!directRefImages,
+        directRefImagesCount: directRefImages?.length || 0,
+        directRefImages: directRefImages,
+        hasNormalizedImages: !!enquiry.images,
+        normalizedImagesCount: enquiry.images?.length || 0,
+        referenceImageUri: referenceImageUri,
+        imageDataUri: imageDataUri ? `data:... (${imageDataUri.length} chars)` : null,
+        imageError: imageError,
+        imageLoading: imageLoading,
+        latestImageFromOriginal: originalRefImages?.[originalRefImages?.length - 1],
+        latestImageFromDirect: directRefImages?.[directRefImages?.length - 1],
+      });
+    }
+  }, [enquiry?.id, referenceImageUri, imageDataUri, imageError, imageLoading]);
+
+  // Fetch image with authentication and convert to data URI
+  useEffect(() => {
+    // Cleanup: abort any ongoing fetch when component unmounts or URI changes
+    return () => {
+      if (fetchAbortController.current) {
+        fetchAbortController.current.abort();
+        fetchAbortController.current = null;
+      }
+    };
+  }, [referenceImageUri]);
+
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('🔄 Image fetch useEffect triggered:', {
+        enquiryId: enquiry?.id,
+        referenceImageUri: referenceImageUri,
+        hasUri: !!referenceImageUri,
+      });
+    }
+
+    if (!referenceImageUri) {
+      if (__DEV__) {
+        console.log('⏭️ No referenceImageUri, skipping image fetch');
+      }
+      setImageDataUri(null);
+      setImageError(false);
+      setImageLoading(false);
+      return;
+    }
+
+    // Abort previous fetch if any
+    if (fetchAbortController.current) {
+      fetchAbortController.current.abort();
+    }
+
+    // Create new AbortController for this fetch
+    fetchAbortController.current = new AbortController();
+    const signal = fetchAbortController.current.signal;
+
+    // Reset state
+    if (__DEV__) {
+      console.log('🔄 Starting image fetch for:', referenceImageUri);
+    }
+    setImageError(false);
+    setImageLoading(true);
+    setImageDataUri(null);
+
+    // If it's already a data URI, use it directly
+    if (referenceImageUri.startsWith('data:')) {
+      setImageDataUri(referenceImageUri);
+      setImageLoading(false);
+      return;
+    }
+
+    // Fetch image with authentication
+    const fetchImageWithAuth = async () => {
+      try {
+        const token = await AsyncStorage.getItem('token');
+        if (!token) {
+          if (__DEV__) console.warn('No token available for image fetch');
+          setImageError(true);
+          setImageLoading(false);
+          return;
+        }
+
+        if (__DEV__) {
+          console.log('🔄 Fetching card image with auth:', referenceImageUri);
+        }
+
+        const response = await fetch(referenceImageUri, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+          signal: signal, // Add abort signal
+        });
+
+        if (response.ok) {
+          const contentType = response.headers.get('content-type') || '';
+          
+          if (__DEV__) {
+            console.log('✅ Image fetch OK, content-type:', contentType);
+          }
+
+          // Check if response is JSON (API returns a URL object)
+          if (contentType.includes('application/json')) {
+            if (__DEV__) {
+              console.log('📄 API returned JSON, parsing response...');
+            }
+            
+            let jsonData;
+            try {
+              const responseText = await response.text();
+              if (__DEV__) {
+                console.log('📄 Raw JSON response text:', responseText.substring(0, 500));
+              }
+              jsonData = JSON.parse(responseText);
+            } catch (parseError) {
+              if (__DEV__) {
+                console.error('❌ Failed to parse JSON:', parseError);
+              }
+              setImageError(true);
+              setImageLoading(false);
+              return;
+            }
+            
+            if (__DEV__) {
+              console.log('📄 JSON response:', JSON.stringify(jsonData, null, 2));
+              console.log('📄 JSON keys:', Object.keys(jsonData));
+            }
+            
+            // Try multiple possible URL fields - check nested structures too
+            let actualImageUrl = null;
+            
+            // Check top-level fields
+            actualImageUrl = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location || 
+                           jsonData.Url || jsonData.Location || jsonData.fileUrl || jsonData.fileURL ||
+                           jsonData.image || jsonData.Image || jsonData.file || jsonData.File;
+            
+            // Check nested data object
+            if (!actualImageUrl && jsonData.data) {
+              actualImageUrl = jsonData.data.url || jsonData.data.imageUrl || jsonData.data.src || 
+                             jsonData.data.location || jsonData.data.Url || jsonData.data.Location ||
+                             jsonData.data.fileUrl || jsonData.data.fileURL;
+            }
+            
+            // Check if it's an array with URL objects
+            if (!actualImageUrl && Array.isArray(jsonData) && jsonData.length > 0) {
+              const firstItem = jsonData[0];
+              actualImageUrl = firstItem.url || firstItem.imageUrl || firstItem.src || firstItem.location ||
+                             firstItem.Url || firstItem.Location || firstItem.fileUrl || firstItem.fileURL;
+            }
+            
+            // Check if response has a message/error
+            if (!actualImageUrl && jsonData.message) {
+              if (__DEV__) {
+                console.warn('⚠️ API returned message instead of URL:', jsonData.message);
+              }
+            }
+            
+            if (!actualImageUrl) {
+              if (__DEV__) {
+                console.error('❌ No image URL found in JSON response. Available keys:', Object.keys(jsonData));
+              }
+              setImageError(true);
+              setImageLoading(false);
+              return;
+            }
+            
+            if (__DEV__) {
+              console.log('🖼️ Found image URL in JSON:', actualImageUrl);
+            }
+            
+            // If it's an S3 URL or public URL, use it directly (no need to convert to base64)
+            // React Native Image component can handle HTTP/HTTPS URLs directly
+            if (actualImageUrl.includes('amazonaws.com') || actualImageUrl.includes('s3.') || 
+                actualImageUrl.startsWith('http://') || actualImageUrl.startsWith('https://')) {
+              
+              if (__DEV__) {
+                console.log('✅ Using S3/public URL directly (no base64 conversion needed)');
+              }
+              
+              // Use the URL directly - React Native Image can handle it
+              setImageDataUri(actualImageUrl);
+              setImageLoading(false);
+              setImageError(false);
+              
+              if (__DEV__) {
+                console.log('✅ Image URL set, should render now');
+              }
+              return;
+            }
+            
+            // For non-public URLs, fetch and convert to base64
+            if (__DEV__) {
+              console.log('🔄 Fetching image for base64 conversion...');
+            }
+            
+            const imageResponse = await fetch(actualImageUrl, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+              },
+            });
+            
+            if (!imageResponse.ok) {
+              if (__DEV__) {
+                console.error('❌ Failed to fetch actual image:', imageResponse.status, imageResponse.statusText);
+              }
+              setImageError(true);
+              setImageLoading(false);
+              return;
+            }
+            
+            const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
+            
+            if (__DEV__) {
+              console.log('✅ Actual image fetched, converting to base64. Content-type:', imageContentType);
+            }
+            
+            // Convert to base64
+            const arrayBuffer = await imageResponse.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+            let binary = '';
+            const chunkSize = 8192;
+            
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+              const chunk = bytes.subarray(i, i + chunkSize);
+              binary += String.fromCharCode.apply(null, chunk);
+            }
+            
+            let base64;
+            try {
+              base64 = btoa(binary);
+            } catch (e) {
+              if (typeof Buffer !== 'undefined') {
+                base64 = Buffer.from(bytes).toString('base64');
+              } else {
+                if (__DEV__) {
+                  console.error('❌ Error converting to base64:', e);
+                }
+                throw e;
+              }
+            }
+            
+            const dataUri = `data:${imageContentType};base64,${base64}`;
+            
+            if (__DEV__) {
+              console.log('✅ Image converted to data URI');
+              console.log('   - Content type:', imageContentType);
+              console.log('   - Base64 length:', base64.length);
+              console.log('   - Data URI length:', dataUri.length);
+            }
+            
+            // Set the image data URI
+            setImageDataUri(dataUri);
+            setImageLoading(false);
+            setImageError(false);
+            
+            if (__DEV__) {
+              console.log('✅ Image state updated, should render now');
+            }
+          } else {
+            // Direct image response - convert to base64
+            const arrayBuffer = await response.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+            let binary = '';
+            const chunkSize = 8192;
+            
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+              const chunk = bytes.subarray(i, i + chunkSize);
+              binary += String.fromCharCode.apply(null, chunk);
+            }
+            
+            let base64;
+            try {
+              base64 = btoa(binary);
+            } catch (e) {
+              if (typeof Buffer !== 'undefined') {
+                base64 = Buffer.from(bytes).toString('base64');
+              } else {
+                throw e;
+              }
+            }
+            
+            const dataUri = `data:${contentType || 'image/jpeg'};base64,${base64}`;
+            
+            if (__DEV__) {
+              console.log('✅ Direct image converted to data URI');
+              console.log('   - Content type:', contentType);
+              console.log('   - Base64 length:', base64.length);
+              console.log('   - Data URI length:', dataUri.length);
+            }
+            
+            setImageDataUri(dataUri);
+            setImageLoading(false);
+            setImageError(false);
+          }
+        } else {
+          if (__DEV__) {
+            console.warn('Image fetch failed:', response.status, response.statusText);
+          }
+          setImageError(true);
+          setImageLoading(false);
+        }
+      } catch (error) {
+        // Don't set error if fetch was aborted
+        if (error.name === 'AbortError') {
+          if (__DEV__) {
+            console.log('⏹️ Image fetch aborted for:', enquiry?.id);
+          }
+          return;
+        }
+        
+        if (__DEV__) {
+          console.error('Error fetching image:', error);
+        }
+        setImageError(true);
+        setImageLoading(false);
+      }
+    };
+
+    fetchImageWithAuth();
+    
+    // Cleanup function
+    return () => {
+      if (fetchAbortController.current) {
+        fetchAbortController.current.abort();
+      }
+    };
+  }, [referenceImageUri, enquiry?.id]);
+
+  return (
+    <Card style={styles.compactEnquiryCard} onPress={onPress}>
+      {/* Reference Image - Always show container */}
+      <View style={styles.compactImageContainer}>
+        {imageDataUri && !imageError ? (
+          <Image
+            source={{ uri: imageDataUri }}
+            style={styles.compactImage}
+            resizeMode="cover"
+            onLoad={() => {
+              if (__DEV__) {
+                console.log('✅ Image loaded successfully in Image component');
+              }
+            }}
+            onError={(error) => {
+              if (__DEV__) {
+                console.error('❌ Image component error:', error);
+                console.error('❌ Failed imageDataUri length:', imageDataUri?.length);
+                console.error('❌ Failed imageDataUri preview:', imageDataUri?.substring(0, 100));
+              }
+              setImageError(true);
+            }}
+          />
+        ) : (
+          <View style={styles.compactImagePlaceholder}>
+            <Icon name="image" size={32} color={colors.textLight} />
+            <Text style={styles.compactImagePlaceholderText}>No image available</Text>
+            {__DEV__ && (
+              <Text style={[styles.compactImagePlaceholderText, { fontSize: 6, marginTop: 2 }]}>
+                {referenceImageUri ? 'Loading...' : 'No image'}
+              </Text>
+            )}
+          </View>
+        )}
+        {imageLoading && referenceImageUri && !imageError && (
+          <View style={styles.compactImageLoading}>
+            <Icon name="sync" size={20} color={colors.textLight} />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.compactCardContent}>
+        {/* Row 1: Name and Priority */}
+        <View style={styles.compactRow1}>
+          <Text style={styles.compactName} numberOfLines={1}>
+            {enquiry.title || enquiry.Name || 'Untitled Enquiry'}
+          </Text>
+          <View style={[styles.compactPriorityBadge, { backgroundColor: priorityColor + '15' }]}>
+            <Text style={[styles.compactPriorityText, { color: priorityColor }]} numberOfLines={1}>
+              {(enquiry.priority || 'medium').toUpperCase()}
+            </Text>
+          </View>
+        </View>
+
+        {/* Row 2: Status (right aligned) */}
+        <View style={styles.compactRow2}>
+          <View style={[styles.compactStatusBadge, { backgroundColor: statusColor + '15' }]}>
+            <Text style={[styles.compactStatusText, { color: statusColor }]} numberOfLines={1}>
+              {(enquiry.status || 'pending').replace('_', ' ').toUpperCase()}
+            </Text>
+          </View>
+        </View>
+
+        {/* Row 3: Assigned to and Created Date */}
+        <View style={styles.compactRow3}>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Assigned to</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>{assignedTo}</Text>
+          </View>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Created</Text>
+            <Text style={styles.compactValueText}>{createdDate}</Text>
+          </View>
+        </View>
+
+        {/* Row 4: Shipping Date (right aligned) */}
+        <View style={styles.compactRow4}>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Shipping</Text>
+            <Text style={styles.compactValueText}>{shippingDate}</Text>
+          </View>
+        </View>
+
+        {/* Row 5: Metal, Category, Stone type */}
+        <View style={styles.compactRow5}>
+          <View style={styles.compactMaterialItem}>
+            <Text style={styles.compactMaterialLabel}>Metal</Text>
+            <Text style={styles.compactMaterialValue} numberOfLines={1}>{metalDisplay}</Text>
+          </View>
+          <View style={styles.compactMaterialItem}>
+            <Text style={styles.compactMaterialLabel}>Category</Text>
+            <Text style={styles.compactMaterialValue} numberOfLines={1}>{category}</Text>
+          </View>
+          <View style={styles.compactMaterialItem}>
+            <Text style={styles.compactMaterialLabel}>Stone type</Text>
+            <Text style={styles.compactMaterialValue} numberOfLines={1}>{stoneType}</Text>
+          </View>
+        </View>
+
+        {/* Row 6: Price (only for client) */}
+        {showPrice && (
+          <View style={styles.compactRow6}>
+            <Text style={styles.compactPriceLabel}>Price</Text>
+            <Text style={styles.compactPriceValue}>{price}</Text>
+          </View>
+        )}
+
+        {/* Row 7: Design Progress - Design, CAD, Order placement */}
+        {/* <View style={styles.compactRow7}>
+          <View style={[styles.compactProgressItem, hasDesign && styles.compactProgressItemActive]}>
+            <Text style={[styles.compactProgressText, hasDesign && styles.compactProgressTextActive]}>Design</Text>
+          </View>
+          <View style={[styles.compactProgressItem, hasCAD && styles.compactProgressItemActive]}>
+            <Text style={[styles.compactProgressText, hasCAD && styles.compactProgressTextActive]}>CAD</Text>
+          </View>
+          <View style={[styles.compactProgressItem, hasOrder && styles.compactProgressItemActive]}>
+            <Text style={[styles.compactProgressText, hasOrder && styles.compactProgressTextActive]}>Order placement</Text>
+          </View>
+        </View> */}
+      </View>
+    </Card>
+  );
+};
 
 export const EnquiryCard = ({
   enquiry,
@@ -462,5 +1115,203 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: colors.textLight,
     textAlign: 'center',
+  },
+  
+  // Compact Enquiry Card Styles (2 per row)
+  compactEnquiryCard: {
+    width: '48%',
+    marginHorizontal: '1%',
+    marginVertical: 8,
+    borderRadius: 12,
+    padding: 0,
+    backgroundColor: colors.background,
+    shadowColor: colors.cardShadow,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    overflow: 'hidden',
+  },
+  compactImageContainer: {
+    width: '100%',
+    height: 100,
+    backgroundColor: colors.backgroundSecondary,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  compactImage: {
+    width: '100%',
+    height: '100%',
+  },
+  compactImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSecondary,
+  },
+  compactImagePlaceholderText: {
+    fontSize: 8,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    marginTop: 4,
+  },
+  compactImageLoading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+  },
+  compactCardContent: {
+    padding: 8,
+  },
+  // Row 1: Name and Priority
+  compactRow1: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  compactName: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    flex: 1,
+    marginRight: 4,
+  },
+  compactPriorityBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  compactPriorityText: {
+    fontSize: 8,
+    fontFamily: fonts.bold,
+    letterSpacing: 0.3,
+  },
+  // Row 2: Status
+  compactRow2: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 6,
+  },
+  compactStatusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  compactStatusText: {
+    fontSize: 8,
+    fontFamily: fonts.bold,
+    letterSpacing: 0.3,
+  },
+  // Row 3: Assigned to and Created
+  compactRow3: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  compactFieldGroup: {
+    flex: 1,
+  },
+  compactLabelText: {
+    fontSize: 7,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    marginBottom: 1,
+  },
+  compactValueText: {
+    fontSize: 7,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+  },
+  // Row 4: Shipping
+  compactRow4: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 6,
+  },
+  // Row 5: Metal, Category, Stone type
+  compactRow5: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    gap: 4,
+  },
+  compactMaterialItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  compactMaterialLabel: {
+    fontSize: 7,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    marginBottom: 2,
+  },
+  compactMaterialValue: {
+    fontSize: 7,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  // Row 6: Price
+  compactRow6: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  compactPriceLabel: {
+    fontSize: 8,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+  },
+  compactPriceValue: {
+    fontSize: 9,
+    fontFamily: fonts.bold,
+    color: colors.primary,
+  },
+  // Row 7: Design Progress
+  compactRow7: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 4,
+    marginTop: 4,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  compactProgressItem: {
+    flex: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderRadius: 4,
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+  },
+  compactProgressItemActive: {
+    backgroundColor: colors.primary + '20',
+  },
+  compactProgressText: {
+    fontSize: 7,
+    fontFamily: fonts.medium,
+    color: colors.textLight,
+  },
+  compactProgressTextActive: {
+    color: colors.primary,
+    fontFamily: fonts.bold,
   },
 });

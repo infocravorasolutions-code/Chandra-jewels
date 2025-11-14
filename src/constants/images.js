@@ -76,8 +76,8 @@ export const icons = {
   // Professional enquiry detail icons
   person: 'person',
   schedule: 'schedule',
-  attachMoney: 'currency-rupee',
-  rupee: 'currency-rupee',
+  attachMoney: 'attach-money',
+  rupee: 'attach-money',
   photoLibrary: 'photo-library',
   designServices: 'design-services',
   precisionManufacturing: 'precision-manufacturing',

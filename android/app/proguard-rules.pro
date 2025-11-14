@@ -8,3 +8,8 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# Sentry ProGuard rules
+-keepattributes SourceFile,LineNumberTable
+-keep class io.sentry.** { *; }
+-dontwarn io.sentry.**

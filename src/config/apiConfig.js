@@ -112,11 +112,15 @@ export const getSocketBaseUrl = () => {
 
 /**
  * Get the base URL for file/media serving
- * By default, uses the same URL as API
+ * Mirrors the API base URL unless explicitly overridden
  * @returns {string} Base URL for file serving
  */
 export const getFileBaseUrl = () => {
-  // Files are typically served from the same server as API
+  if (process.env.FILE_URL) {
+    return process.env.FILE_URL;
+  }
+
+  // Default to the same base URL used for API requests
   return getApiBaseUrl();
 };
 

@@ -46,8 +46,54 @@ export const checkAuthState = createAsyncThunk(
           }
         }
         
-        // Add name if missing (for backward compatibility)
-        if (!userData.name) {
+        // Check if name is missing or appears to be email-derived (contains numbers or matches email pattern)
+        const isEmailDerivedName = userData.name && (
+          userData.name.toLowerCase() === (userData.email?.split('@')[0] || '').toLowerCase() ||
+          /^\d/.test(userData.name) || // Starts with number
+          /^[a-z]+\d+$/i.test(userData.name) // Pattern like "pitbull9792"
+        );
+        
+        // Fetch user details from API if name is missing or email-derived
+        if ((!userData.name || isEmailDerivedName) && userData.id) {
+          try {
+            const { API_BASE_URL } = require('../../config/apiConfig');
+            const userResponse = await fetch(`${API_BASE_URL}/api/users/${userData.id}`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${storedToken}`,
+                'Content-Type': 'application/json',
+              },
+            });
+            
+            if (userResponse.ok) {
+              const userDataResponse = await userResponse.json();
+              const fetchedUser = userDataResponse.user || userDataResponse;
+              const fetchedName = fetchedUser.name || fetchedUser.Name;
+              
+              if (fetchedName && fetchedName !== userData.name) {
+                userData.name = fetchedName;
+                userDataUpdated = true;
+                console.log('Updated user name from API:', fetchedName);
+              }
+            }
+          } catch (error) {
+            console.warn('Error fetching user details in checkAuthState:', error);
+            // Continue even if fetch fails
+          }
+        }
+        
+        // Add name if still missing (for backward compatibility)
+        // First try to extract from token, then fallback to email-based generation
+        if (!userData.name && decodedToken) {
+          // Try different case variations for name in token
+          const userName = decodedToken.Name || decodedToken.name || decodedToken.username || decodedToken.Username || 
+                          decodedToken.fullName || decodedToken.FullName || decodedToken.firstName || decodedToken.FirstName;
+          
+          if (userName) {
+            userData.name = userName;
+            userDataUpdated = true;
+          } else {
+            // Fallback: generate from email if name not in token
           const getDisplayName = (email, role) => {
             if (email) {
               const emailPart = email.split('@')[0];
@@ -63,6 +109,7 @@ export const checkAuthState = createAsyncThunk(
           };
           userData.name = getDisplayName(userData.email, userData.role);
           userDataUpdated = true;
+          }
         }
         
         // Save updated userData if any changes were made

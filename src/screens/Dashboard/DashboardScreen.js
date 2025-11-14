@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Text,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
@@ -18,6 +19,33 @@ import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatCurrency, getRoleDisplayName, spacing, responsivePadding, imageSizes } from '../../utils';
+import { FILE_BASE_URL } from '../../config/apiConfig';
+
+// Client Card Component with Image Support
+const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
+  const [imageError, setImageError] = useState(false);
+  
+  return (
+    <TouchableOpacity
+      style={styles.clientCard}
+      onPress={onPress}
+    >
+      {imageUrl && !imageError ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={styles.clientImage}
+          resizeMode="contain"
+          onError={() => setImageError(true)}
+        />
+      ) : (
+        <View style={styles.clientImagePlaceholder}>
+          <Icon name="account" size={24} color={colors.textSecondary} />
+        </View>
+      )}
+      <Text style={styles.clientCount}>{client.enquiryCount || 0}</Text>
+    </TouchableOpacity>
+  );
+};
 
 const DashboardScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -41,16 +69,26 @@ const DashboardScreen = ({ navigation }) => {
   });
 
   const { 
-    data: enquiriesData = [], 
+    data: enquiriesResponse, 
     isLoading: enquiriesLoading 
   } = useGetEnquiriesQuery(user?.role || 'admin', {
     skip: !user || user?.role !== 'admin',
   });
 
+  // Extract enquiries array from response (new API returns { data, pagination })
+  const enquiriesData = enquiriesResponse?.data || [];
+
   // Compute clients with enquiry counts
   const clients = useMemo(() => {
     if (user?.role !== 'admin' || !clientsData || clientsData.length === 0) {
       return [];
+    }
+
+    if (!enquiriesData || !Array.isArray(enquiriesData) || enquiriesData.length === 0) {
+      return clientsData.map(client => ({
+        ...client,
+        enquiryCount: 0,
+      }));
     }
 
     return clientsData.map(client => {
@@ -133,16 +171,36 @@ const DashboardScreen = ({ navigation }) => {
             style={styles.clientsScroll}
             contentContainerStyle={styles.clientsScrollContent}
           >
-            {clients.map(client => (
-              <TouchableOpacity
-                style={styles.clientCard}
-                key={client.id}
-                onPress={() => navigation.navigate('Enquiries', { filterType: 'client', filter: client.name })}
-              >
-                <Text style={styles.clientName} numberOfLines={2}>{client.name || 'Unknown Client'}</Text>
-                <Text style={styles.clientCount}>{client.enquiryCount || 0}</Text>
-              </TouchableOpacity>
-            ))}
+            {clients.map(client => {
+              // Construct image URL
+              const getClientImageUrl = () => {
+                if (!client.imageUrl) return null;
+                
+                // If it's already a full URL, use it directly
+                if (client.imageUrl.startsWith('http://') || client.imageUrl.startsWith('https://')) {
+                  return client.imageUrl;
+                }
+                
+                // If it starts with /, it's a path - construct full URL
+                if (client.imageUrl.startsWith('/')) {
+                  return `${FILE_BASE_URL}${client.imageUrl}`;
+                }
+                
+                // Otherwise, treat as file key and construct URL
+                return `${FILE_BASE_URL}/api/clients/files/${encodeURIComponent(client.imageUrl)}`;
+              };
+              
+              const imageUrl = getClientImageUrl();
+              
+              return (
+                <ClientCardWithImage
+                  key={client.id}
+                  client={client}
+                  imageUrl={imageUrl}
+                  onPress={() => navigation.navigate('Enquiries', { filterType: 'client', filter: client.name })}
+                />
+              );
+            })}
           </ScrollView>
         </View>
       )}
@@ -171,7 +229,7 @@ const DashboardScreen = ({ navigation }) => {
         <StatusCard
           title="Revenue"
           value={formatCurrency(dashboardData?.revenue || 0)}
-          icon={<Icon name="currency-rupee" size={20} color={colors.textWhite} />}
+          icon={<Icon name="attach-money" size={20} color={colors.textWhite} />}
           color={colors.primary}
           onPress={() => navigation.navigate('RevenueReport')}
         />
@@ -375,10 +433,10 @@ const DashboardScreen = ({ navigation }) => {
             <View style={styles.welcomeContent}>
               <View style={styles.welcomeText}>
                 <Text style={styles.welcomeGreeting}>
-                  Hi <Text style={styles.userNameHighlight}>{user?.name || 'User'}</Text>,
+                  Hii <Text style={styles.userNameHighlight}>{user?.name || 'User'}</Text>,
                 </Text>
                 <Text style={styles.welcomeSubtitle}>
-                  Welcome to Chandra Jewellers
+                  Welcome to Chandra Jewels
                 </Text>
               </View>
               <View style={styles.welcomeIconContainer}>
@@ -576,14 +634,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
     borderWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  clientImage: {
+    width: '100%',
+    height: 60,
+    marginBottom: 4,
+    borderRadius: 8,
+  },
+  clientImagePlaceholder: {
+    width: '100%',
+    height: 60,
+    marginBottom: 4,
+    borderRadius: 8,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   clientName: {
     fontSize: 11,

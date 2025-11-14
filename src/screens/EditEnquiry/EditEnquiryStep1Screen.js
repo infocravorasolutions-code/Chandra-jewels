@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -14,7 +14,7 @@ import { Heading, CustomText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
-import { useGetEnquiryByIdQuery, useGetClientsQuery } from '../../store/api';
+import { useGetEnquiryByIdQuery, useGetClientsQuery, useGetUsersQuery } from '../../store/api';
 
 const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const enquiryToEdit = route.params?.enquiry || null;
@@ -35,14 +35,19 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const { data: clientsData = [] } = useGetClientsQuery(undefined, {
     skip: false,
   });
+  const clients = useMemo(() => Array.isArray(clientsData) ? clientsData : [], [clientsData]);
+
+  // Fetch users for Assigned To field
+  const { data: usersData = [] } = useGetUsersQuery(undefined, {
+    skip: false,
+  });
+  const users = useMemo(() => Array.isArray(usersData) ? usersData : [], [usersData]);
   
-  const clients = Array.isArray(clientsData) ? clientsData : [];
-  
-  // Create client options for dropdown
-  const clientOptions = clients.map(client => ({
+  // Create client options for dropdown - memoized to prevent recreation on every render
+  const clientOptions = useMemo(() => clients.map(client => ({
     label: client.name || 'Unknown Client',
     value: client.id || client._id,
-  }));
+  })), [clients]);
 
   // Map enquiry data to form format
   const getInitialFormData = () => {
@@ -57,21 +62,20 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         status: 'Enquiry Created',
         assignedTo: '',
         priority: 'Normal',
-        deadline: '',
         category: 'Ring',
         metalColor: 'Gold',
         metalQuality: '10K',
         stoneType: 'NaturalRegular',
         quantity: '1',
+        stamping: '',
+        gatiOrderNumber: '',
+        styleNumber: '',
         metalWeightFrom: '',
         metalWeightTo: '',
         metalWeightExact: '',
         diamondWeightFrom: '',
         diamondWeightTo: '',
         diamondWeightExact: '',
-        stamping: '',
-        styleNumber: '',
-        gatiOrderNumber: '',
       };
     }
     
@@ -158,6 +162,10 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     // Get AssignedTo from enquiry
     const enquiryAssignedTo = originalData?.AssignedTo || enquiry?.AssignedTo || enquiry?.assignedTo || '';
     
+    // Extract weight data
+    const metalWeight = originalData?.MetalWeight || enquiry.MetalWeight || enquiry.metalWeight || {};
+    const diamondWeight = originalData?.DiamondWeight || enquiry.DiamondWeight || enquiry.diamondWeight || {};
+    
     return {
       title: enquiry.title || enquiry.Name || originalData?.Name || '',
       description: enquiry.description || enquiry.Remarks || originalData?.Remarks || '',
@@ -166,21 +174,20 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       status: enquiryStatus,
       assignedTo: enquiryAssignedTo,
       priority: mappedPriority,
-      deadline: formatDateForInput(enquiry.deadline || enquiry.ShippingDate || originalData?.ShippingDate || originalData?.Deadline),
       category: enquiry.category || enquiry.Category || originalData?.Category || 'Ring',
       metalColor: originalData?.Metal?.Color || enquiry.Metal?.Color || originalData?.metal?.color || 'Gold',
       metalQuality: originalData?.Metal?.Quality || enquiry.Metal?.Quality || originalData?.metal?.quality || '10K',
       stoneType: enquiry.stoneType || enquiry.StoneType || originalData?.StoneType || originalData?.stoneType || 'NaturalRegular',
       quantity: safeToString(originalData?.Quantity || enquiry.Quantity || enquiry.quantity || '1'),
-      metalWeightFrom: safeToString(originalData?.MetalWeight?.From || enquiry.MetalWeight?.From || originalData?.metalWeight?.from || enquiry.metalWeightFrom || ''),
-      metalWeightTo: safeToString(originalData?.MetalWeight?.To || enquiry.MetalWeight?.To || originalData?.metalWeight?.to || enquiry.metalWeightTo || ''),
-      metalWeightExact: safeToString(originalData?.MetalWeight?.Exact || enquiry.MetalWeight?.Exact || originalData?.metalWeight?.exact || enquiry.metalWeightExact || ''),
-      diamondWeightFrom: safeToString(originalData?.DiamondWeight?.From || enquiry.DiamondWeight?.From || originalData?.diamondWeight?.from || enquiry.diamondWeightFrom || ''),
-      diamondWeightTo: safeToString(originalData?.DiamondWeight?.To || enquiry.DiamondWeight?.To || originalData?.diamondWeight?.to || enquiry.diamondWeightTo || ''),
-      diamondWeightExact: safeToString(originalData?.DiamondWeight?.Exact || enquiry.DiamondWeight?.Exact || originalData?.diamondWeight?.exact || enquiry.diamondWeightExact || ''),
       stamping: safeToString(originalData?.Stamping || enquiry.stamping || enquiry.Stamping || ''),
-      styleNumber: safeToString(originalData?.StyleNumber || enquiry.styleNumber || enquiry.StyleNumber || ''),
-      gatiOrderNumber: safeToString(originalData?.GatiOrderNumber || enquiry.gatiOrderNumber || enquiry.GatiOrderNumber || ''),
+      gatiOrderNumber: safeToString(originalData?.GatiOrderNumber || enquiry.GatiOrderNumber || enquiry.gatiOrderNumber || ''),
+      styleNumber: safeToString(originalData?.StyleNumber || enquiry.StyleNumber || enquiry.styleNumber || ''),
+      metalWeightFrom: safeToString(metalWeight.From || metalWeight.from || ''),
+      metalWeightTo: safeToString(metalWeight.To || metalWeight.to || ''),
+      metalWeightExact: safeToString(metalWeight.Exact || metalWeight.exact || ''),
+      diamondWeightFrom: safeToString(diamondWeight.From || diamondWeight.from || ''),
+      diamondWeightTo: safeToString(diamondWeight.To || diamondWeight.to || ''),
+      diamondWeightExact: safeToString(diamondWeight.Exact || diamondWeight.exact || ''),
     };
   };
 
@@ -193,21 +200,20 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     status: 'Enquiry Created',
     assignedTo: '',
     priority: 'Normal',
-    deadline: '',
     category: 'Ring',
     metalColor: 'Gold',
     metalQuality: '10K',
     stoneType: 'NaturalRegular',
     quantity: '1',
+    stamping: '',
+    gatiOrderNumber: '',
+    styleNumber: '',
     metalWeightFrom: '',
     metalWeightTo: '',
     metalWeightExact: '',
     diamondWeightFrom: '',
     diamondWeightTo: '',
     diamondWeightExact: '',
-    stamping: '',
-    styleNumber: '',
-    gatiOrderNumber: '',
   });
   const [errors, setErrors] = useState({});
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -218,43 +224,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
 
-  // Helper function to check if a field should be displayed
-  const shouldDisplayField = (fieldPath) => {
-    const originalData = finalEnquiryToEdit?._originalData || finalEnquiryToEdit;
-    if (!originalData) return false;
-    
-    // Handle nested paths like Metal.Color, MetalWeight.From, etc.
-    const pathParts = fieldPath.split('.');
-    let value = originalData;
-    
-    for (const part of pathParts) {
-      if (value === null || value === undefined) return false;
-      value = value[part];
-    }
-    
-    // Return true if value exists and is not null
-    return value !== null && value !== undefined;
-  };
-  
-  // Check if weight sections should be displayed
-  const shouldDisplayMetalWeight = (
-    shouldDisplayField('MetalWeight.From') || 
-    shouldDisplayField('MetalWeight.To') || 
-    shouldDisplayField('MetalWeight.Exact')
-  );
-  
-  const shouldDisplayDiamondWeight = (
-    shouldDisplayField('DiamondWeight.From') || 
-    shouldDisplayField('DiamondWeight.To') || 
-    shouldDisplayField('DiamondWeight.Exact')
-  );
-  
-  // Check if additional information section should be displayed
-  const shouldDisplayAdditionalInfo = (
-    shouldDisplayField('Stamping') || 
-    shouldDisplayField('StyleNumber') || 
-    shouldDisplayField('GatiOrderNumber')
-  );
 
   // Update form data when enquiry changes or when fetched data arrives
   useEffect(() => {
@@ -290,7 +259,9 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         console.log('  - Quantity:', initialData.quantity);
       }
     }
-  }, [finalEnquiryToEdit?.id, finalEnquiryToEdit?._id, enquiryId, fetchingEnquiry, clients]);
+    // Removed 'clients' from dependencies - use clientsData.length instead to track when clients are loaded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalEnquiryToEdit?.id, finalEnquiryToEdit?._id, enquiryId, fetchingEnquiry, clientsData?.length]);
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -403,11 +374,16 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Rejected', value: 'Rejected' },
   ];
 
-  // Create assigned to options from clients (includes all users)
-  const assignedToOptions = clients.map(client => ({
-    label: client.name || 'Unknown',
-    value: client.id || client._id,
-  }));
+  // Create assigned-to options from users (exclude clients by role) - memoized to prevent recreation
+  const assignedToOptions = useMemo(() => users
+    .filter(user => {
+      const roleString = String(user.role || '').toLowerCase();
+      return roleString !== 'client';
+    })
+    .map(user => ({
+      label: user.name || user.email || 'Unknown',
+      value: user.id || user._id,
+    })), [users]);
 
   const categoryOptions = [
     { label: 'Ring', value: 'Ring' },
@@ -462,272 +438,257 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       </View>
 
       <View style={styles.form}>
-        <Input
-          label="Enquiry Title"
-          placeholder="Enter enquiry title"
-          value={formData.title}
-          onChangeText={(value) => handleInputChange('title', value)}
-          error={errors.title}
-        />
-
-        {shouldDisplayField('Remarks') && (
-          <Input
-            label="Description"
-            placeholder="Describe your jewellery requirements"
-            value={formData.description}
-            onChangeText={(value) => handleInputChange('description', value)}
-            multiline
-            numberOfLines={4}
-            error={errors.description}
-          />
-        )}
-
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Client Information
-          </CustomText>
-          
-          {renderDropdown(
-            'Client Name',
-            formData.clientId,
-            clientOptions,
-            (clientId) => {
-              const selectedClient = clients.find(c => (c.id || c._id) === clientId);
-              handleInputChange('clientId', clientId);
-              handleInputChange('clientName', selectedClient?.name || '');
-            },
-            showClientDropdown,
-            () => setShowClientDropdown(!showClientDropdown)
-          )}
-          {errors.clientId && (
-            <Text style={styles.errorText}>{errors.clientId}</Text>
-          )}
+        {/* Row 1: Name and Client */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Name*"
+              placeholder="Name*"
+              value={formData.title}
+              onChangeText={(value) => handleInputChange('title', value)}
+              error={errors.title}
+            />
+          </View>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Client*',
+              formData.clientId,
+              clientOptions,
+              (clientId) => {
+                const selectedClient = clients.find(c => (c.id || c._id) === clientId);
+                handleInputChange('clientId', clientId);
+                handleInputChange('clientName', selectedClient?.name || '');
+              },
+              showClientDropdown,
+              () => setShowClientDropdown(!showClientDropdown)
+            )}
+            {errors.clientId && (
+              <Text style={styles.errorText}>{errors.clientId}</Text>
+            )}
+          </View>
         </View>
 
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Project Details
-          </CustomText>
-
-          {renderDropdown(
-            'Status',
-            formData.status,
-            statusOptions,
-            (value) => handleInputChange('status', value),
-            showStatusDropdown,
-            () => setShowStatusDropdown(!showStatusDropdown)
-          )}
-
-          {renderDropdown(
-            'Assigned To',
-            formData.assignedTo,
-            assignedToOptions,
-            (value) => handleInputChange('assignedTo', value),
-            showAssignedToDropdown,
-            () => setShowAssignedToDropdown(!showAssignedToDropdown)
-          )}
-
-          <View style={styles.priorityContainer}>
-            <CustomText variant="label" style={styles.priorityLabel}>
-              Priority Level
-            </CustomText>
-            <View style={styles.priorityOptions}>
-              {priorityOptions.map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.priorityOption,
-                    formData.priority === option.value && styles.priorityOptionActive,
-                  ]}
-                  onPress={() => handleInputChange('priority', option.value)}>
-                  <CustomText
-                    variant="caption"
-                    color={formData.priority === option.value ? 'white' : 'secondary'}>
-                    {option.label}
-                  </CustomText>
-                </TouchableOpacity>
-              ))}
+        {/* Row 2: Priority and Category */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <View style={styles.priorityContainer}>
+              <Text style={styles.priorityLabel}>Priority</Text>
+              <View style={styles.priorityOptions}>
+                {priorityOptions.map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.priorityOption,
+                      formData.priority === option.value && styles.priorityOptionActive,
+                    ]}
+                    onPress={() => handleInputChange('priority', option.value)}>
+                    <Text
+                      style={[
+                        styles.priorityOptionText,
+                        formData.priority === option.value && styles.priorityOptionTextActive,
+                      ]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           </View>
-
-          {shouldDisplayField('ShippingDate') && (
-            <Input
-              label="Shipping Date (Optional)"
-              placeholder="YYYY-MM-DD"
-              value={formData.deadline}
-              onChangeText={(value) => handleInputChange('deadline', value)}
-            />
-          )}
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Category',
+              formData.category,
+              categoryOptions,
+              (value) => handleInputChange('category', value),
+              showCategoryDropdown,
+              () => setShowCategoryDropdown(!showCategoryDropdown)
+            )}
+          </View>
         </View>
 
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Product Details
-          </CustomText>
-          
-          {renderDropdown(
-            'Category',
-            formData.category,
-            categoryOptions,
-            (value) => handleInputChange('category', value),
-            showCategoryDropdown,
-            () => setShowCategoryDropdown(!showCategoryDropdown)
-          )}
-
-          {renderDropdown(
-            'Metal Color',
-            formData.metalColor,
-            metalColorOptions,
-            (value) => handleInputChange('metalColor', value),
-            showMetalColorDropdown,
-            () => setShowMetalColorDropdown(!showMetalColorDropdown)
-          )}
-
-          {renderDropdown(
-            'Metal Quality',
-            formData.metalQuality,
-            metalQualityOptions,
-            (value) => handleInputChange('metalQuality', value),
-            showMetalQualityDropdown,
-            () => setShowMetalQualityDropdown(!showMetalQualityDropdown)
-          )}
-
-          {renderDropdown(
-            'Stone Type',
-            formData.stoneType,
-            stoneTypeOptions,
-            (value) => handleInputChange('stoneType', value),
-            showStoneTypeDropdown,
-            () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
-          )}
-
-          {shouldDisplayField('Quantity') && (
+        {/* Row 3: Stamping and Quantity */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Stamping"
+              placeholder="Stamping"
+              value={formData.stamping}
+              onChangeText={(value) => handleInputChange('stamping', value)}
+            />
+          </View>
+          <View style={styles.formField}>
             <Input
               label="Quantity"
-              placeholder="Enter quantity"
+              placeholder="Quantity"
               value={formData.quantity}
               onChangeText={(value) => handleInputChange('quantity', value)}
               keyboardType="numeric"
               error={errors.quantity}
             />
-          )}
+          </View>
         </View>
 
-        {shouldDisplayMetalWeight && (
-          <View style={styles.section}>
-            <CustomText variant="label" style={styles.sectionTitle}>
-              Weight Details (Optional)
-            </CustomText>
-            
-            {(shouldDisplayField('MetalWeight.From') || shouldDisplayField('MetalWeight.To')) && (
-              <View style={styles.weightRow}>
-                {shouldDisplayField('MetalWeight.From') && (
-                  <Input
-                    label="Metal Weight (From)"
-                    placeholder="From"
-                    value={formData.metalWeightFrom}
-                    onChangeText={(value) => handleInputChange('metalWeightFrom', value)}
-                    keyboardType="numeric"
-                    style={styles.weightInput}
-                  />
-                )}
-                {shouldDisplayField('MetalWeight.To') && (
-                  <Input
-                    label="Metal Weight (To)"
-                    placeholder="To"
-                    value={formData.metalWeightTo}
-                    onChangeText={(value) => handleInputChange('metalWeightTo', value)}
-                    keyboardType="numeric"
-                    style={styles.weightInput}
-                  />
-                )}
-              </View>
-            )}
-
-            {shouldDisplayField('MetalWeight.Exact') && (
-              <Input
-                label="Metal Weight (Exact)"
-                placeholder="Exact weight"
-                value={formData.metalWeightExact}
-                onChangeText={(value) => handleInputChange('metalWeightExact', value)}
-                keyboardType="numeric"
-              />
-            )}
-
-            {(shouldDisplayField('DiamondWeight.From') || shouldDisplayField('DiamondWeight.To')) && (
-              <View style={styles.weightRow}>
-                {shouldDisplayField('DiamondWeight.From') && (
-                  <Input
-                    label="Diamond Weight (From)"
-                    placeholder="From"
-                    value={formData.diamondWeightFrom}
-                    onChangeText={(value) => handleInputChange('diamondWeightFrom', value)}
-                    keyboardType="numeric"
-                    style={styles.weightInput}
-                  />
-                )}
-                {shouldDisplayField('DiamondWeight.To') && (
-                  <Input
-                    label="Diamond Weight (To)"
-                    placeholder="To"
-                    value={formData.diamondWeightTo}
-                    onChangeText={(value) => handleInputChange('diamondWeightTo', value)}
-                    keyboardType="numeric"
-                    style={styles.weightInput}
-                  />
-                )}
-              </View>
-            )}
-
-            {shouldDisplayField('DiamondWeight.Exact') && (
-              <Input
-                label="Diamond Weight (Exact)"
-                placeholder="Exact weight"
-                value={formData.diamondWeightExact}
-                onChangeText={(value) => handleInputChange('diamondWeightExact', value)}
-                keyboardType="numeric"
-              />
+        {/* Row 4: Status and Assigned To */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Status*',
+              formData.status,
+              statusOptions,
+              (value) => handleInputChange('status', value),
+              showStatusDropdown,
+              () => setShowStatusDropdown(!showStatusDropdown)
             )}
           </View>
-        )}
-
-        {shouldDisplayAdditionalInfo && (
-          <View style={styles.section}>
-            <CustomText variant="label" style={styles.sectionTitle}>
-              Additional Information (Optional)
-            </CustomText>
-            
-            {shouldDisplayField('Stamping') && (
-              <Input
-                label="Stamping"
-                placeholder="Enter stamping details"
-                value={formData.stamping}
-                onChangeText={(value) => handleInputChange('stamping', value)}
-              />
-            )}
-
-            {shouldDisplayField('StyleNumber') && (
-              <Input
-                label="Style Number"
-                placeholder="Enter style number"
-                value={formData.styleNumber}
-                onChangeText={(value) => handleInputChange('styleNumber', value)}
-              />
-            )}
-
-            {shouldDisplayField('GatiOrderNumber') && (
-              <Input
-                label="Gati Order Number"
-                placeholder="Enter Gati order number"
-                value={formData.gatiOrderNumber}
-                onChangeText={(value) => handleInputChange('gatiOrderNumber', value)}
-              />
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Assigned To',
+              formData.assignedTo,
+              assignedToOptions,
+              (value) => handleInputChange('assignedTo', value),
+              showAssignedToDropdown,
+              () => setShowAssignedToDropdown(!showAssignedToDropdown)
             )}
           </View>
-        )}
+        </View>
+
+        {/* Row 5: Stone Type (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            {renderDropdown(
+              'Stone Type*',
+              formData.stoneType,
+              stoneTypeOptions,
+              (value) => handleInputChange('stoneType', value),
+              showStoneTypeDropdown,
+              () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
+            )}
+          </View>
+        </View>
+
+        {/* Row 6: Gati Order and Style Number */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Gati Order"
+              placeholder="Gati Order"
+              value={formData.gatiOrderNumber}
+              onChangeText={(value) => handleInputChange('gatiOrderNumber', value)}
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Style Number"
+              placeholder="Style Number"
+              value={formData.styleNumber}
+              onChangeText={(value) => handleInputChange('styleNumber', value)}
+            />
+          </View>
+        </View>
+
+        {/* Row 7: Metal Quality and Metal Color */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Metal Quality*',
+              formData.metalQuality,
+              metalQualityOptions,
+              (value) => handleInputChange('metalQuality', value),
+              showMetalQualityDropdown,
+              () => setShowMetalQualityDropdown(!showMetalQualityDropdown)
+            )}
+          </View>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Metal Color*',
+              formData.metalColor,
+              metalColorOptions,
+              (value) => handleInputChange('metalColor', value),
+              showMetalColorDropdown,
+              () => setShowMetalColorDropdown(!showMetalColorDropdown)
+            )}
+          </View>
+        </View>
+
+        {/* Row 8: Metal Weight - From, To, Exact */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Metal Weight - From"
+              placeholder="From (gms)"
+              value={formData.metalWeightFrom}
+              onChangeText={(value) => handleInputChange('metalWeightFrom', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Metal Weight - To"
+              placeholder="To (gms)"
+              value={formData.metalWeightTo}
+              onChangeText={(value) => handleInputChange('metalWeightTo', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Metal Weight - Exact"
+              placeholder="Exact (gms)"
+              value={formData.metalWeightExact}
+              onChangeText={(value) => handleInputChange('metalWeightExact', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+
+        {/* Row 9: Diamond Weight - From, To, Exact */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Diamond Weight - From"
+              placeholder="From (ct)"
+              value={formData.diamondWeightFrom}
+              onChangeText={(value) => handleInputChange('diamondWeightFrom', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Diamond Weight - To"
+              placeholder="To (ct)"
+              value={formData.diamondWeightTo}
+              onChangeText={(value) => handleInputChange('diamondWeightTo', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Diamond Weight - Exact"
+              placeholder="Exact (ct)"
+              value={formData.diamondWeightExact}
+              onChangeText={(value) => handleInputChange('diamondWeightExact', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+
+        {/* Row 10: Remarks (full width textarea) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Remarks"
+              placeholder="Remarks"
+              value={formData.description}
+              onChangeText={(value) => handleInputChange('description', value)}
+              multiline
+              numberOfLines={4}
+              error={errors.description}
+            />
+          </View>
+        </View>
 
         <Button
-          title="Next Step"
+          title="Save"
           onPress={handleNext}
           style={styles.nextButton}
         />
@@ -838,13 +799,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  weightRow: {
+  formRow: {
     flexDirection: 'row',
     gap: 12,
     marginBottom: 16,
   },
-  weightInput: {
+  formField: {
     flex: 1,
+  },
+  fullWidthField: {
+    flex: 1,
+    width: '100%',
   },
   nextButton: {
     marginTop: 24,

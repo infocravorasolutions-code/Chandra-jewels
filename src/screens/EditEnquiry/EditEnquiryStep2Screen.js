@@ -253,6 +253,22 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         budget: enquiry.budget,
       };
       
+      if (__DEV__) {
+        console.log('========== EditEnquiryStep2Screen - Navigation Back ==========');
+        console.log('enquiry.id:', enquiry.id);
+        console.log('updatedEnquiry:', {
+          id: updatedEnquiry.id,
+          StoneType: updatedEnquiry.StoneType,
+          StyleNumber: updatedEnquiry.StyleNumber,
+          GatiOrderNumber: updatedEnquiry.GatiOrderNumber,
+          MetalWeight: updatedEnquiry.MetalWeight,
+          DiamondWeight: updatedEnquiry.DiamondWeight,
+        });
+        console.log('shouldRefresh: true');
+        console.log('Navigating to SingleEnquiry screen...');
+        console.log('============================================================');
+      }
+      
       Alert.alert(
         'Enquiry Updated',
         'Your enquiry has been updated successfully!',
@@ -261,6 +277,9 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
             text: 'OK',
             onPress: () => {
               // Navigate back to single enquiry screen with updated data
+              if (__DEV__) {
+                console.log('✅ Alert OK pressed, navigating to SingleEnquiry...');
+              }
               navigation.navigate('SingleEnquiry', { 
                 enquiryId: enquiry.id, 
                 enquiry: updatedEnquiry,

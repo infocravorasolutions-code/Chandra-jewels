@@ -23,8 +23,9 @@ import {
   setSelectedStatus,
   setSelectedClient,
   clearFilters,
+  setPage,
 } from '../../features/enquiries/enquiriesSlice';
-import { EnquiryCard, Card } from '../../components/cards/Cards';
+import { EnquiryCard, CompactEnquiryCard, Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
@@ -62,8 +63,13 @@ const EnquiryListScreen = ({ navigation }) => {
   const selectedClient = useSelector(state => state.enquiries.selectedClient);
   
   // RTK Query hook - replaces loadEnquiries and all filtering logic
-  const { enquiries: filteredEnquiries, allEnquiries: enquiries, isLoading: loading, refetch } = 
+  const { enquiries: filteredEnquiries, allEnquiries: enquiries, isLoading: loading, refetch, pagination } = 
     useFilteredEnquiries(user?.role);
+  
+  // Get pagination state from Redux
+  const currentPage = useSelector(state => state.enquiries.pagination.currentPage);
+  const totalPages = useSelector(state => state.enquiries.pagination.totalPages);
+  const total = useSelector(state => state.enquiries.pagination.total);
   
   // Fetch clients to enrich client names
   const { data: clientsData = [], isLoading: clientsLoading, error: clientsError } = useGetClientsQuery(undefined, {
@@ -87,6 +93,7 @@ const EnquiryListScreen = ({ navigation }) => {
   const [showFilters, setShowFilters] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [isPageChanging, setIsPageChanging] = useState(false);
 
   // Create a client ID to name lookup map
   // Handle both string and object ID comparisons
@@ -263,11 +270,83 @@ const EnquiryListScreen = ({ navigation }) => {
     const newStatus = route.params?.filter || 'all';
     if (newStatus !== filters.status) {
       dispatch(setFilters({ status: newStatus }));
+      dispatch(setPage(1)); // Reset to first page when filter changes
     }
     if (route.params?.filterType === 'client' && route.params?.filter) {
       dispatch(setSelectedClient(route.params.filter));
+      dispatch(setPage(1)); // Reset to first page when filter changes
     }
   }, [route.params?.filterType, route.params?.filter]);
+  
+  // Reset to page 1 when filters or search change
+  useEffect(() => {
+    if (currentPage !== 1) {
+      dispatch(setPage(1));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.status, filters.priority, filters.client, searchQuery]);
+  
+  // Pagination handlers
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
+      setIsPageChanging(true);
+      dispatch(setPage(newPage));
+      // Scroll to top when page changes
+      // You might want to add a ref to ScrollView and scroll to top here
+    }
+  };
+
+  // Reset page changing state when data is loaded
+  useEffect(() => {
+    if (!loading && isPageChanging) {
+      // Small delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        setIsPageChanging(false);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, isPageChanging]);
+
+  // Generate page numbers to display with ellipsis
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisible = 7; // Show up to 7 page numbers
+    
+    if (totalPages <= maxVisible) {
+      // Show all pages if total is less than max visible
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Show pages with ellipsis
+      if (currentPage <= 4) {
+        // Show first 5 pages, ellipsis, last page
+        for (let i = 1; i <= 5; i++) {
+          pages.push(i);
+        }
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 3) {
+        // Show first page, ellipsis, last 5 pages
+        pages.push(1);
+        pages.push('ellipsis');
+        for (let i = totalPages - 4; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        // Show first page, ellipsis, current-1, current, current+1, ellipsis, last page
+        pages.push(1);
+        pages.push('ellipsis');
+        pages.push(currentPage - 1);
+        pages.push(currentPage);
+        pages.push(currentPage + 1);
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      }
+    }
+    
+    return pages;
+  };
 
   // Handler for downloading all enquiries as PDF
   const handleDownloadAllPDF = async () => {
@@ -449,7 +528,7 @@ const EnquiryListScreen = ({ navigation }) => {
     { key: 'createdAt', label: 'Date Created', icon: 'schedule' },
     { key: 'title', label: 'Title', icon: 'title' },
     { key: 'clientName', label: 'Client', icon: 'person' },
-    { key: 'budget', label: 'Budget', icon: 'currency-rupee' },
+    { key: 'budget', label: 'Budget', icon: 'attach-money' },
     { key: 'status', label: 'Status', icon: 'flag' },
   ];
 
@@ -475,94 +554,100 @@ const EnquiryListScreen = ({ navigation }) => {
     setShowSortModal(false);
   };
 
-  const renderFilterChips = () => {
-    const activeFilters = Object.entries(filters).filter(([key, value]) => value !== 'all');
+  const renderStatusChips = () => {
+    if (statusList.length <= 1) return null;
     
-    if (activeFilters.length === 0) return null;
-
+    // Filter out the selected status from available options
+    const availableStatuses = statusList.filter(status => status !== selectedStatus);
+    
     return (
-      <View style={styles.filterChipsContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChips}>
-          {activeFilters.map(([key, value]) => (
-            <View key={key} style={styles.filterChip}>
-              <Text style={styles.filterChipText}>
-                {key === 'status' ? 'Status' : key}: {value}
-              </Text>
+      <View style={styles.compactFilterRow}>
+        <Text style={styles.compactFilterLabel}>Status:</Text>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.compactChipsScroll}
+          contentContainerStyle={styles.compactChipsContent}
+        >
+          {/* Show selected status first with X button */}
+          {selectedStatus && selectedStatus !== 'All' && (
+            <View style={styles.compactSelectedChip}>
+              <Text style={styles.compactSelectedChipText}>{selectedStatus}</Text>
               <TouchableOpacity
-                style={styles.filterChipClose}
-                onPress={() => handleFilterChange(key, 'all')}>
-                <Icon name="close" size={14} color={colors.textWhite} />
+                style={styles.compactChipClose}
+                onPress={() => {
+                  dispatch(setSelectedStatus('All'));
+                }}
+              >
+                <Icon name="close" size={12} color={colors.textWhite} />
               </TouchableOpacity>
             </View>
-          ))}
-        </ScrollView>
-        <TouchableOpacity style={styles.clearAllButton} onPress={handleClearFilters}>
-          <Text style={styles.clearAllText}>Clear All</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  const renderStatusChips = () => (
-    statusList.length <= 1 ? null : (
-      <View style={styles.chipsGroupRow}>
-        <Text style={styles.chipGroupLabel}>Status</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
-          {statusList.map(status => (
+          )}
+          
+          {/* Show available status options (excluding selected) */}
+          {availableStatuses.map(status => (
             <TouchableOpacity
               key={status}
-              style={[
-                styles.chip,
-                selectedStatus === status && styles.chipActive,
-              ]}
+              style={styles.compactChip}
               onPress={() => {
                 dispatch(setSelectedStatus(status));
-                // Filter is automatically updated by setSelectedStatus action
               }}
             >
-              <Text style={[
-                styles.chipText,
-                selectedStatus === status && styles.chipTextActive,
-              ]}>{status}</Text>
+              <Text style={styles.compactChipText}>{status}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
-    )
-  );
+    );
+  };
 
   const renderClientChips = () => {
-    // Always show client chips, even if there's only one client or none
-    // This ensures the UI is consistent
     if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
-      return null; // Don't show if no enquiries loaded yet
+      return null;
     }
     
-    // Don't show if no valid clients found
     if (!clientList || clientList.length === 0) {
       return null;
     }
     
+    // Filter out the selected client from available options
+    const allClients = ["All", ...clientList];
+    const availableClients = allClients.filter(client => client !== selectedClient);
+    
     return (
-      <View style={styles.chipsGroupRow}>
-        <Text style={styles.chipGroupLabel}>Client</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
-          {["All", ...clientList].map(client => (
+      <View style={styles.compactFilterRow}>
+        <Text style={styles.compactFilterLabel}>Client:</Text>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.compactChipsScroll}
+          contentContainerStyle={styles.compactChipsContent}
+        >
+          {/* Show selected client first with X button */}
+          {selectedClient && selectedClient !== 'All' && (
+            <View style={styles.compactSelectedChip}>
+              <Text style={styles.compactSelectedChipText}>{selectedClient}</Text>
+              <TouchableOpacity
+                style={styles.compactChipClose}
+                onPress={() => {
+                  dispatch(setSelectedClient('All'));
+                }}
+              >
+                <Icon name="close" size={12} color={colors.textWhite} />
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          {/* Show available client options (excluding selected) */}
+          {availableClients.map(client => (
             <TouchableOpacity
               key={client}
-              style={[
-                styles.chip,
-                selectedClient === client && styles.chipActive,
-              ]}
+              style={styles.compactChip}
               onPress={() => {
                 dispatch(setSelectedClient(client));
-                // Filter is automatically updated by setSelectedClient action
               }}
             >
-              <Text style={[
-                styles.chipText,
-                selectedClient === client && styles.chipTextActive,
-              ]}>{client}</Text>
+              <Text style={styles.compactChipText}>{client}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -729,12 +814,18 @@ const EnquiryListScreen = ({ navigation }) => {
     </Modal>
   );
 
-  if (loading) {
+  if (loading && !isPageChanging) {
     return <AnimatedLogoLoader size={80} />;
   }
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Page changing loader overlay */}
+      {isPageChanging && (
+        <View style={styles.pageChangeLoader}>
+          <AnimatedLogoLoader size={60} />
+        </View>
+      )}
       <TopNavbar navigation={navigation} />
       <View style={styles.header}>
         <View style={styles.searchRow}>
@@ -768,15 +859,14 @@ const EnquiryListScreen = ({ navigation }) => {
         
       </View>
 
-      {renderStatusChips()}
-      {renderClientChips()}
-      {renderFilterChips()}
-
       <ScrollView
         style={styles.scrollView}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }>
+        
+        {renderStatusChips()}
+        {renderClientChips()}
         
         {enrichedFilteredEnquiries.length === 0 ? (
           <Card style={styles.emptyCard}>
@@ -789,34 +879,95 @@ const EnquiryListScreen = ({ navigation }) => {
             </Text>
           </Card>
         ) : (
-          enrichedFilteredEnquiries.filter(enquiry => enquiry && enquiry.id).map(enquiry => (
-            <EnquiryCard
-              key={enquiry.id}
-              enquiry={enquiry}
-              onPress={() => {
-                console.log('Navigating to SingleEnquiry with enquiry:', enquiry);
-                console.log('Enquiry ID:', enquiry?.id);
-                console.log('Enquiry object keys:', enquiry ? Object.keys(enquiry) : 'No enquiry object');
-                try {
-                  navigation.navigate('SingleEnquiry', { 
-                    enquiryId: enquiry.id, 
-                    enquiry,
-                    shouldRefresh: false,
-                  });
-                } catch (error) {
-                  console.error('Navigation error:', error);
-                }
-              }}
-              getStatusColor={getStatusColor}
-              getStatusIcon={getStatusIcon}
-              getPriorityColor={getPriorityColor}
-              getPriorityIcon={getPriorityIcon}
-              formatCurrency={formatCurrency}
-              formatDate={formatDate}
-            />
-          ))
+          <View style={styles.cardsContainer}>
+            {enrichedFilteredEnquiries.filter(enquiry => enquiry && enquiry.id).map(enquiry => (
+              <CompactEnquiryCard
+                key={enquiry.id}
+                enquiry={enquiry}
+                onPress={() => {
+                  console.log('Navigating to SingleEnquiry with enquiry:', enquiry);
+                  console.log('Enquiry ID:', enquiry?.id);
+                  console.log('Enquiry object keys:', enquiry ? Object.keys(enquiry) : 'No enquiry object');
+                  try {
+                    navigation.navigate('SingleEnquiry', { 
+                      enquiryId: enquiry.id, 
+                      enquiry,
+                      shouldRefresh: false,
+                    });
+                  } catch (error) {
+                    console.error('Navigation error:', error);
+                  }
+                }}
+                getStatusColor={getStatusColor}
+                getStatusIcon={getStatusIcon}
+                getPriorityColor={getPriorityColor}
+                getPriorityIcon={getPriorityIcon}
+                formatCurrency={formatCurrency}
+                formatDate={formatDate}
+                userRole={user?.role}
+              />
+            ))}
+          </View>
         )}
       </ScrollView>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <View style={styles.paginationContainer}>
+          <TouchableOpacity
+            style={styles.paginationArrow}
+            onPress={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1}>
+            <Icon 
+              name="chevron-left" 
+              size={20} 
+              color={currentPage === 1 ? colors.textLight : colors.textPrimary} 
+            />
+          </TouchableOpacity>
+
+          <View style={styles.paginationNumbers}>
+            {getPageNumbers().map((page, index) => {
+              if (page === 'ellipsis') {
+                return (
+                  <Text key={`ellipsis-${index}`} style={styles.paginationEllipsis}>
+                    ...
+                  </Text>
+                );
+              }
+              
+              const isActive = page === currentPage;
+              return (
+                <TouchableOpacity
+                  key={page}
+                  style={[
+                    styles.paginationNumber,
+                    isActive && styles.paginationNumberActive
+                  ]}
+                  onPress={() => handlePageChange(page)}
+                  disabled={isActive}>
+                  <Text style={[
+                    styles.paginationNumberText,
+                    isActive && styles.paginationNumberTextActive
+                  ]}>
+                    {page}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <TouchableOpacity
+            style={styles.paginationArrow}
+            onPress={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}>
+            <Icon 
+              name="chevron-right" 
+              size={20} 
+              color={currentPage === totalPages ? colors.textLight : colors.textPrimary} 
+            />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {renderFilterModal()}
       {renderSortModal()}
@@ -948,6 +1099,12 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  cardsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
   emptyCard: {
     margin: 16,
     alignItems: 'center',
@@ -1067,6 +1224,69 @@ const styles = StyleSheet.create({
   sortOrderIndicator: {
     marginLeft: 8,
   },
+  // Compact Filter Row Styles
+  compactFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  compactFilterLabel: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.bold,
+    color: colors.textSecondary,
+    marginRight: 8,
+    minWidth: 60,
+  },
+  compactChipsScroll: {
+    flex: 1,
+  },
+  compactChipsContent: {
+    alignItems: 'center',
+    paddingRight: 8,
+  },
+  compactSelectedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 6,
+  },
+  compactSelectedChipText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+    marginRight: 4,
+  },
+  compactChipClose: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  compactChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    marginRight: 6,
+  },
+  compactChipText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+  },
+  
+  // Old chip styles (keeping for backward compatibility if needed)
   chipsGroupRow: {
     marginBottom: 2,
     paddingLeft: 20,    // match Enquiry Cards' left inset
@@ -1159,6 +1379,70 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
     letterSpacing: 0.2,
+  },
+  // Pagination Styles
+  paginationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: colors.background,
+    borderRadius: 20,
+    marginHorizontal: 16,
+    marginTop: 18,
+    marginBottom: 0,
+  },
+  paginationArrow: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 18,
+  },
+  paginationNumbers: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  paginationNumber: {
+    minWidth: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    marginHorizontal: 2,
+  },
+  paginationNumberActive: {
+    backgroundColor: colors.primary, // Brand color
+  },
+  paginationNumberText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+  },
+  paginationNumberTextActive: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+  },
+  paginationEllipsis: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    paddingHorizontal: 4,
+  },
+  pageChangeLoader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
   },
 });
 

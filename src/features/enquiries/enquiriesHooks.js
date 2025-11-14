@@ -1,19 +1,46 @@
-import { useMemo } from 'react';
-import { useSelector } from 'react-redux';
+import { useMemo, useEffect } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import {
   useGetEnquiriesQuery,
   useGetEnquiryByIdQuery,
 } from '../../store/api';
+import { setPagination } from './enquiriesSlice';
 
 /**
  * Custom hook that combines RTK Query data with UI filters
  * Replaces the manual filtering logic in components
  */
 export const useFilteredEnquiries = (role) => {
-  const { data: enquiries = [], isLoading, error, refetch } = useGetEnquiriesQuery(role, {
-    skip: !role,
-    refetchOnFocus: true, // Refetch when screen comes into focus
-  });
+  const dispatch = useDispatch();
+  const currentPage = useSelector(state => state.enquiries.pagination.currentPage);
+  
+  const { data, isLoading, error, refetch } = useGetEnquiriesQuery(
+    { role, page: currentPage },
+    {
+      skip: !role,
+      refetchOnFocus: true, // Refetch when screen comes into focus
+    }
+  );
+  
+  // Extract enquiries and pagination from response
+  const enquiries = data?.data || [];
+  const pagination = data?.pagination || {
+    total: 0,
+    page: 1,
+    limit: 25,
+    totalPages: 1,
+  };
+  
+  // Update Redux pagination state when API response changes
+  useEffect(() => {
+    if (pagination && pagination.total > 0) {
+      dispatch(setPagination({
+        total: pagination.total,
+        totalPages: pagination.totalPages,
+        limit: pagination.limit,
+      }));
+    }
+  }, [pagination, dispatch]);
   
   const filters = useSelector(state => state.enquiries.filters);
   const searchQuery = useSelector(state => state.enquiries.searchQuery);
@@ -93,6 +120,7 @@ export const useFilteredEnquiries = (role) => {
     isLoading,
     error,
     refetch,
+    pagination,
   };
 };
 

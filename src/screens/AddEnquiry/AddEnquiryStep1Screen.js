@@ -13,9 +13,8 @@ import { Input, Button } from '../../components/common';
 import { Heading, CustomText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
-import { validateEmail } from '../../utils/helpers';
 import IconComponent from '../../components/common/Icon';
-import { useGetClientsQuery } from '../../store/api';
+import { useGetClientsQuery, useGetUsersQuery } from '../../store/api';
 
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // This screen is only for creating new enquiries
@@ -28,25 +27,15 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       description: '',
       clientId: '',
       clientName: '',
-      clientEmail: '',
-      clientPhone: '',
-      estimatedBudget: '',
-      priority: 'medium',
-      deadline: '',
+      priority: 'Normal',
       category: 'Ring',
       metalColor: 'Gold',
       metalQuality: '10K',
       stoneType: 'NaturalRegular',
       quantity: '1',
-      metalWeightFrom: '',
-      metalWeightTo: '',
-      metalWeightExact: '',
-      diamondWeightFrom: '',
-      diamondWeightTo: '',
-      diamondWeightExact: '',
       stamping: '',
-      styleNumber: '',
-      gatiOrderNumber: '',
+      status: 'Enquiry Created',
+      assignedTo: '',
     };
   };
 
@@ -56,25 +45,15 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     description: '',
     clientId: '',
     clientName: '',
-    clientEmail: '',
-    clientPhone: '',
-    estimatedBudget: '',
-    priority: 'medium',
-    deadline: '',
+    priority: 'Normal',
     category: 'Ring',
     metalColor: 'Gold',
     metalQuality: '10K',
     stoneType: 'NaturalRegular',
     quantity: '1',
-    metalWeightFrom: '',
-    metalWeightTo: '',
-    metalWeightExact: '',
-    diamondWeightFrom: '',
-    diamondWeightTo: '',
-    diamondWeightExact: '',
     stamping: '',
-    styleNumber: '',
-    gatiOrderNumber: '',
+    status: 'Enquiry Created',
+    assignedTo: '',
   });
   const [errors, setErrors] = useState({});
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -82,6 +61,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   const [showMetalQualityDropdown, setShowMetalQualityDropdown] = useState(false);
   const [showStoneTypeDropdown, setShowStoneTypeDropdown] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
   
   // Fetch clients for dropdown
   const { data: clientsData = [] } = useGetClientsQuery(undefined, {
@@ -95,6 +76,23 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     label: client.name || 'Unknown Client',
     value: client.id || client._id,
   }));
+
+  // Fetch users for Assigned To field
+  const { data: usersData = [] } = useGetUsersQuery(undefined, {
+    skip: false,
+  });
+  const users = Array.isArray(usersData) ? usersData : [];
+
+  // Create assigned-to options from users (exclude clients by role)
+  const assignedToOptions = users
+    .filter(user => {
+      const roleString = String(user.role || '').toLowerCase();
+      return roleString !== 'client';
+    })
+    .map(user => ({
+      label: user.name || user.email || 'Unknown',
+      value: user.id || user._id,
+    }));
 
 
   // Initialize form on mount (only for creating new enquiries)
@@ -115,26 +113,27 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     const newErrors = {};
 
     if (!formData.title.trim()) {
-      newErrors.title = 'Title is required';
-    }
-
-    if (!formData.description.trim()) {
-      newErrors.description = 'Description is required';
+      newErrors.title = 'Name is required';
     }
 
     if (!formData.clientId && !formData.clientName.trim()) {
       newErrors.clientId = 'Client is required';
     }
 
-    // Validate client email and phone (required for new enquiries)
-    if (!formData.clientEmail.trim()) {
-      newErrors.clientEmail = 'Client email is required';
-    } else if (!validateEmail(formData.clientEmail)) {
-      newErrors.clientEmail = 'Please enter a valid email';
+    if (!formData.status) {
+      newErrors.status = 'Status is required';
     }
 
-    if (!formData.clientPhone.trim()) {
-      newErrors.clientPhone = 'Client phone is required';
+    if (!formData.stoneType) {
+      newErrors.stoneType = 'Stone Type is required';
+    }
+
+    if (!formData.metalQuality) {
+      newErrors.metalQuality = 'Metal Quality is required';
+    }
+
+    if (!formData.metalColor) {
+      newErrors.metalColor = 'Metal Color is required';
     }
 
     if (!formData.quantity.trim()) {
@@ -212,10 +211,19 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   };
 
   const priorityOptions = [
-    { label: 'Low', value: 'low' },
-    { label: 'Medium', value: 'medium' },
-    { label: 'High', value: 'high' },
-    { label: 'Urgent', value: 'urgent' },
+    { label: 'Normal', value: 'Normal' },
+    { label: 'High', value: 'High' },
+    { label: 'Super High', value: 'Super High' },
+  ];
+
+  const statusOptions = [
+    { label: 'Enquiry Created', value: 'Enquiry Created' },
+    { label: 'Design Approval Pending', value: 'Design Approval Pending' },
+    { label: 'CAD', value: 'CAD' },
+    { label: 'Coral', value: 'Coral' },
+    { label: 'In Progress', value: 'In Progress' },
+    { label: 'Completed', value: 'Completed' },
+    { label: 'Rejected', value: 'Rejected' },
   ];
 
   const categoryOptions = [
@@ -261,250 +269,186 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       </View>
 
       <View style={styles.form}>
-        <Input
-          label="Enquiry Title"
-          placeholder="Enter enquiry title"
-          value={formData.title}
-          onChangeText={(value) => handleInputChange('title', value)}
-          error={errors.title}
-        />
-
-        <Input
-          label="Description"
-          placeholder="Describe your jewellery requirements"
-          value={formData.description}
-          onChangeText={(value) => handleInputChange('description', value)}
-          multiline
-          numberOfLines={4}
-          error={errors.description}
-        />
-
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Client Information
-          </CustomText>
-          
-          {renderDropdown(
-            'Client Name',
-            formData.clientId,
-            clientOptions,
-            (clientId) => {
-              const selectedClient = clients.find(c => (c.id || c._id) === clientId);
-              handleInputChange('clientId', clientId);
-              handleInputChange('clientName', selectedClient?.name || '');
-            },
-            showClientDropdown,
-            () => setShowClientDropdown(!showClientDropdown)
-          )}
-          {errors.clientId && (
-            <Text style={styles.errorText}>{errors.clientId}</Text>
-          )}
-
-          <Input
-            label="Client Email"
-            placeholder="Enter client email"
-            value={formData.clientEmail}
-            onChangeText={(value) => handleInputChange('clientEmail', value)}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            error={errors.clientEmail}
-          />
-
-          <Input
-            label="Client Phone"
-            placeholder="Enter client phone number"
-            value={formData.clientPhone}
-            onChangeText={(value) => handleInputChange('clientPhone', value)}
-            keyboardType="phone-pad"
-            error={errors.clientPhone}
-          />
+        {/* Row 1: Name and Client */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Name*"
+              placeholder="Name*"
+              value={formData.title}
+              onChangeText={(value) => handleInputChange('title', value)}
+              error={errors.title}
+            />
+          </View>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Client*',
+              formData.clientId,
+              clientOptions,
+              (clientId) => {
+                const selectedClient = clients.find(c => (c.id || c._id) === clientId);
+                handleInputChange('clientId', clientId);
+                handleInputChange('clientName', selectedClient?.name || '');
+              },
+              showClientDropdown,
+              () => setShowClientDropdown(!showClientDropdown)
+            )}
+            {errors.clientId && (
+              <Text style={styles.errorText}>{errors.clientId}</Text>
+            )}
+          </View>
         </View>
 
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Project Details
-          </CustomText>
-          
-          <Input
-            label="Estimated Budget"
-            placeholder="Enter estimated budget"
-            value={formData.estimatedBudget}
-            onChangeText={(value) => handleInputChange('estimatedBudget', value)}
-            keyboardType="numeric"
-            error={errors.estimatedBudget}
-          />
-
-          <View style={styles.priorityContainer}>
-            <CustomText variant="label" style={styles.priorityLabel}>
-              Priority Level
-            </CustomText>
-            <View style={styles.priorityOptions}>
-              {priorityOptions.map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.priorityOption,
-                    formData.priority === option.value && styles.priorityOptionActive,
-                  ]}
-                  onPress={() => handleInputChange('priority', option.value)}>
-                  <CustomText
-                    variant="caption"
-                    color={formData.priority === option.value ? 'white' : 'secondary'}>
-                    {option.label}
-                  </CustomText>
-                </TouchableOpacity>
-              ))}
+        {/* Row 2: Priority and Category */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <View style={styles.priorityContainer}>
+              <Text style={styles.priorityLabel}>Priority</Text>
+              <View style={styles.priorityOptions}>
+                {priorityOptions.map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.priorityOption,
+                      formData.priority === option.value && styles.priorityOptionActive,
+                    ]}
+                    onPress={() => handleInputChange('priority', option.value)}>
+                    <Text
+                      style={[
+                        styles.priorityOptionText,
+                        formData.priority === option.value && styles.priorityOptionTextActive,
+                      ]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           </View>
-
-          <Input
-            label="Shipping Date (Optional)"
-            placeholder="YYYY-MM-DD"
-            value={formData.deadline}
-            onChangeText={(value) => handleInputChange('deadline', value)}
-          />
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Category',
+              formData.category,
+              categoryOptions,
+              (value) => handleInputChange('category', value),
+              showCategoryDropdown,
+              () => setShowCategoryDropdown(!showCategoryDropdown)
+            )}
+          </View>
         </View>
 
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Product Details
-          </CustomText>
-          
-          {renderDropdown(
-            'Category',
-            formData.category,
-            categoryOptions,
-            (value) => handleInputChange('category', value),
-            showCategoryDropdown,
-            () => setShowCategoryDropdown(!showCategoryDropdown)
-          )}
-
-          {renderDropdown(
-            'Metal Color',
-            formData.metalColor,
-            metalColorOptions,
-            (value) => handleInputChange('metalColor', value),
-            showMetalColorDropdown,
-            () => setShowMetalColorDropdown(!showMetalColorDropdown)
-          )}
-
-          {renderDropdown(
-            'Metal Quality',
-            formData.metalQuality,
-            metalQualityOptions,
-            (value) => handleInputChange('metalQuality', value),
-            showMetalQualityDropdown,
-            () => setShowMetalQualityDropdown(!showMetalQualityDropdown)
-          )}
-
-          {renderDropdown(
-            'Stone Type',
-            formData.stoneType,
-            stoneTypeOptions,
-            (value) => handleInputChange('stoneType', value),
-            showStoneTypeDropdown,
-            () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
-          )}
-
-          <Input
-            label="Quantity"
-            placeholder="Enter quantity"
-            value={formData.quantity}
-            onChangeText={(value) => handleInputChange('quantity', value)}
-            keyboardType="numeric"
-            error={errors.quantity}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Weight Details (Optional)
-          </CustomText>
-          
-          <View style={styles.weightRow}>
+        {/* Row 3: Stamping and Quantity */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
             <Input
-              label="Metal Weight (From)"
-              placeholder="From"
-              value={formData.metalWeightFrom}
-              onChangeText={(value) => handleInputChange('metalWeightFrom', value)}
-              keyboardType="numeric"
-              style={styles.weightInput}
-            />
-            <Input
-              label="Metal Weight (To)"
-              placeholder="To"
-              value={formData.metalWeightTo}
-              onChangeText={(value) => handleInputChange('metalWeightTo', value)}
-              keyboardType="numeric"
-              style={styles.weightInput}
+              label="Stamping"
+              placeholder="Stamping"
+              value={formData.stamping}
+              onChangeText={(value) => handleInputChange('stamping', value)}
             />
           </View>
-
-          <Input
-            label="Metal Weight (Exact)"
-            placeholder="Exact weight"
-            value={formData.metalWeightExact}
-            onChangeText={(value) => handleInputChange('metalWeightExact', value)}
-            keyboardType="numeric"
-          />
-
-          <View style={styles.weightRow}>
+          <View style={styles.formField}>
             <Input
-              label="Diamond Weight (From)"
-              placeholder="From"
-              value={formData.diamondWeightFrom}
-              onChangeText={(value) => handleInputChange('diamondWeightFrom', value)}
+              label="Quantity"
+              placeholder="Quantity"
+              value={formData.quantity}
+              onChangeText={(value) => handleInputChange('quantity', value)}
               keyboardType="numeric"
-              style={styles.weightInput}
-            />
-            <Input
-              label="Diamond Weight (To)"
-              placeholder="To"
-              value={formData.diamondWeightTo}
-              onChangeText={(value) => handleInputChange('diamondWeightTo', value)}
-              keyboardType="numeric"
-              style={styles.weightInput}
+              error={errors.quantity}
             />
           </View>
-
-          <Input
-            label="Diamond Weight (Exact)"
-            placeholder="Exact weight"
-            value={formData.diamondWeightExact}
-            onChangeText={(value) => handleInputChange('diamondWeightExact', value)}
-            keyboardType="numeric"
-          />
         </View>
 
-        <View style={styles.section}>
-          <CustomText variant="label" style={styles.sectionTitle}>
-            Additional Information (Optional)
-          </CustomText>
-          
-          <Input
-            label="Stamping"
-            placeholder="Enter stamping details"
-            value={formData.stamping}
-            onChangeText={(value) => handleInputChange('stamping', value)}
-          />
+        {/* Row 4: Status and Assigned To */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Status*',
+              formData.status,
+              statusOptions,
+              (value) => handleInputChange('status', value),
+              showStatusDropdown,
+              () => setShowStatusDropdown(!showStatusDropdown)
+            )}
+            {errors.status && (
+              <Text style={styles.errorText}>{errors.status}</Text>
+            )}
+          </View>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Assigned To',
+              formData.assignedTo,
+              assignedToOptions,
+              (value) => handleInputChange('assignedTo', value),
+              showAssignedToDropdown,
+              () => setShowAssignedToDropdown(!showAssignedToDropdown)
+            )}
+          </View>
+        </View>
 
-          <Input
-            label="Style Number"
-            placeholder="Enter style number"
-            value={formData.styleNumber}
-            onChangeText={(value) => handleInputChange('styleNumber', value)}
-          />
+        {/* Row 5: Stone Type (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            {renderDropdown(
+              'Stone Type*',
+              formData.stoneType,
+              stoneTypeOptions,
+              (value) => handleInputChange('stoneType', value),
+              showStoneTypeDropdown,
+              () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
+            )}
+            {errors.stoneType && (
+              <Text style={styles.errorText}>{errors.stoneType}</Text>
+            )}
+          </View>
+        </View>
 
-          <Input
-            label="Gati Order Number"
-            placeholder="Enter Gati order number"
-            value={formData.gatiOrderNumber}
-            onChangeText={(value) => handleInputChange('gatiOrderNumber', value)}
-          />
+        {/* Row 6: Metal Quality and Metal Color */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Metal Quality*',
+              formData.metalQuality,
+              metalQualityOptions,
+              (value) => handleInputChange('metalQuality', value),
+              showMetalQualityDropdown,
+              () => setShowMetalQualityDropdown(!showMetalQualityDropdown)
+            )}
+            {errors.metalQuality && (
+              <Text style={styles.errorText}>{errors.metalQuality}</Text>
+            )}
+          </View>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Metal Color*',
+              formData.metalColor,
+              metalColorOptions,
+              (value) => handleInputChange('metalColor', value),
+              showMetalColorDropdown,
+              () => setShowMetalColorDropdown(!showMetalColorDropdown)
+            )}
+            {errors.metalColor && (
+              <Text style={styles.errorText}>{errors.metalColor}</Text>
+            )}
+          </View>
+        </View>
+
+        {/* Row 7: Remarks (full width textarea) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Remarks"
+              placeholder="Remarks"
+              value={formData.description}
+              onChangeText={(value) => handleInputChange('description', value)}
+              multiline
+              numberOfLines={4}
+            />
+          </View>
         </View>
 
         <Button
-          title="Next Step"
+          title="Save"
           onPress={handleNext}
           style={styles.nextButton}
         />
@@ -556,8 +500,33 @@ const styles = StyleSheet.create({
   priorityOptionActive: {
     backgroundColor: colors.primary,
   },
+  priorityOptionText: {
+    fontSize: fonts.base,
+    color: colors.textPrimary,
+  },
+  priorityOptionTextActive: {
+    color: colors.textWhite,
+  },
+  formRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  formField: {
+    flex: 1,
+  },
+  fullWidthField: {
+    flex: 1,
+    width: '100%',
+  },
   nextButton: {
     marginTop: 32,
+  },
+  errorText: {
+    color: colors.error,
+    fontSize: fonts.sm,
+    marginTop: 4,
+    marginLeft: 4,
   },
   dropdownContainer: {
     marginBottom: 16,

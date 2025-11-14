@@ -105,7 +105,7 @@ const NotificationsScreen = ({ navigation }) => {
     const icons = {
       enquiry: 'assignment',
       approval: 'check-circle',
-      payment: 'currency-rupee',
+      payment: 'attach-money',
       chat: 'chat',
       system: 'info',
     };

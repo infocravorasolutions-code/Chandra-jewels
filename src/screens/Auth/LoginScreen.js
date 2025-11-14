@@ -81,7 +81,33 @@ const LoginScreen = ({ navigation }) => {
         });
         console.log('==================================');
         
-        // Generate display name
+        // Fetch user details from API to get the actual name from database
+        let userDetails = null;
+        if (result.user.id) {
+          try {
+            const { API_BASE_URL } = require('../../config/apiConfig');
+            const userResponse = await fetch(`${API_BASE_URL}/api/users/${result.user.id}`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${result.token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+            
+            if (userResponse.ok) {
+              const userDataResponse = await userResponse.json();
+              userDetails = userDataResponse.user || userDataResponse;
+              console.log('Fetched user details from API:', userDetails);
+            } else {
+              console.warn('Failed to fetch user details, status:', userResponse.status);
+            }
+          } catch (error) {
+            console.warn('Error fetching user details:', error);
+            // Continue with login even if user details fetch fails
+          }
+        }
+        
+        // Generate display name as fallback if name is not available
         const getDisplayName = (email, role) => {
           if (email) {
             const emailPart = email.split('@')[0];
@@ -96,11 +122,22 @@ const LoginScreen = ({ navigation }) => {
           return roleNames[role] || 'User';
         };
         
+        // Use name from database (userDetails), then from token, then generate from email
+        const userName = userDetails?.name || userDetails?.Name || 
+                        result.user.name || 
+                        getDisplayName(formData.email, result.user.role);
+        
         const userData = {
           ...result.user,
           email: formData.email,
-          name: getDisplayName(formData.email, result.user.role),
+          name: userName, // Use actual name from database
+          // Include other user details if available
+          ...(userDetails && {
+            phone: userDetails.phone || userDetails.Phone,
+          }),
         };
+        
+        console.log('Final user data with name:', userData);
         
         // Store in AsyncStorage
         await AsyncStorage.setItem('user', JSON.stringify(userData));

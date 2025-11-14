@@ -23,13 +23,40 @@ import { formatCurrency, formatDate, getStatusColor, getPriorityColor, imageSize
 import { EnquiryHistoryModal } from '../../components/modals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../config/apiConfig';
+import { useUsers } from '../../features/users/usersHooks';
+import { getUserName } from '../../utils/userUtils';
 
 const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { enquiry: initialEnquiry, enquiryId: routeEnquiryId, shouldRefresh } = route.params || {};
   
+  // Log route params when screen loads or params change
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('========== SingleEnquiryScreen - Route Params ==========');
+      console.log('route.params:', route.params);
+      console.log('initialEnquiry:', initialEnquiry ? { id: initialEnquiry.id || initialEnquiry._id, title: initialEnquiry.title || initialEnquiry.Name } : 'null');
+      console.log('routeEnquiryId:', routeEnquiryId);
+      console.log('shouldRefresh:', shouldRefresh);
+      console.log('========================================================');
+    }
+  }, [route.params, initialEnquiry, routeEnquiryId, shouldRefresh]);
+  
+  // Fetch and cache users for name resolution
+  useUsers();
+  
   // Use route enquiryId or initialEnquiry id
   const enquiryId = routeEnquiryId || initialEnquiry?.id || initialEnquiry?._id;
+  
+  // Log enquiryId
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('========== SingleEnquiryScreen - Enquiry ID ==========');
+      console.log('enquiryId:', enquiryId);
+      console.log('enquiryId type:', typeof enquiryId);
+      console.log('=====================================================');
+    }
+  }, [enquiryId]);
   
   // Redux hooks
   const { 
@@ -40,6 +67,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   } = useGetEnquiryByIdQuery(enquiryId, {
     skip: !enquiryId,
   });
+  
+  // Log enquiryData changes - reduced logging to prevent performance issues
+  useEffect(() => {
+    if (__DEV__ && enquiryData && shouldRefresh) {
+      console.log('========== SingleEnquiryScreen - Enquiry Data Updated ==========');
+      console.log('enquiryData id:', enquiryData?.id || enquiryData?._id);
+      console.log('StoneType:', enquiryData.StoneType || enquiryData.stoneType);
+      console.log('StyleNumber:', enquiryData.StyleNumber || enquiryData.styleNumber);
+      console.log('GatiOrderNumber:', enquiryData.GatiOrderNumber || enquiryData.gatiOrderNumber);
+      console.log('===============================================================');
+    }
+  }, [enquiryData?.id, enquiryData?.StoneType, enquiryData?.StyleNumber, enquiryData?.GatiOrderNumber, shouldRefresh]);
 
   const [deleteEnquiry, { isLoading: isDeleting }] = useDeleteEnquiryMutation();
   
@@ -173,17 +212,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       }
     }
     
-    if (__DEV__) {
-      console.warn(`getClientName: Could not find client name for ID "${idStr}"`);
-      console.warn('Available client IDs in map:', Array.from(clientNameMap.keys()).slice(0, 10));
-      if (clients && clients.length > 0) {
-        console.warn('Sample client IDs from array:', clients.slice(0, 3).map(c => ({
-          id: c.id,
-          _id: c._id,
-          name: c.name
-        })));
-      }
-    }
+    // Removed console.warn from render - it causes performance issues
+    // Logging moved to useEffect to avoid blocking render
     
     return 'Unknown Client';
   };
@@ -195,6 +225,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const [showVersionSelector, setShowVersionSelector] = useState(false);
   const [selectedDesignType, setSelectedDesignType] = useState(null); // 'coral' or 'cad'
   const [selectedVersionIndex, setSelectedVersionIndex] = useState(null);
+  const [selectedImageUri, setSelectedImageUri] = useState(null);
+  const [isImageModalVisible, setImageModalVisible] = useState(false);
+  
+  const handleImagePress = (uri) => {
+    if (!uri) {
+      return;
+    }
+    setSelectedImageUri(uri);
+    setImageModalVisible(true);
+  };
+
+  const closeImageModal = () => {
+    setImageModalVisible(false);
+    setSelectedImageUri(null);
+  };
   
   // API mutations
   const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
@@ -203,8 +248,34 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // Use enquiry from query if available, otherwise use initialEnquiry
   const enquiry = enquiryData || initialEnquiry || {};
   
+  // Log which enquiry source is being used
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('========== SingleEnquiryScreen - Enquiry Source ==========');
+      console.log('Using enquiryData:', !!enquiryData);
+      console.log('Using initialEnquiry:', !!initialEnquiry);
+      console.log('Final enquiry id:', enquiry?.id || enquiry?._id);
+      console.log('Final enquiry keys:', Object.keys(enquiry).slice(0, 20));
+      console.log('==========================================================');
+    }
+  }, [enquiryData, initialEnquiry, enquiry]);
+  
   // Get original data for accessing raw API fields
   const originalData = enquiry?._originalData || enquiry;
+  
+  // Log originalData for debugging
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('========== SingleEnquiryScreen - Original Data ==========');
+      console.log('originalData exists:', !!originalData);
+      console.log('originalData.StoneType:', originalData?.StoneType || originalData?.stoneType);
+      console.log('originalData.StyleNumber:', originalData?.StyleNumber || originalData?.styleNumber);
+      console.log('originalData.GatiOrderNumber:', originalData?.GatiOrderNumber || originalData?.gatiOrderNumber);
+      console.log('originalData.MetalWeight:', originalData?.MetalWeight || originalData?.metalWeight);
+      console.log('originalData.DiamondWeight:', originalData?.DiamondWeight || originalData?.diamondWeight);
+      console.log('========================================================');
+    }
+  }, [originalData]);
   
   // Debug: Log enquiry structure to understand data format
   useEffect(() => {
@@ -249,18 +320,9 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
   }
   
-  // Debug logging for client name resolution
-  if (__DEV__) {
-    console.log('SingleEnquiryScreen - Client Resolution:');
-    console.log('  ClientId from enquiry:', clientId);
-    console.log('  ClientId type:', typeof clientId);
-    console.log('  Enquiry clientName:', enquiry?.clientName);
-    console.log('  Enquiry client:', enquiry?.client);
-    console.log('  Clients loading:', clientsLoading);
-    console.log('  Clients loaded:', clients.length);
-    console.log('  Client name map size:', clientNameMap.size);
-    console.log('  Final resolved client name:', clientName);
-    if (clientId && clientName === 'Unknown Client' && !clientsLoading && clients.length > 0) {
+  // Debug logging for client name resolution - moved to useEffect to avoid blocking render
+  useEffect(() => {
+    if (__DEV__ && clientId && clientName === 'Unknown Client' && !clientsLoading && clients.length > 0) {
       console.warn('⚠️ Client name lookup failed!');
       console.warn('  Searching for ClientId:', JSON.stringify(clientId));
       console.warn('  Available client IDs in map:', Array.from(clientNameMap.keys()).slice(0, 10));
@@ -270,17 +332,47 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         name: clients[0].name
       } : 'No clients');
     }
-  }
+  }, [clientId, clientName, clientsLoading, clients.length, clientNameMap]);
   
   // Get dates - check multiple possible fields
   const createdAt = enquiry?.createdAt || originalData?.createdAt || new Date().toISOString();
   const updatedAt = enquiry?.updatedAt || originalData?.updatedAt || enquiry?.createdAt || createdAt;
 
+  // Use ref to track last shouldRefresh value to prevent duplicate refetches
+  const lastShouldRefreshRef = React.useRef(shouldRefresh);
+  
   // Refresh enquiry data when screen comes into focus (if needed)
   useFocusEffect(
     React.useCallback(() => {
-      if (shouldRefresh && enquiryId) {
-        refetch();
+      // Only refetch if shouldRefresh changed from false to true
+      const shouldRefetch = shouldRefresh && shouldRefresh !== lastShouldRefreshRef.current && enquiryId;
+      
+      if (__DEV__ && shouldRefresh) {
+        console.log('🔄 useFocusEffect - shouldRefresh:', shouldRefresh, 'will refetch:', shouldRefetch);
+      }
+      
+      if (shouldRefetch) {
+        lastShouldRefreshRef.current = shouldRefresh;
+        
+        // Use a small delay to ensure navigation is complete
+        const timeoutId = setTimeout(() => {
+          refetch()
+            .then((result) => {
+              if (__DEV__) {
+                console.log('✅ Refetch completed:', !!result?.data);
+              }
+            })
+            .catch((error) => {
+              if (__DEV__) {
+                console.error('❌ Refetch error:', error);
+              }
+            });
+        }, 100);
+        
+        return () => clearTimeout(timeoutId);
+      } else {
+        // Update ref even if not refetching
+        lastShouldRefreshRef.current = shouldRefresh;
       }
     }, [shouldRefresh, enquiryId, refetch])
   );
@@ -526,30 +618,39 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const renderEnquiryDetails = () => {
     // Extract metal details - prefer originalData first
     const metal = originalData?.Metal || enquiry?.Metal || enquiry?.metal || {};
-    const metalColor = metal.Color || metal.color || 'N/A';
-    const metalQuality = metal.Quality || metal.quality || '';
+    const metalColor = metal.Color || metal.color || null;
+    const metalQuality = metal.Quality || metal.quality || null;
     const metalWeight = originalData?.MetalWeight || enquiry?.MetalWeight || enquiry?.metalWeight || {};
     const diamondWeight = originalData?.DiamondWeight || enquiry?.DiamondWeight || enquiry?.diamondWeight || {};
     
-    // Format metal weight
-    let metalWeightText = 'N/A';
+    // Removed excessive logging from render - causes performance issues
+    // Logging moved to useEffect to avoid blocking render
+    
+    // Format metal weight - only return value if exists, otherwise null (so field won't display)
+    let metalWeightText = null;
     if (metalWeight.Exact || metalWeight.exact) {
-      metalWeightText = `${metalWeight.Exact || metalWeight.exact} gms`;
+      metalWeightText = `Exact: ${metalWeight.Exact || metalWeight.exact} gms`;
     } else if (metalWeight.From || metalWeight.from) {
       const from = metalWeight.From || metalWeight.from || '';
       const to = metalWeight.To || metalWeight.to || '';
-      metalWeightText = `${from}${to ? ` - ${to}` : ''} gms`;
+      if (from) {
+        metalWeightText = `From: ${from}${to ? ` To: ${to}` : ''} gms`;
+      }
     }
     
-    // Format diamond weight
-    let diamondWeightText = 'N/A';
+    // Format diamond weight - only return value if exists, otherwise null (so field won't display)
+    let diamondWeightText = null;
     if (diamondWeight.Exact || diamondWeight.exact) {
-      diamondWeightText = `${diamondWeight.Exact || diamondWeight.exact} carats`;
+      diamondWeightText = `Exact: ${diamondWeight.Exact || diamondWeight.exact} ct`;
     } else if (diamondWeight.From || diamondWeight.from) {
       const from = diamondWeight.From || diamondWeight.from || '';
       const to = diamondWeight.To || diamondWeight.to || '';
-      diamondWeightText = `${from}${to ? ` - ${to}` : ''} carats`;
+      if (from) {
+        diamondWeightText = `From: ${from}${to ? ` To: ${to}` : ''} ct`;
+      }
     }
+    
+    // Removed excessive logging from render - causes performance issues
 
     return (
       <>
@@ -599,7 +700,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           </Text>
           <View style={styles.detailsGrid}>
             {renderDetailItem('category', 'Category', originalData?.Category || enquiry?.Category || enquiry?.category)}
-            {renderDetailItem('inventory', 'Quantity', originalData?.Quantity || enquiry?.Quantity ? `${originalData?.Quantity || enquiry?.Quantity}` : 'N/A')}
+            {renderDetailItem('inventory', 'Quantity', originalData?.Quantity || enquiry?.Quantity ? `${originalData?.Quantity || enquiry?.Quantity}` : null)}
             {renderDetailItem('grain', 'Stone Type', originalData?.StoneType || enquiry?.StoneType || enquiry?.stoneType)}
             {renderDetailItem('label', 'Style Number', originalData?.StyleNumber || enquiry?.StyleNumber)}
             {renderDetailItem('receipt', 'Gati Order Number', originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber)}
@@ -627,7 +728,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               Assignment & Codes
             </Text>
             <View style={styles.detailsGrid}>
-            {renderDetailItem('person', 'Assigned To', enquiry?.AssignedTo)}
+            {renderDetailItem('person', 'Assigned To', getUserName(enquiry?.AssignedTo))}
             {renderDetailItem('description', 'Coral Code', enquiry?.CoralCode || enquiry?.coralVersion)}
             {renderDetailItem('description', 'CAD Code', enquiry?.CadCode || enquiry?.cadVersion)}
             </View>
@@ -873,7 +974,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
     
     return (
-      <View style={styles.imageContainer}>
+      <TouchableOpacity
+        style={styles.imageContainer}
+        activeOpacity={0.9}
+        onPress={() => handleImagePress(imageDataUri)}
+      >
         <EnquiryImage
           source={{ uri: imageDataUri }}
           onError={() => {
@@ -884,7 +989,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             console.log(`✅ Reference image[${index}] loaded successfully`);
           }}
         />
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -906,23 +1011,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       images = originalData.Images;
     }
     
-    if (__DEV__) {
-      console.log('========== REFERENCE IMAGES DEBUG ==========');
-      console.log('originalData exists:', !!originalData);
-      console.log('originalData.ReferenceImages:', originalData?.ReferenceImages);
-      console.log('originalData.Images:', originalData?.Images);
-      console.log('enquiry.ReferenceImages:', enquiry?.ReferenceImages);
-      console.log('enquiry.images:', enquiry?.images);
-      console.log('enquiry.Images:', enquiry?.Images);
-      console.log('Final images array:', images);
-      console.log('Images length:', images.length);
-      console.log('Images type:', Array.isArray(images) ? 'Array' : typeof images);
-      if (images.length > 0) {
-        console.log('First image structure:', images[0]);
-        console.log('First image keys:', typeof images[0] === 'object' ? Object.keys(images[0]) : 'Not an object');
-      }
-      console.log('==========================================');
-    }
+    // Removed excessive logging from render - causes performance issues
     
     if (!Array.isArray(images) || images.length === 0) {
       return (
@@ -952,45 +1041,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             let imageId = null;
             let imageUri = null;
             
-            if (__DEV__) {
-              console.log(`renderImages - image[${index}]:`, image, 'type:', typeof image);
-            }
-            
             // Extract key/ID from image object if it's an object
             if (typeof image === 'object' && image !== null) {
               imageKey = image.Key || image.key || image.KeyName || image.keyName || '';
               imageId = image.Id || image.id || image._id || image.FileId || image.fileId || '';
               imageUri = image.Url || image.url || image.URI || image.uri || image.Location || image.location || image.UrlPath || image.urlPath || '';
-              
-              if (__DEV__) {
-                console.log(`renderImages - image[${index}] extraction:`);
-                console.log(`  - Full object:`, JSON.stringify(image, null, 2));
-                console.log(`  - Extracted Key: ${imageKey}`);
-                console.log(`  - Extracted Id: ${imageId}`);
-                console.log(`  - Extracted Url: ${imageUri}`);
-              }
             } else if (typeof image === 'string') {
               // If it's already a full URL, use it
               if (image.startsWith('http') || image.startsWith('https')) {
                 imageUri = image;
-                if (__DEV__) {
-                  console.log(`renderImages - image[${index}] is full URL:`, imageUri);
-                }
               } else {
                 imageKey = image;
-                if (__DEV__) {
-                  console.log(`renderImages - image[${index}] is string key:`, imageKey);
-                }
               }
-            }
-            
-            if (__DEV__) {
-              console.log(`renderImages - image[${index}] final values:`, {
-                imageKey,
-                imageId,
-                imageUri,
-                willUseImageWithFallback: !imageUri || !imageUri.startsWith('http')
-              });
             }
             
             // Always use ImageWithFallback component for consistent authentication handling
@@ -1256,30 +1318,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     </Card>
   );
 
-  const handleViewCoral = () => {
-    // Get all Coral versions
-    const coralVersions = originalData?.Coral || enquiry?.Coral || [];
-    
-    if (coralVersions.length === 0) {
-      Alert.alert('No Versions', 'No Coral versions available');
-      return;
-    }
-    
-    // If only one version, go directly
-    if (coralVersions.length === 1) {
-      navigation.navigate('DesignViewer', {
-        designType: 'coral',
-        enquiry: enquiry,
-        versionIndex: 0,
-      });
-      return;
-    }
-    
-    // Show version selector for multiple versions
-    setSelectedDesignType('coral');
-    setShowVersionSelector(true);
-  };
-
   const handleViewCAD = () => {
     // Get all CAD versions
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
@@ -1305,69 +1343,72 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   };
 
   const renderAdminActions = () => {
-    // Check if Coral or CAD data exists
-    const hasCoral = originalData?.CoralCode || enquiry?.CoralCode || enquiry?.coralCode || 
-                     (originalData?.Coral && Array.isArray(originalData.Coral) && originalData.Coral.length > 0) ||
-                     (enquiry?.Coral && Array.isArray(enquiry.Coral) && enquiry.Coral.length > 0);
-    
     const hasCAD = originalData?.CadCode || enquiry?.CadCode || enquiry?.cadCode || 
                    (originalData?.Cad && Array.isArray(originalData.Cad) && originalData.Cad.length > 0) ||
                    (enquiry?.Cad && Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0);
 
     return (
-      <Card style={styles.actionsCard}>
-        <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
-          Admin Actions
-          </Text>
-        
-        <Button
-          title="Edit Enquiry"
-          onPress={handleEditEnquiry}
-          style={[styles.actionButton, styles.editButton]}
-        />
-
-        <Button
-          title="Enquiry History"
-          onPress={() => setShowHistoryModal(true)}
-          style={[styles.actionButton, styles.historyButton]}
-        />
-
-        {/* Coral and CAD Design Viewers */}
-        {(hasCoral || hasCAD) && (
-          <View style={styles.actionButtons}>
-            {hasCoral && (
-              <Button
-                title="Coral"
-                onPress={handleViewCoral}
-                style={[styles.actionButton, styles.coralButton]}
-              />
-            )}
-            {hasCAD && (
-              <Button
-                title="CAD"
-                onPress={handleViewCAD}
-                style={[styles.actionButton, styles.cadButton]}
-              />
-            )}
-          </View>
-        )}
-
-        <View style={styles.actionButtons}>
-          <Button
-            title="Delete Enquiry"
-            onPress={handleDeleteEnquiry}
-            style={[styles.actionButton, styles.deleteButton]}
-          />
+      <Card style={[styles.actionsCard, styles.adminActionsCard]}>
+        <View style={styles.adminActionsHeader}>
+          <Icon name="admin-panel-settings" size={18} color={colors.primary} />
+          <Text style={styles.adminActionsTitle}>Admin Controls</Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.chatButton}
-          onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
-          <Icon name="chat" size={16} color={colors.primary} />
-          <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
-            Open Chat
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.adminActionsRow}>
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonPrimary]}
+            activeOpacity={0.85}
+            onPress={handleEditEnquiry}
+          >
+            <Icon name="edit" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>Edit Enquiry</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+            activeOpacity={0.85}
+            onPress={() => setShowHistoryModal(true)}
+          >
+            <Icon name="history" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>Enquiry History</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* {hasCAD && (
+          <View style={styles.adminActionsRow}>
+            <TouchableOpacity
+              style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+              activeOpacity={0.85}
+              onPress={handleViewCAD}
+            >
+              <Icon name="precision-manufacturing" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>View CAD</Text>
+            </TouchableOpacity>
+          </View> */}
+          <></>
+        {/* )} */}
+
+        <View style={styles.adminActionsRow}>
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonDanger]}
+            activeOpacity={0.85}
+            onPress={handleDeleteEnquiry}
+          >
+            <Icon name="delete-outline" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>Delete Enquiry</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.adminActionsRow}>
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonOutline]}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('ChatDetail', { enquiry })}
+          >
+            <Icon name="chat" size={18} color={colors.primary} />
+            <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>Open Chat</Text>
+          </TouchableOpacity>
+        </View>
       </Card>
     );
   };
@@ -1424,7 +1465,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
         {renderEnquiryDetails()}
         {renderImages()}
         {renderVersions()}
@@ -1433,6 +1477,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         {(user.role === 'coral' || user.role === 'cad') && renderDesignerActions(user.role)}
         {user.role === 'admin' && renderAdminActions()}
       </ScrollView>
+
+      {selectedImageUri && (
+        <Modal
+          visible={isImageModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={closeImageModal}
+        >
+          <View style={styles.fullscreenImageBackdrop}>
+            <TouchableOpacity style={styles.fullscreenImageCloseButton} onPress={closeImageModal}>
+              <Icon name="close" size={24} color={colors.textWhite} />
+            </TouchableOpacity>
+            <Image
+              source={{ uri: selectedImageUri }}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+            />
+          </View>
+        </Modal>
+      )}
 
       {showApprovalModal && renderApprovalModal()}
       
@@ -1452,12 +1516,14 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    paddingHorizontal: 16,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   detailsCard: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 12,
+    marginBottom: spacing.lg,
   },
   detailsHeader: {
     flexDirection: 'column',
@@ -1507,8 +1573,7 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
   imagesCard: {
-    marginHorizontal: 16,
-    marginVertical: 12,
+    marginBottom: spacing.lg,
   },
   sectionTitle: {
     marginBottom: 12,
@@ -1540,8 +1605,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   versionsCard: {
-    marginHorizontal: 16,
-    marginVertical: 12,
+    marginBottom: spacing.lg,
   },
   versionItem: {
     marginBottom: 16,
@@ -1567,8 +1631,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   actionsCard: {
-    marginHorizontal: 16,
-    marginVertical: 12,
+    marginBottom: spacing.lg,
   },
   actionButtons: {
     flexDirection: 'row',
@@ -1646,6 +1709,81 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
+  },
+  fullscreenImageBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenImage: {
+    width: '90%',
+    height: '80%',
+  },
+  fullscreenImageCloseButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    padding: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  adminActionsCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(16, 53, 52, 0.1)',
+    backgroundColor: '#F2F5F4',
+    padding: 20,
+    borderRadius: 16,
+  },
+  adminActionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  adminActionsTitle: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: colors.primary,
+  },
+  adminActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 12,
+  },
+  adminActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: colors.primaryLight,
+  },
+  adminActionButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  adminActionButtonSecondary: {
+    backgroundColor: colors.primaryLight,
+  },
+  adminActionButtonDanger: {
+    backgroundColor: colors.error,
+  },
+  adminActionButtonOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  adminActionText: {
+    color: colors.textWhite,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  adminActionOutlineText: {
+    color: colors.primary,
   },
 });
 
