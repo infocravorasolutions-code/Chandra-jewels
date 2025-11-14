@@ -10,6 +10,8 @@ import {
   Dimensions,
   Platform,
   Alert,
+  Modal,
+  StatusBar,
 } from 'react-native';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input, AnimatedLogoLoader } from '../../components/common';
@@ -39,6 +41,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
   const [useFetchDirectly, setUseFetchDirectly] = useState(Platform.OS === 'android');
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingImage, setIsDownloadingImage] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   
   // API mutation for updating asset description
   const [updateAssetDescription, { isLoading: isUpdatingDescription }] = useUpdateAssetDescriptionMutation();
@@ -1127,87 +1130,99 @@ const DesignViewerScreen = ({ route, navigation }) => {
               <>
                 {/* Try Image component with headers first (iOS only, Android uses fetch directly) */}
                 {!imageDataUri && !useFetchDirectly && (
-                  <Image
-                    source={{
-                      uri: currentImageUrl,
-                      headers: imageHeaders,
-                    }}
-                    style={styles.image}
-                    resizeMode="contain"
-                    onLoadStart={() => {
-                      console.log('🖼️ Image component load started for URL:', currentImageUrl);
-                      console.log('🖼️ Using headers:', imageHeaders);
-                      setImageLoadingError(false);
-                    }}
-                    onLoad={() => {
-                      console.log('✅ Image loaded successfully via Image component:', currentImageUrl);
-                      setImageLoadingError(false);
-                    }}
-                    onError={(error) => {
-                      const errorObj = error.nativeEvent?.error || {};
-                      const is401 = errorObj.code === 401 || 
-                                   errorObj.message?.includes('401') ||
-                                   String(errorObj).includes('401');
-                      
-                      console.error('❌ Image component load ERROR:', {
-                        error: errorObj,
-                        errorCode: errorObj.code,
-                        errorMessage: errorObj.message,
-                        fullError: String(errorObj),
-                        httpCode: is401 ? '401 Unauthorized' : 'Unknown',
-                        url: currentImageUrl,
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => setIsFullScreen(true)}
+                    style={styles.imageTouchable}
+                  >
+                    <Image
+                      source={{
+                        uri: currentImageUrl,
                         headers: imageHeaders,
-                        imageIndex: currentImageIndex,
-                        imageObject: images[currentImageIndex],
-                      });
-                      
-                      // If 401, trigger fetch fallback immediately
-                      if (is401) {
-                        console.error('❌ 401 Unauthorized - Triggering fetch fallback immediately');
-                        setImageLoadingError(true);
-                        fetchImageWithAuth();
-                      }
-                    }}
-                    onLoadEnd={() => {
-                      console.log('🖼️ Image component load ended');
-                    }}
-                  />
+                      }}
+                      style={styles.image}
+                      resizeMode="contain"
+                      onLoadStart={() => {
+                        console.log('🖼️ Image component load started for URL:', currentImageUrl);
+                        console.log('🖼️ Using headers:', imageHeaders);
+                        setImageLoadingError(false);
+                      }}
+                      onLoad={() => {
+                        console.log('✅ Image loaded successfully via Image component:', currentImageUrl);
+                        setImageLoadingError(false);
+                      }}
+                      onError={(error) => {
+                        const errorObj = error.nativeEvent?.error || {};
+                        const is401 = errorObj.code === 401 || 
+                                     errorObj.message?.includes('401') ||
+                                     String(errorObj).includes('401');
+                        
+                        console.error('❌ Image component load ERROR:', {
+                          error: errorObj,
+                          errorCode: errorObj.code,
+                          errorMessage: errorObj.message,
+                          fullError: String(errorObj),
+                          httpCode: is401 ? '401 Unauthorized' : 'Unknown',
+                          url: currentImageUrl,
+                          headers: imageHeaders,
+                          imageIndex: currentImageIndex,
+                          imageObject: images[currentImageIndex],
+                        });
+                        
+                        // If 401, trigger fetch fallback immediately
+                        if (is401) {
+                          console.error('❌ 401 Unauthorized - Triggering fetch fallback immediately');
+                          setImageLoadingError(true);
+                          fetchImageWithAuth();
+                        }
+                      }}
+                      onLoadEnd={() => {
+                        console.log('🖼️ Image component load ended');
+                      }}
+                    />
+                  </TouchableOpacity>
                 )}
                 
                 {/* Use data URI (fetched image) - for both Android (direct) and iOS (fallback) */}
                 {imageDataUri && (
-                  <Image
-                    source={{ uri: imageDataUri }}
-                    style={styles.image}
-                    resizeMode="contain"
-                    onLoadStart={() => {
-                      console.log('🖼️ Data URI image load started');
-                      console.log('Data URI length:', imageDataUri.length);
-                      console.log('Data URI starts with:', imageDataUri.substring(0, 50));
-                      console.log('Data URI format check:', imageDataUri.startsWith('data:image'));
-                    }}
-                    onLoad={() => {
-                      console.log('✅ Image loaded successfully via data URI');
-                      setImageLoadingError(false);
-                    }}
-                    onError={(error) => {
-                      const errorObj = error.nativeEvent?.error || {};
-                      console.error('❌ Data URI image load ERROR:', {
-                        error: errorObj,
-                        errorCode: errorObj.code,
-                        errorMessage: errorObj.message,
-                        fullErrorString: String(errorObj),
-                        dataUriLength: imageDataUri?.length,
-                        dataUriPreview: imageDataUri?.substring(0, 150),
-                        dataUriStartsWith: imageDataUri?.substring(0, 50),
-                        isValidDataUri: imageDataUri?.startsWith('data:image'),
-                      });
-                      setImageLoadingError(true);
-                    }}
-                    onLoadEnd={() => {
-                      console.log('🖼️ Data URI image load ended');
-                    }}
-                  />
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => setIsFullScreen(true)}
+                    style={styles.imageTouchable}
+                  >
+                    <Image
+                      source={{ uri: imageDataUri }}
+                      style={styles.image}
+                      resizeMode="contain"
+                      onLoadStart={() => {
+                        console.log('🖼️ Data URI image load started');
+                        console.log('Data URI length:', imageDataUri.length);
+                        console.log('Data URI starts with:', imageDataUri.substring(0, 50));
+                        console.log('Data URI format check:', imageDataUri.startsWith('data:image'));
+                      }}
+                      onLoad={() => {
+                        console.log('✅ Image loaded successfully via data URI');
+                        setImageLoadingError(false);
+                      }}
+                      onError={(error) => {
+                        const errorObj = error.nativeEvent?.error || {};
+                        console.error('❌ Data URI image load ERROR:', {
+                          error: errorObj,
+                          errorCode: errorObj.code,
+                          errorMessage: errorObj.message,
+                          fullErrorString: String(errorObj),
+                          dataUriLength: imageDataUri?.length,
+                          dataUriPreview: imageDataUri?.substring(0, 150),
+                          dataUriStartsWith: imageDataUri?.substring(0, 50),
+                          isValidDataUri: imageDataUri?.startsWith('data:image'),
+                        });
+                        setImageLoadingError(true);
+                      }}
+                      onLoadEnd={() => {
+                        console.log('🖼️ Data URI image load ended');
+                      }}
+                    />
+                  </TouchableOpacity>
                 )}
                 
                 {/* Show loading/error state */}
@@ -1288,34 +1303,45 @@ const DesignViewerScreen = ({ route, navigation }) => {
               // Designer view: Read-only comment display
               <>
                 <View style={styles.commentHeader}>
-                  <CustomText variant="label" style={styles.label}>
-                    Comments:
-                  </CustomText>
-                  <Icon name="edit" size={16} color={colors.textSecondary} />
+                  <View style={styles.commentHeaderLeft}>
+                    <Icon name="comment" size={20} color={colors.primary} />
+                    <CustomText variant="label" style={styles.commentLabel}>
+                      Comments
+                    </CustomText>
+                  </View>
                 </View>
-                <CustomText variant="body" style={styles.commentText}>
-                  {comment || designCode || 'No comments'}
-                </CustomText>
+                <View style={styles.commentDisplayBox}>
+                  <CustomText variant="body" style={styles.commentText}>
+                    {comment || designCode || 'No comments available'}
+                  </CustomText>
+                </View>
               </>
             ) : (
               // Admin view: Editable comment input
               <>
-                <CustomText variant="label" style={styles.label}>
-                  Comments
-                </CustomText>
-                <Input
-                  value={comment}
-                  onChangeText={setComment}
-                  placeholder="Enter image comment..."
-                  multiline
-                  numberOfLines={2}
-                  style={styles.commentInput}
-                />
+                <View style={styles.commentHeader}>
+                  <View style={styles.commentHeaderLeft}>
+                    <Icon name="comment" size={20} color={colors.primary} />
+                    <CustomText variant="label" style={styles.commentLabel}>
+                      Comments
+                    </CustomText>
+                  </View>
+                </View>
+                <View style={styles.commentInputContainer}>
+                  <Input
+                    value={comment}
+                    onChangeText={setComment}
+                    placeholder="Enter image comment..."
+                    multiline
+                    numberOfLines={3}
+                    style={styles.commentInput}
+                  />
+                </View>
                 <Button
                   title={isUpdatingDescription ? "Saving..." : "Save Comment"}
                   onPress={handleSaveComment}
                   style={styles.saveButton}
-                  variant="outline"
+                  textStyle={styles.saveButtonText}
                   disabled={isUpdatingDescription}
                 />
               </>
@@ -1323,62 +1349,148 @@ const DesignViewerScreen = ({ route, navigation }) => {
           </View>
 
           {/* Action Buttons - Different for designers vs admin */}
+          <View style={styles.actionsDivider} />
+          
           {isDesigner ? (
             // Designer view: Only Download buttons
             <View style={styles.designerActions}>
-              <Button
-                title={isDownloadingImage ? "Downloading..." : "Download"}
+              <TouchableOpacity
                 onPress={handleDownloadImage}
-                style={[styles.actionButton, styles.downloadButton]}
                 disabled={isDownloadingImage}
-              />
-              <Button
-                title={isDownloadingExcel ? "Downloading..." : `Download Excel - ${designCode || 'N/A'}.xlsx`}
+                style={[styles.actionBtn, styles.downloadBtn, isDownloadingImage && styles.btnDisabled]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
+                  <Icon name="file-download" size={20} color={colors.textWhite} />
+                  <Text style={styles.btnText}>
+                    {isDownloadingImage ? "Downloading..." : "Download Image"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
                 onPress={handleDownloadExcel}
-                style={[styles.excelButton]}
                 disabled={isDownloadingExcel}
-              />
+                style={[styles.actionBtn, styles.excelBtn, isDownloadingExcel && styles.btnDisabled]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
+                  <Icon name="insert-drive-file" size={20} color={colors.textWhite} />
+                  <Text style={styles.btnText}>
+                    {isDownloadingExcel ? "Downloading..." : `Download Excel - ${designCode || 'N/A'}`}
+                  </Text>
+                </View>
+              </TouchableOpacity>
             </View>
           ) : (
             // Admin view: All buttons including Delete and Pricing
-            <>
-              <View style={styles.actionButtons}>
-                <Button
-                  title={isDownloadingImage ? "Downloading..." : "Download Image"}
+            <View style={styles.adminActions}>
+              <View style={styles.actionButtonsRow}>
+                <TouchableOpacity
                   onPress={handleDownloadImage}
-                  style={[styles.actionButton, styles.downloadButton]}
                   disabled={isDownloadingImage}
-                />
-                <Button
-                  title="Delete"
+                  style={[styles.actionBtn, styles.actionBtnHalf, styles.downloadBtn, isDownloadingImage && styles.btnDisabled]}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.btnContent}>
+                    <Icon name="file-download" size={18} color={colors.textWhite} />
+                    <Text style={styles.btnText}>
+                      {isDownloadingImage ? "Downloading..." : "Download Image"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
                   onPress={handleDeleteImage}
-                  style={[styles.actionButton, styles.deleteButton]}
-                />
+                  style={[styles.actionBtn, styles.actionBtnHalf, styles.deleteBtn]}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.btnContent}>
+                    <Icon name="delete-outline" size={18} color={colors.textWhite} />
+                    <Text style={styles.btnText}>Delete</Text>
+                  </View>
+                </TouchableOpacity>
               </View>
 
               {/* Download Excel Button */}
-              <Button
-                title={isDownloadingExcel ? "Downloading..." : `Download Excel - ${designCode || 'N/A'}`}
+              <TouchableOpacity
                 onPress={handleDownloadExcel}
-                style={[styles.excelButton]}
                 disabled={isDownloadingExcel}
-              />
+                style={[styles.actionBtn, styles.excelBtn, isDownloadingExcel && styles.btnDisabled]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
+                  <Icon name="insert-drive-file" size={20} color={colors.textWhite} />
+                  <Text style={styles.btnText}>
+                    {isDownloadingExcel ? "Downloading..." : `Download Excel - ${designCode || 'N/A'}`}
+                  </Text>
+                </View>
+              </TouchableOpacity>
 
               {/* Pricing Button - Admin only */}
               {isAdmin && (
-                <Button
-                  title="Pricing"
+                <TouchableOpacity
                   onPress={() => navigation.navigate('Pricing', {
                     enquiry: enquiry,
                     designType: designType,
                   })}
-                  style={[styles.pricingButton]}
-                />
+                  style={[styles.actionBtn, styles.pricingBtn]}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.btnContent}>
+                    <Icon name="attach-money" size={20} color={colors.textWhite} />
+                    <Text style={styles.btnText}>Pricing</Text>
+                  </View>
+                </TouchableOpacity>
               )}
-            </>
+            </View>
           )}
         </Card>
       </ScrollView>
+
+      {/* Full Screen Image Modal */}
+      <Modal
+        visible={isFullScreen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsFullScreen(false)}
+      >
+        <StatusBar hidden={isFullScreen} />
+        <View style={styles.fullScreenContainer}>
+          <TouchableOpacity
+            style={styles.fullScreenCloseButton}
+            onPress={() => setIsFullScreen(false)}
+            activeOpacity={0.8}
+          >
+            <Icon name="close" size={30} color={colors.textWhite} />
+          </TouchableOpacity>
+          
+          {currentImageUrl && (
+            <TouchableOpacity
+              style={styles.fullScreenImageContainer}
+              activeOpacity={1}
+              onPress={() => setIsFullScreen(false)}
+            >
+              {!imageDataUri && !useFetchDirectly ? (
+                <Image
+                  source={{
+                    uri: currentImageUrl,
+                    headers: imageHeaders,
+                  }}
+                  style={styles.fullScreenImage}
+                  resizeMode="contain"
+                />
+              ) : imageDataUri ? (
+                <Image
+                  source={{ uri: imageDataUri }}
+                  style={styles.fullScreenImage}
+                  resizeMode="contain"
+                />
+              ) : null}
+            </TouchableOpacity>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1480,54 +1592,160 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   commentSection: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   commentHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  label: {
-    fontSize: fonts.base,
-    fontWeight: '600',
+  commentHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  commentLabel: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
     color: colors.textPrimary,
+    letterSpacing: 0.3,
+  },
+  commentDisplayBox: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minHeight: 60,
+    justifyContent: 'center',
   },
   commentText: {
     color: colors.textPrimary,
     fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    lineHeight: 22,
+  },
+  commentInputContainer: {
+    marginBottom: 16,
   },
   commentInput: {
-    marginBottom: 12,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
   saveButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
     alignSelf: 'flex-start',
+  },
+  saveButtonText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.base,
+  },
+  buttonText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.base,
+  },
+  actionsDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: 20,
   },
   designerActions: {
     gap: 12,
   },
-  actionButtons: {
+  adminActions: {
+    gap: 12,
+  },
+  actionButtonsRow: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 16,
   },
-  actionButton: {
+  actionBtn: {
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    minHeight: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionBtnHalf: {
     flex: 1,
   },
-  downloadButton: {
-    backgroundColor: colors.info || '#2196F3',
+  btnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
-  deleteButton: {
-    backgroundColor: colors.error,
+  btnText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.base,
+    letterSpacing: 0.2,
   },
-  excelButton: {
-    backgroundColor: colors.success,
-    width: '100%',
-    marginBottom: 12,
-  },
-  pricingButton: {
+  downloadBtn: {
     backgroundColor: colors.primary,
     width: '100%',
+  },
+  deleteBtn: {
+    backgroundColor: colors.primary,
+  },
+  excelBtn: {
+    backgroundColor: colors.primary,
+    width: '100%',
+  },
+  pricingBtn: {
+    backgroundColor: colors.primary,
+    width: '100%',
+  },
+  btnDisabled: {
+    opacity: 0.6,
+  },
+  imageTouchable: {
+    width: '100%',
+    height: '100%',
+  },
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImageContainer: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+  },
+  fullScreenCloseButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 20,
+    right: 20,
+    zIndex: 1000,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
