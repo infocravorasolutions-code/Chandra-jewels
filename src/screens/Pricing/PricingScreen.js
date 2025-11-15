@@ -11,14 +11,18 @@ import {
   TextInput,
 } from 'react-native';
 import { Card } from '../../components/cards/Cards';
-import { Button, Input } from '../../components/common';
+import { Input } from '../../components/common';
 import { CustomText, Heading } from '../../components/common/Text';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatCurrency } from '../../utils/helpers';
-import { useGetMetalPricesQuery, useCalculatePricingMutation, useApproveDesignVersionMutation, useRejectDesignVersionMutation } from '../../store/api';
+import { useGetMetalPricesQuery, useCalculatePricingMutation } from '../../store/api';
 import { API_BASE_URL } from '../../config/apiConfig';
+import RNFS from 'react-native-fs';
+import Share from 'react-native-share';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as XLSX from 'xlsx';
 
 const PricingScreen = ({ route, navigation }) => {
   const { enquiry, designType } = route.params || {}; // designType: 'coral' or 'cad'
@@ -33,26 +37,103 @@ const PricingScreen = ({ route, navigation }) => {
     ? designData[designData.length - 1] 
     : null;
   
-  const existingPricing = latestDesign?.Pricing || latestDesign?.pricing || {};
+  // Handle Pricing as both array and object formats
+  const rawPricing = latestDesign?.Pricing || latestDesign?.pricing || {};
+  const existingPricing = Array.isArray(rawPricing) && rawPricing.length > 0 
+    ? rawPricing[rawPricing.length - 1] // Get the latest pricing if it's an array
+    : rawPricing; // Use as-is if it's an object
 
-  // Form state
+  // Form state - initialize with existing pricing data
   const [formData, setFormData] = useState({
-    metalPrice: existingPricing?.MetalPrice?.toString() || '0',
-    diamondPrice: existingPricing?.DiamondPrice?.toString() || '0',
-    totalPrice: existingPricing?.TotalPrice?.toString() || '0',
-    metalWeight: existingPricing?.MetalWeight?.toString() || '0',
-    diamondWeight: existingPricing?.DiamondWeight?.toString() || '0',
-    totalPieces: existingPricing?.TotalPieces?.toString() || '0',
-    lossPercent: existingPricing?.LossPercent?.toString() || '0',
-    labour: existingPricing?.Labour?.toString() || '0',
-    duties: existingPricing?.Duties?.toString() || '0',
-    extraCharges: existingPricing?.ExtraCharges?.toString() || '0',
-    undercutPrice: existingPricing?.UndercutPrice?.toString() || '0',
+    metalPrice: (existingPricing?.MetalPrice || existingPricing?.metalPrice || 0).toString(),
+    diamondPrice: (existingPricing?.DiamondPrice || existingPricing?.DiamondsPrice || existingPricing?.diamondPrice || 0).toString(),
+    totalPrice: (existingPricing?.TotalPrice || existingPricing?.totalPrice || 0).toString(),
+    metalWeight: (existingPricing?.MetalWeight || existingPricing?.metalWeight || 0).toString(),
+    diamondWeight: (existingPricing?.DiamondWeight || existingPricing?.diamondWeight || 0).toString(),
+    totalPieces: (existingPricing?.TotalPieces || existingPricing?.totalPieces || 0).toString(),
+    lossPercent: (existingPricing?.LossPercent || existingPricing?.lossPercent || existingPricing?.Loss || 0).toString(),
+    labour: (existingPricing?.Labour || existingPricing?.labour || 0).toString(),
+    duties: (existingPricing?.Duties || existingPricing?.duties || 0).toString(),
+    extraCharges: (existingPricing?.ExtraCharges || existingPricing?.extraCharges || 0).toString(),
+    undercutPrice: (existingPricing?.UndercutPrice || existingPricing?.undercutPrice || 0).toString(),
     clientPricingMessage: existingPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
   });
 
-  const [undercutEnabled, setUndercutEnabled] = useState(!!existingPricing?.UndercutPrice);
-  const [stones, setStones] = useState(existingPricing?.Stones || latestDesign?.Stones || []);
+  const [undercutEnabled, setUndercutEnabled] = useState(!!(existingPricing?.UndercutPrice || existingPricing?.undercutPrice));
+  
+  // Normalize stones data - map API field names to UI field names
+  const normalizeStones = (rawStones) => {
+    if (!Array.isArray(rawStones) || rawStones.length === 0) return [];
+    return rawStones.map(stone => ({
+      Type: stone.Type || stone.type || '',
+      Color: stone.Color || stone.color || '',
+      Shape: stone.Shape || stone.shape || '',
+      MM: (stone.MmSize || stone.MM || stone.mmSize || stone.mm || '').toString(),
+      Sieve: (stone.SieveSize || stone.Sieve || stone.sieveSize || stone.sieve || '').toString(),
+      Weight: (stone.Weight || stone.weight || 0).toString(),
+      Pieces: (stone.Pcs || stone.Pieces || stone.pcs || stone.pieces || 0).toString(),
+      CaratWeight: (stone.CtWeight || stone.CaratWeight || stone.ctWeight || stone.caratWeight || 0).toString(),
+      Price: (stone.Price || stone.price || 0).toString(),
+    }));
+  };
+  
+  const [stones, setStones] = useState(() => {
+    const rawStones = existingPricing?.Stones || existingPricing?.stones || latestDesign?.Stones || latestDesign?.stones || [];
+    return normalizeStones(rawStones);
+  });
+
+  // Update form data when enquiry or design data changes
+  useEffect(() => {
+    if (latestDesign) {
+      // Re-extract pricing in case it changed (handle array format)
+      const rawPricing = latestDesign?.Pricing || latestDesign?.pricing || {};
+      const currentPricing = Array.isArray(rawPricing) && rawPricing.length > 0 
+        ? rawPricing[rawPricing.length - 1]
+        : rawPricing;
+      
+      if (currentPricing && typeof currentPricing === 'object') {
+        const updatedFormData = {
+          metalPrice: (currentPricing?.MetalPrice || currentPricing?.metalPrice || 0).toString(),
+          diamondPrice: (currentPricing?.DiamondPrice || currentPricing?.DiamondsPrice || currentPricing?.diamondPrice || 0).toString(),
+          totalPrice: (currentPricing?.TotalPrice || currentPricing?.totalPrice || 0).toString(),
+          metalWeight: (currentPricing?.MetalWeight || currentPricing?.metalWeight || 0).toString(),
+          diamondWeight: (currentPricing?.DiamondWeight || currentPricing?.diamondWeight || 0).toString(),
+          totalPieces: (currentPricing?.TotalPieces || currentPricing?.totalPieces || 0).toString(),
+          lossPercent: (currentPricing?.LossPercent || currentPricing?.lossPercent || currentPricing?.Loss || 0).toString(),
+          labour: (currentPricing?.Labour || currentPricing?.labour || 0).toString(),
+          duties: (currentPricing?.Duties || currentPricing?.duties || 0).toString(),
+          extraCharges: (currentPricing?.ExtraCharges || currentPricing?.extraCharges || 0).toString(),
+          undercutPrice: (currentPricing?.UndercutPrice || currentPricing?.undercutPrice || 0).toString(),
+          clientPricingMessage: currentPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
+        };
+        
+        setFormData(prevFormData => {
+          // Only update if values have changed to avoid unnecessary re-renders
+          const hasChanges = Object.keys(updatedFormData).some(
+            key => updatedFormData[key] !== prevFormData[key]
+          );
+          
+          return hasChanges ? updatedFormData : prevFormData;
+        });
+        
+        // Update stones if they exist - normalize field names
+        const rawStones = currentPricing?.Stones || currentPricing?.stones || latestDesign?.Stones || latestDesign?.stones || [];
+        const updatedStones = normalizeStones(rawStones);
+        if (updatedStones.length > 0) {
+          setStones(prevStones => {
+            if (JSON.stringify(updatedStones) !== JSON.stringify(prevStones)) {
+              return updatedStones;
+            }
+            return prevStones;
+          });
+        }
+        
+        // Update undercut enabled
+        const hasUndercut = !!(currentPricing?.UndercutPrice || currentPricing?.undercutPrice);
+        setUndercutEnabled(prev => hasUndercut !== prev ? hasUndercut : prev);
+      }
+    }
+  }, [latestDesign]);
 
   // Fetch latest metal prices - API is called automatically when component mounts
   const { data: metalPricesData, isLoading: loadingMetalPrices, refetch: refetchMetalPrices } = useGetMetalPricesQuery(false);
@@ -60,14 +141,6 @@ const PricingScreen = ({ route, navigation }) => {
   
   // Pricing calculation mutation
   const [calculatePricing, { isLoading: isCalculating }] = useCalculatePricingMutation();
-  
-  // Approve/Reject mutations
-  const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
-  const [rejectDesignVersion, { isLoading: isRejecting }] = useRejectDesignVersionMutation();
-  
-  // State for rejection reason
-  const [showRejectModal, setShowRejectModal] = useState(false);
-  const [rejectionReason, setRejectionReason] = useState('');
   
   // Determine metal type from enquiry (default to gold)
   const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
@@ -98,6 +171,36 @@ const PricingScreen = ({ route, navigation }) => {
       setMetalRateConsidered(apiMetalRate);
     }
   }, [apiMetalRate, existingPricing?.MetalRateConsidered]);
+
+  // Debug: Log pricing data structure (after all useState hooks)
+  useEffect(() => {
+    if (__DEV__) {
+      const rawPricing = latestDesign?.Pricing || latestDesign?.pricing || {};
+      const pricingObj = Array.isArray(rawPricing) && rawPricing.length > 0 
+        ? rawPricing[rawPricing.length - 1]
+        : rawPricing;
+      
+      console.log('========== PRICING SCREEN DEBUG ==========');
+      console.log('Design Type:', designType);
+      console.log('Latest Design:', latestDesign ? 'Found' : 'Not Found');
+      console.log('Raw Pricing Type:', Array.isArray(rawPricing) ? 'Array' : 'Object');
+      console.log('Existing Pricing:', pricingObj);
+      console.log('Pricing Keys:', Object.keys(pricingObj || {}));
+      console.log('MetalPrice:', pricingObj?.MetalPrice);
+      console.log('DiamondPrice:', pricingObj?.DiamondPrice);
+      console.log('DiamondsPrice:', pricingObj?.DiamondsPrice);
+      console.log('TotalPrice:', pricingObj?.TotalPrice);
+      console.log('MetalWeight:', pricingObj?.MetalWeight);
+      console.log('DiamondWeight:', pricingObj?.DiamondWeight);
+      console.log('TotalPieces:', pricingObj?.TotalPieces);
+      console.log('Loss:', pricingObj?.Loss);
+      console.log('Labour:', pricingObj?.Labour);
+      console.log('Duties:', pricingObj?.Duties);
+      console.log('Stones:', pricingObj?.Stones?.length || 0);
+      console.log('Full Pricing Object:', JSON.stringify(pricingObj, null, 2));
+      console.log('==========================================');
+    }
+  }, [latestDesign, designType]);
 
   // Get design code for Excel filename
   const designCode = designType === 'coral'
@@ -715,119 +818,249 @@ const PricingScreen = ({ route, navigation }) => {
     }
   };
 
-  const handleDownloadPricing = () => {
-    // TODO: Implement pricing download
-    Alert.alert('Info', 'Download Pricing functionality will be implemented');
+  const handleDownloadPricing = async () => {
+    if (stones.length === 0) {
+      Alert.alert('No Data', 'No stones data available to download');
+      return;
+    }
+
+    try {
+      // Get auth token
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        Alert.alert('Error', 'Authentication token not found');
+      return;
+    }
+
+      // Prepare stones data for Excel generation
+      const stonesData = stones.map(stone => ({
+        Type: stone.Type || '',
+        Color: stone.Color || '',
+        Shape: stone.Shape || '',
+        MmSize: stone.MM || '',
+        SieveSize: stone.Sieve || '',
+        Weight: parseFloat(stone.Weight) || 0,
+        Pcs: parseInt(stone.Pieces) || 0,
+        CtWeight: parseFloat(stone.CaratWeight) || 0,
+        Price: parseFloat(stone.Price) || 0,
+      }));
+
+      // Create filename with design code and timestamp
+      const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
+      const excelFilename = designCode 
+        ? `Pricing_${designCode}_${timestamp}.xlsx`
+        : `Pricing_${timestamp}.xlsx`;
+
+      // Try to call backend API to generate Excel
+      const excelUrl = `${API_BASE_URL}/api/pricing/generate-excel`;
+      
+              if (__DEV__) {
+        console.log('Generating Excel for pricing:', {
+          stonesCount: stonesData.length,
+          designCode,
+          excelFilename,
+        });
+      }
+
+      const response = await fetch(excelUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          stones: stonesData,
+          designCode: designCode || '',
+          designType: designType || '',
+          enquiryId: enquiry?.id || enquiry?._id || '',
+        }),
+      });
+
+      if (!response.ok) {
+        // If backend API doesn't exist, generate CSV as fallback
+        throw new Error(`Backend API not available (${response.status}), using CSV fallback`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      
+      if (contentType.includes('application/json')) {
+        // Backend returned JSON (possibly with signed URL)
+        const jsonData = await response.json();
+        if (jsonData.url) {
+          // Download from signed URL
+          const s3Response = await fetch(jsonData.url);
+          if (!s3Response.ok) {
+            throw new Error('Failed to download from signed URL');
+          }
+          const arrayBuffer = await s3Response.arrayBuffer();
+          await saveExcelFile(arrayBuffer, excelFilename);
+        } else {
+          throw new Error('Backend did not return a valid URL');
+        }
+      } else {
+        // Backend returned Excel file directly
+        const arrayBuffer = await response.arrayBuffer();
+        await saveExcelFile(arrayBuffer, excelFilename);
+      }
+    } catch (error) {
+      console.warn('Backend Excel generation failed, using client-side Excel generation:', error.message);
+      // Fallback to client-side Excel generation
+      await generateExcelFile();
+    }
+  };
+
+  const saveExcelFile = async (arrayBuffer, filename) => {
+    const downloadPath = `${RNFS.DownloadDirectoryPath}/${filename}`;
+    
+    // Convert array buffer to base64
+    const bytes = new Uint8Array(arrayBuffer);
+    const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let base64 = '';
+    let i = 0;
+    
+    while (i < bytes.length) {
+      const a = bytes[i++];
+      const b = i < bytes.length ? bytes[i++] : 0;
+      const c = i < bytes.length ? bytes[i++] : 0;
+      
+      const bitmap = (a << 16) | (b << 8) | c;
+      
+      base64 += base64Chars.charAt((bitmap >> 18) & 63);
+      base64 += base64Chars.charAt((bitmap >> 12) & 63);
+      base64 += i - 2 < bytes.length ? base64Chars.charAt((bitmap >> 6) & 63) : '=';
+      base64 += i - 1 < bytes.length ? base64Chars.charAt(bitmap & 63) : '=';
+    }
+
+    // Write file to device
+    await RNFS.writeFile(downloadPath, base64, 'base64');
+
+    // Share/open the file
+    try {
+      await Share.open({
+        url: `file://${downloadPath}`,
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        filename: filename,
+        title: 'Open Excel File',
+        message: `Downloaded: ${filename}`,
+      });
+    } catch (shareError) {
+      if (shareError.message !== 'User did not share') {
+        Alert.alert(
+          'Success',
+          `Excel file downloaded successfully!\n\nSaved to: Downloads/${filename}`,
+          [{ text: 'OK' }]
+        );
+      }
+    }
+  };
+
+  const generateExcelFile = async () => {
+    if (stones.length === 0) {
+      Alert.alert('No Data', 'No stones data available');
+      return;
+    }
+
+    try {
+      // Prepare data array with headers matching the Excel structure
+      const excelData = [
+        ['Type', 'Color', 'Shape', 'MM Size', 'Sieve Size', 'Weight', 'Pieces', 'Carat Weight', 'Price']
+      ];
+
+      // Add stone data rows
+      stones.forEach(stone => {
+        excelData.push([
+          stone.Type || '',
+          stone.Color || '',
+          stone.Shape || '',
+          stone.MM || '',
+          stone.Sieve || '',
+          parseFloat(stone.Weight) || 0,
+          parseInt(stone.Pieces) || 0,
+          parseFloat(stone.CaratWeight) || 0,
+          parseFloat(stone.Price) || 0,
+        ]);
+      });
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(excelData);
+
+      // Set column widths for better readability
+      ws['!cols'] = [
+        { wch: 15 }, // Type
+        { wch: 10 }, // Color
+        { wch: 10 }, // Shape
+        { wch: 12 }, // MM Size
+        { wch: 15 }, // Sieve Size
+        { wch: 12 }, // Weight
+        { wch: 10 }, // Pieces
+        { wch: 15 }, // Carat Weight
+        { wch: 12 }, // Price
+      ];
+
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'Pricing');
+
+      // Generate Excel file buffer
+      const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+
+      // Create filename
+      const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
+      const excelFilename = designCode 
+        ? `Pricing_${designCode}_${timestamp}.xlsx`
+        : `Pricing_${timestamp}.xlsx`;
+      
+      const downloadPath = `${RNFS.DownloadDirectoryPath}/${excelFilename}`;
+
+      // Convert array buffer to base64
+      const bytes = new Uint8Array(excelBuffer);
+      const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      let base64 = '';
+      let i = 0;
+      
+      while (i < bytes.length) {
+        const a = bytes[i++];
+        const b = i < bytes.length ? bytes[i++] : 0;
+        const c = i < bytes.length ? bytes[i++] : 0;
+        
+        const bitmap = (a << 16) | (b << 8) | c;
+        
+        base64 += base64Chars.charAt((bitmap >> 18) & 63);
+        base64 += base64Chars.charAt((bitmap >> 12) & 63);
+        base64 += i - 2 < bytes.length ? base64Chars.charAt((bitmap >> 6) & 63) : '=';
+        base64 += i - 1 < bytes.length ? base64Chars.charAt(bitmap & 63) : '=';
+      }
+
+      // Write Excel file
+      await RNFS.writeFile(downloadPath, base64, 'base64');
+
+      // Share/open the file
+      try {
+        await Share.open({
+          url: `file://${downloadPath}`,
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          filename: excelFilename,
+          title: 'Open Excel File',
+          message: `Downloaded: ${excelFilename}`,
+        });
+      } catch (shareError) {
+        if (shareError.message !== 'User did not share') {
+          Alert.alert(
+            'Success',
+            `Excel file downloaded successfully!\n\nSaved to: Downloads/${excelFilename}`,
+            [{ text: 'OK' }]
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error generating Excel file:', error);
+      Alert.alert('Error', `Failed to generate Excel file: ${error.message}`);
+    }
   };
 
   const handleSyncClientPricing = () => {
     // TODO: Implement sync functionality
     Alert.alert('Info', 'Sync Client Pricing functionality will be implemented');
-  };
-
-  const handleApprove = async () => {
-    if (!latestDesign) {
-      Alert.alert('Error', 'No design version found to approve');
-      return;
-    }
-
-    const version = latestDesign?.Version || `Version ${designData.length}`;
-    const enquiryId = enquiry?.id || enquiry?._id;
-    
-    if (!enquiryId) {
-      Alert.alert('Error', 'Enquiry ID not found');
-      return;
-    }
-
-    Alert.alert(
-      'Approve Design Version',
-      `Are you sure you want to approve ${designType.toUpperCase()} ${version}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Approve',
-          onPress: async () => {
-            try {
-              if (__DEV__) {
-                console.log('========== APPROVING DESIGN VERSION FROM PRICING SCREEN ==========');
-                console.log('Enquiry ID:', enquiryId);
-                console.log('Design Type:', designType);
-                console.log('Version:', version);
-              }
-
-              await approveDesignVersion({
-                enquiryId,
-                designType,
-                version,
-              }).unwrap();
-
-              Alert.alert('Success', `${designType.toUpperCase()} ${version} approved successfully`);
-            } catch (error) {
-              console.error('Error approving design version:', error);
-              Alert.alert(
-                'Error',
-                error?.data?.error || error?.message || 'Failed to approve design version. Please try again.'
-              );
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleReject = () => {
-    if (!latestDesign) {
-      Alert.alert('Error', 'No design version found to reject');
-      return;
-    }
-    setShowRejectModal(true);
-  };
-
-  const confirmReject = async () => {
-    if (!rejectionReason.trim()) {
-      Alert.alert('Error', 'Please provide a reason for rejection');
-      return;
-    }
-
-    if (!latestDesign) {
-      Alert.alert('Error', 'No design version found to reject');
-      return;
-    }
-
-    const version = latestDesign?.Version || `Version ${designData.length}`;
-    const enquiryId = enquiry?.id || enquiry?._id;
-    
-    if (!enquiryId) {
-      Alert.alert('Error', 'Enquiry ID not found');
-      return;
-    }
-
-    try {
-      if (__DEV__) {
-        console.log('========== REJECTING DESIGN VERSION FROM PRICING SCREEN ==========');
-        console.log('Enquiry ID:', enquiryId);
-        console.log('Design Type:', designType);
-        console.log('Version:', version);
-        console.log('Reason:', rejectionReason);
-      }
-
-      await rejectDesignVersion({
-        enquiryId,
-        designType,
-        version,
-        reason: rejectionReason.trim(),
-      }).unwrap();
-
-      Alert.alert('Success', `${designType.toUpperCase()} ${version} rejected successfully`);
-      setShowRejectModal(false);
-      setRejectionReason('');
-    } catch (error) {
-      console.error('Error rejecting design version:', error);
-      Alert.alert(
-        'Error',
-        error?.data?.error || error?.message || 'Failed to reject design version. Please try again.'
-      );
-    }
   };
 
   return (
@@ -983,135 +1216,186 @@ const PricingScreen = ({ route, navigation }) => {
         <Card style={styles.stonesCard}>
           <View style={styles.stonesHeader}>
             <Heading level={4} style={styles.sectionTitle}>Stones</Heading>
-            <View style={styles.stonesButtons}>
-              <Button
-                title="Add Diamond"
+          </View>
+          <View style={styles.stonesButtonsContainer}>
+            <TouchableOpacity
                 onPress={handleAddDiamond}
                 style={[styles.stonesButton, styles.addButton]}
-              />
-              <Button
-                title="Download Pricing"
+              activeOpacity={0.8}
+            >
+              <View style={styles.stonesBtnContent}>
+                <Icon name="add" size={18} color={colors.textWhite} />
+                <Text style={styles.stonesBtnText}>Add Diamond</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
                 onPress={handleDownloadPricing}
                 style={[styles.stonesButton, styles.downloadButton]}
-              />
+              activeOpacity={0.8}
+            >
+              <View style={styles.stonesBtnContent}>
+                <Icon name="file-download" size={18} color={colors.textWhite} />
+                <Text style={styles.stonesBtnText}>Download Pricing</Text>
             </View>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.stonesTable}>
-            <View style={styles.tableHeader}>
-              <Text style={styles.tableHeaderText}>Type</Text>
-              <Text style={styles.tableHeaderText}>Color</Text>
-              <Text style={styles.tableHeaderText}>Shape</Text>
-              <Text style={styles.tableHeaderText}>MM Size</Text>
-              <Text style={styles.tableHeaderText}>Sieve Size</Text>
-              <Text style={styles.tableHeaderText}>Weight</Text>
-              <Text style={styles.tableHeaderText}>Pieces</Text>
-              <Text style={styles.tableHeaderText}>Carat Weight</Text>
-              <Text style={styles.tableHeaderText}>Price</Text>
-              <Text style={styles.tableHeaderText}>Actions</Text>
-            </View>
+          <View style={styles.stonesContainer}>
             {stones.length > 0 ? (
               stones.map((stone, index) => (
-                <View key={index} style={styles.tableRow}>
+                <Card key={index} style={styles.stoneCard}>
+                  <View style={styles.stoneCardHeader}>
+                    <CustomText variant="label" style={styles.stoneCardTitle}>
+                      Stone {index + 1}
+                    </CustomText>
+                    <TouchableOpacity
+                      onPress={() => handleDeleteStone(index)}
+                      style={styles.deleteStoneButton}
+                    >
+                      <Icon name="delete" size={20} color={colors.error} />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  <View style={styles.stoneFields}>
                   {/* Type Dropdown */}
-                  <View style={styles.tableCell}>
+                    <View style={styles.stoneField}>
+                      <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                        Type *
+                      </CustomText>
                     {renderTypeDropdown(index, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '')}
                   </View>
                   
-                  {/* Color Input */}
+                    {/* Row 1: Color and Shape */}
+                    <View style={styles.stoneFieldRow}>
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          Color
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.Color || ''}
                     onChangeText={(value) => handleUpdateStone(index, 'Color', value)}
-                    placeholder=""
+                          placeholder="Enter color"
                     placeholderTextColor={colors.textLight}
                   />
+                      </View>
                   
-                  {/* Shape Input */}
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          Shape
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.Shape || ''}
                     onChangeText={(value) => handleUpdateStone(index, 'Shape', value)}
-                    placeholder=""
+                          placeholder="Enter shape"
                     placeholderTextColor={colors.textLight}
                   />
-                  
-                  {/* MM Size Input */}
+                      </View>
+                    </View>
+                    
+                    {/* Row 2: MM Size and Sieve Size */}
+                    <View style={styles.stoneFieldRow}>
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          MM Size
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.MM || ''}
                     onChangeText={(value) => handleUpdateStone(index, 'MM', value)}
-                    placeholder=""
+                          placeholder="0"
                     placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
                   />
+                      </View>
                   
-                  {/* Sieve Size Input */}
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          Sieve Size
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.Sieve || ''}
                     onChangeText={(value) => handleUpdateStone(index, 'Sieve', value)}
-                    placeholder=""
+                          placeholder="0"
                     placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
                   />
-                  
-                  {/* Weight Input */}
+                      </View>
+                    </View>
+                    
+                    {/* Row 3: Weight and Pieces */}
+                    <View style={styles.stoneFieldRow}>
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          Weight
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.Weight || '0'}
                     onChangeText={(value) => handleUpdateStone(index, 'Weight', value)}
                     placeholder="0"
                     placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
-                    textAlign="center"
                   />
+                      </View>
                   
-                  {/* Pieces Input */}
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          Pieces
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.Pieces || '0'}
                     onChangeText={(value) => handleUpdateStone(index, 'Pieces', value)}
                     placeholder="0"
                     placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
-                    textAlign="center"
-                  />
-                  
-                  {/* Carat Weight Input */}
+                        />
+                      </View>
+                    </View>
+                    
+                    {/* Row 4: Carat Weight and Price */}
+                    <View style={styles.stoneFieldRow}>
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          Carat Weight
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.CaratWeight || '0'}
                     onChangeText={(value) => handleUpdateStone(index, 'CaratWeight', value)}
                     placeholder="0"
                     placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
-                    textAlign="center"
                   />
+                      </View>
                   
-                  {/* Price Input */}
+                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
+                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
+                          Price
+                        </CustomText>
                   <TextInput
-                    style={styles.tableInput}
+                          style={styles.stoneInput}
                     value={stone.Price || '0'}
                     onChangeText={(value) => handleUpdateStone(index, 'Price', value)}
                     placeholder="0"
                     placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
-                    textAlign="center"
-                  />
-                  
-                  {/* Delete Button */}
-                  <TouchableOpacity
-                    onPress={() => handleDeleteStone(index)}
-                    style={styles.deleteStoneButton}
-                  >
-                    <Icon name="delete" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
+                        />
                 </View>
+                    </View>
+                  </View>
+                </Card>
               ))
             ) : (
-              <View style={styles.emptyStonesRow}>
+              <View style={styles.emptyStonesContainer}>
+                <Icon name="diamond" size={48} color={colors.textLight} />
                 <Text style={styles.emptyStonesText}>No stones added yet</Text>
+                <Text style={styles.emptyStonesSubtext}>
+                  Click "Add Diamond" to add your first stone
+                </Text>
               </View>
             )}
           </View>
@@ -1133,89 +1417,60 @@ const PricingScreen = ({ route, navigation }) => {
         </Card>
 
         {/* Action Buttons */}
+        <Card style={styles.actionButtonsCard}>
         <View style={styles.actionButtons}>
-          <Button
-            title="Save"
+            <View style={styles.actionButtonsRow}>
+              <TouchableOpacity
             onPress={handleSave}
-            style={[styles.actionButton, styles.saveButton]}
-          />
-          <Button
-            title="Cancel"
+                style={[styles.actionBtn, styles.actionBtnHalf, styles.saveBtn]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
+                  <Icon name="save" size={18} color={colors.textWhite} />
+                  <Text style={styles.btnText}>Save</Text>
+                </View>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
             onPress={() => navigation.goBack()}
-            variant="outline"
-            style={styles.actionButton}
-          />
-          <Button
-            title={isCalculating ? "Calculating..." : "Calculate"}
-            onPress={handleCalculate}
-            style={[styles.actionButton, styles.calculateButton]}
-            disabled={isCalculating}
-          />
-          <Button
-            title="Sync Client Pricing"
-            onPress={handleSyncClientPricing}
-            style={[styles.actionButton, styles.syncButton]}
-          />
-          <Button
-            title={isApproving ? "Approving..." : "Approve"}
-            onPress={handleApprove}
-            style={[styles.actionButton, styles.approveButton]}
-            disabled={isApproving || isRejecting}
-          />
-          <Button
-            title={isRejecting ? "Rejecting..." : "Reject"}
-            onPress={handleReject}
-            style={[styles.actionButton, styles.rejectButton]}
-            disabled={isApproving || isRejecting}
-          />
-        </View>
-      </ScrollView>
-
-      {/* Reject Modal */}
-      <Modal
-        visible={showRejectModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowRejectModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Reject Design Version</Text>
-            <Text style={styles.modalSubtitle}>
-              {designType.toUpperCase()} {latestDesign?.Version || `Version ${designData.length}`}
-            </Text>
-            <Text style={styles.modalLabel}>
-              Please provide a reason for rejection:
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Enter rejection reason..."
-              value={rejectionReason}
-              onChangeText={setRejectionReason}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-            <View style={styles.modalButtons}>
-              <Button
-                title="Cancel"
-                variant="outline"
-                onPress={() => {
-                  setShowRejectModal(false);
-                  setRejectionReason('');
-                }}
-                style={styles.modalButton}
-              />
-              <Button
-                title="Reject"
-                onPress={confirmReject}
-                style={[styles.modalButton, styles.rejectButton]}
-                disabled={isRejecting}
-              />
+                style={[styles.actionBtn, styles.actionBtnHalf, styles.cancelBtn]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
+                  <Icon name="close" size={18} color={colors.textWhite} />
+                  <Text style={styles.btnText}>Cancel</Text>
+                </View>
+              </TouchableOpacity>
             </View>
-          </View>
+
+            <TouchableOpacity
+            onPress={handleCalculate}
+            disabled={isCalculating}
+              style={[styles.actionBtn, styles.calculateBtn, isCalculating && styles.btnDisabled]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="calculate" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>
+                  {isCalculating ? "Calculating..." : "Calculate"}
+                </Text>
         </View>
-      </Modal>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleSyncClientPricing}
+              style={[styles.actionBtn, styles.syncBtn]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="sync" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>Sync Client Pricing</Text>
+            </View>
+            </TouchableOpacity>
+
+          </View>
+        </Card>
+      </ScrollView>
     </View>
   );
 };
@@ -1248,20 +1503,29 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     marginBottom: 16,
-    padding: 16,
+    padding: 20,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
   },
   infoText: {
     color: colors.textSecondary,
     fontSize: fonts.sm,
+    fontFamily: fonts.regular,
     lineHeight: 20,
   },
   pricingCard: {
     marginBottom: 16,
-    padding: 16,
+    padding: 20,
+    backgroundColor: colors.background,
+    borderRadius: 12,
   },
   sectionTitle: {
     marginBottom: 16,
     color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: fonts.lg,
   },
   pricingGrid: {
     gap: 16,
@@ -1277,7 +1541,9 @@ const styles = StyleSheet.create({
   },
   undercutCard: {
     marginBottom: 16,
-    padding: 16,
+    padding: 20,
+    backgroundColor: colors.background,
+    borderRadius: 12,
   },
   undercutHeader: {
     flexDirection: 'row',
@@ -1287,7 +1553,7 @@ const styles = StyleSheet.create({
   undercutLabel: {
     marginLeft: 12,
     fontSize: fonts.base,
-    fontWeight: '600',
+    fontFamily: fonts.bold,
     color: colors.textPrimary,
   },
   undercutInput: {
@@ -1295,88 +1561,117 @@ const styles = StyleSheet.create({
   },
   stonesCard: {
     marginBottom: 16,
-    padding: 16,
+    padding: 20,
+    backgroundColor: colors.background,
+    borderRadius: 12,
   },
   stonesHeader: {
+    marginBottom: 12,
+  },
+  stonesButtonsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  stonesButton: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: '45%',
+  },
+  stonesBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  stonesBtnText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.sm,
+    letterSpacing: 0.2,
+  },
+  addButton: {
+    backgroundColor: colors.primary,
+  },
+  downloadButton: {
+    backgroundColor: colors.primary,
+  },
+  stonesContainer: {
+    marginTop: 12,
+    gap: 16,
+  },
+  stoneCard: {
+    padding: 16,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  stoneCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  stonesButtons: {
+  stoneCardTitle: {
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  stoneFields: {
+    gap: 12,
+  },
+  stoneField: {
+    marginBottom: 0,
+  },
+  stoneFieldRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,
   },
-  stonesButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  stoneFieldHalf: {
+    flex: 1,
   },
-  addButton: {
-    backgroundColor: colors.success,
+  stoneFieldLabel: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginBottom: 6,
   },
-  downloadButton: {
-    backgroundColor: colors.info || '#2196F3',
-  },
-  stonesTable: {
-    marginTop: 12,
+  stoneInput: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 8,
-    overflow: 'hidden',
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: colors.backgroundSecondary || '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  tableHeaderText: {
-    flex: 1,
-    fontSize: fonts.xs,
-    fontWeight: '600',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
     color: colors.textPrimary,
-    textAlign: 'center',
-  },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    alignItems: 'center',
-    backgroundColor: colors.background || '#FFFFFF',
-  },
-  tableCell: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tableInput: {
-    flex: 1,
-    fontSize: fonts.xs,
-    color: colors.textPrimary,
-    textAlign: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    minHeight: 32,
-    borderWidth: 0,
+    backgroundColor: colors.backgroundSecondary,
   },
   dropdownButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 4,
-    backgroundColor: colors.background,
+    borderRadius: 6,
+    backgroundColor: colors.backgroundSecondary,
     minWidth: 100,
   },
   dropdownButtonText: {
     fontSize: fonts.xs,
+    fontFamily: fonts.medium,
     color: colors.textPrimary,
     flex: 1,
   },
@@ -1388,10 +1683,15 @@ const styles = StyleSheet.create({
   },
   dropdownModal: {
     backgroundColor: colors.background,
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 8,
     minWidth: 200,
     maxHeight: 300,
+    shadowColor: colors.textPrimary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
   },
   dropdownOption: {
     paddingVertical: 12,
@@ -1401,100 +1701,106 @@ const styles = StyleSheet.create({
   },
   dropdownOptionText: {
     fontSize: fonts.base,
+    fontFamily: fonts.regular,
     color: colors.textPrimary,
   },
   deleteStoneButton: {
     padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 6,
   },
-  emptyStonesRow: {
+  emptyStonesContainer: {
     padding: 40,
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
   },
   emptyStonesText: {
     color: colors.textSecondary,
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStonesSubtext: {
+    color: colors.textLight,
     fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    textAlign: 'center',
   },
   messageCard: {
     marginBottom: 16,
-    padding: 16,
+    padding: 20,
+    backgroundColor: colors.background,
+    borderRadius: 12,
   },
   label: {
-    marginBottom: 8,
+    marginBottom: 12,
     fontSize: fonts.base,
-    fontWeight: '600',
+    fontFamily: fonts.bold,
     color: colors.textPrimary,
   },
   messageInput: {
     minHeight: 120,
   },
-  actionButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+  actionButtonsCard: {
     marginTop: 8,
-  },
-  actionButton: {
-    flex: 1,
-    minWidth: '30%',
-  },
-  saveButton: {
-    backgroundColor: colors.success,
-  },
-  calculateButton: {
-    backgroundColor: colors.info || '#2196F3',
-  },
-  syncButton: {
-    backgroundColor: colors.primary,
-  },
-  approveButton: {
-    backgroundColor: colors.success,
-  },
-  rejectButton: {
-    backgroundColor: colors.error,
-  },
-  modalContent: {
-    backgroundColor: colors.modalBackground || colors.backgroundPrimary,
-    borderRadius: 12,
     padding: 20,
-    width: '100%',
-    maxWidth: 400,
+    backgroundColor: colors.background,
+    borderRadius: 12,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
-    marginBottom: 8,
+  actionButtons: {
+    gap: 12,
   },
-  modalSubtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 16,
-  },
-  modalLabel: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: fonts.base,
-    color: colors.textPrimary,
-    backgroundColor: colors.backgroundSecondary,
-    minHeight: 100,
-    marginBottom: 20,
-  },
-  modalButtons: {
+  actionButtonsRow: {
     flexDirection: 'row',
     gap: 12,
   },
-  modalButton: {
+  actionBtn: {
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    minHeight: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionBtnHalf: {
     flex: 1,
+  },
+  btnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  btnText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.base,
+    letterSpacing: 0.2,
+  },
+  saveBtn: {
+    backgroundColor: colors.primary,
+    width: '100%',
+  },
+  cancelBtn: {
+    backgroundColor: colors.textSecondary,
+    width: '100%',
+  },
+  calculateBtn: {
+    backgroundColor: colors.primary,
+    width: '100%',
+  },
+  syncBtn: {
+    backgroundColor: colors.primary,
+    width: '100%',
+  },
+  btnDisabled: {
+    opacity: 0.6,
   },
 });
 

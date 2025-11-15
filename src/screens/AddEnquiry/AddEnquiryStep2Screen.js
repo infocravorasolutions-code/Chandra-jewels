@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -22,6 +22,22 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   const { formData, enquiry: enquiryToEdit, isEditMode } = route.params;
   const { user } = useAuth();
   const [selectedImages, setSelectedImages] = useState([]);
+  
+  // Log when Step 2 screen loads
+  useEffect(() => {
+    console.log('📋 ========== ADD ENQUIRY STEP 2 LOADED ==========');
+    console.log('📋 Received Form Data from Step 1:', JSON.stringify(formData, null, 2));
+    console.log('📋 Form Data Summary:', {
+      'Title': formData?.title,
+      'ClientId': formData?.clientId,
+      'Priority': formData?.priority,
+      'Category': formData?.category,
+      'StoneType': formData?.stoneType,
+    });
+    console.log('📋 Is Edit Mode:', isEditMode);
+    console.log('📋 User:', { id: user?.id, role: user?.role });
+    console.log('📋 ===========================================');
+  }, []);
   
   // Redux mutations
   const [uploadImage, { isLoading: isUploading }] = useUploadImageMutation();
@@ -171,7 +187,14 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   };
 
   const handleSubmit = async () => {
+    console.log('========== ENQUIRY CREATION STARTED ==========');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('User ID:', user?.id);
+    console.log('Is Edit Mode:', isEditMode);
+    console.log('Form Data from Step 1:', JSON.stringify(formData, null, 2));
+    
     if (!user?.id) {
+      console.error('❌ User not found - cannot create enquiry');
       Alert.alert('Error', 'User not found. Please login again.');
       return;
     }
@@ -179,22 +202,47 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
     let enquiryData = null; // Declare outside try block for error logging
     
     try {
-      // Map Priority from lowercase to capitalized format
+      // Map Priority from form values to API format
       const priorityMap = {
         'low': 'Low',
         'medium': 'Medium',
+        'normal': 'Normal',
         'high': 'High',
+        'super high': 'Super High',
         'urgent': 'Urgent',
+        // Handle exact matches
+        'Low': 'Low',
+        'Medium': 'Medium',
+        'Normal': 'Normal',
+        'High': 'High',
+        'Super High': 'Super High',
+        'Urgent': 'Urgent',
       };
+      
+      const mappedPriority = priorityMap[formData.priority?.toLowerCase()] || priorityMap[formData.priority] || formData.priority || 'Medium';
+      
+      console.log('📋 Priority Mapping:', {
+        'Input Priority': formData.priority,
+        'Mapped Priority': mappedPriority,
+      });
       
       // Upload images first if any are selected
       let uploadedImages = [];
+      console.log('📸 Image Upload Check:', {
+        'Selected Images Count': selectedImages.length,
+        'Has Images': selectedImages.length > 0,
+      });
+      
       if (selectedImages.length > 0) {
+        console.log('🖼️ Starting image upload process...');
         try {
-          if (__DEV__) {
-            console.log('Uploading images:', selectedImages.length);
-            console.log('Selected images:', selectedImages);
-          }
+          console.log('📤 Uploading images:', selectedImages.length);
+          console.log('📤 Selected images details:', selectedImages.map((img, idx) => ({
+            index: idx,
+            uri: img.uri?.substring(0, 50) + '...',
+            type: img.type,
+            name: img.name,
+          })));
           
           // Upload each image
           for (let i = 0; i < selectedImages.length; i++) {
@@ -220,11 +268,15 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
             }
           }
           
-          if (__DEV__) {
-            console.log('All images upload attempts completed. Successfully uploaded:', uploadedImages.length, 'out of', selectedImages.length);
-            if (uploadedImages.length > 0) {
-              console.log('Uploaded images data:', uploadedImages);
-            }
+          console.log('✅ Image Upload Summary:', {
+            'Total Selected': selectedImages.length,
+            'Successfully Uploaded': uploadedImages.length,
+            'Failed': selectedImages.length - uploadedImages.length,
+            'Uploaded Image Keys': uploadedImages.map(img => img.key || img.Key || img),
+          });
+          
+          if (uploadedImages.length > 0) {
+            console.log('📦 Uploaded images data:', JSON.stringify(uploadedImages, null, 2));
           }
           
           // Warn user if some images failed
@@ -246,14 +298,16 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       }
       
       // Prepare enquiry data according to API structure
+      console.log('🔨 Preparing enquiry data...');
+      
       enquiryData = {
         // Only include Id for updates, not for new enquiries
         ...(isEditMode && enquiryToEdit?.id ? { Id: enquiryToEdit.id } : {}),
         Name: formData.title || '',
-        ClientId: enquiryToEdit?.clientId || user.id, // Use existing ClientId if editing
-        AssignedTo: enquiryToEdit?.AssignedTo || null,
-        Status: enquiryToEdit?.status || 'Enquiry Created', // Keep existing status if editing
-        Priority: priorityMap[formData.priority?.toLowerCase()] || 'Medium',
+        ClientId: formData.clientId || enquiryToEdit?.clientId || user.id, // Use formData.clientId first (from Step 1)
+        AssignedTo: formData.assignedTo || enquiryToEdit?.AssignedTo || null,
+        Status: formData.status || enquiryToEdit?.status || 'Enquiry Created', // Use formData.status first
+        Priority: mappedPriority,
         Quantity: parseInt(formData.quantity) || 1, // Convert to number as per API
         Metal: {
           Color: formData.metalColor || 'Gold',
@@ -308,14 +362,31 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       // If updating, we might want to preserve existing images, so only add if new images were uploaded
       if (uploadedImages.length > 0) {
         enquiryData.ReferenceImages = uploadedImages;
+        console.log('📎 Reference Images added to enquiry data:', uploadedImages.length, 'images');
+      } else {
+        console.log('📎 No reference images to add');
       }
 
-      if (__DEV__) {
-        console.log(isEditMode ? 'Updating enquiry with data:' : 'Submitting enquiry with data:', enquiryData);
-      }
+      console.log('📤 Final Enquiry Data to be sent:', JSON.stringify(enquiryData, null, 2));
+      console.log('📊 Enquiry Data Summary:', {
+        'Name': enquiryData.Name,
+        'ClientId': enquiryData.ClientId,
+        'Priority': enquiryData.Priority,
+        'Category': enquiryData.Category,
+        'StoneType': enquiryData.StoneType,
+        'Quantity': enquiryData.Quantity,
+        'Metal Color': enquiryData.Metal?.Color,
+        'Metal Quality': enquiryData.Metal?.Quality,
+        'Has Reference Images': !!enquiryData.ReferenceImages,
+        'Reference Images Count': enquiryData.ReferenceImages?.length || 0,
+        'Has Metal Weight': !!(enquiryData.MetalWeight?.From || enquiryData.MetalWeight?.To || enquiryData.MetalWeight?.Exact),
+        'Has Diamond Weight': !!(enquiryData.DiamondWeight?.From || enquiryData.DiamondWeight?.To || enquiryData.DiamondWeight?.Exact),
+      });
 
       if (isEditMode && enquiryToEdit?.id) {
-        await updateEnquiry({ id: enquiryToEdit.id, ...enquiryData }).unwrap();
+        console.log('🔄 Updating existing enquiry:', enquiryToEdit.id);
+        const updateResult = await updateEnquiry({ id: enquiryToEdit.id, ...enquiryData }).unwrap();
+        console.log('✅ Enquiry updated successfully:', updateResult);
         
         // Construct updated enquiry object from form data since API only returns _id
         // Normalize priority for display
@@ -387,10 +458,29 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
                 });
               },
             },
-          ]
+          ],
+          { cancelable: false }
         );
       } else {
-        await createEnquiry(enquiryData).unwrap();
+        console.log('🆕 Creating new enquiry...');
+        console.log('🌐 API Request Details:', {
+          'Endpoint': '/api/enquiries',
+          'Method': 'POST',
+          'Payload Size': JSON.stringify(enquiryData).length,
+          'Has Images': !!enquiryData.ReferenceImages,
+        });
+        
+        const createResult = await createEnquiry(enquiryData).unwrap();
+        
+        console.log('✅ Enquiry created successfully!');
+        console.log('📥 API Response:', JSON.stringify(createResult, null, 2));
+        console.log('📋 Created Enquiry Details:', {
+          'Enquiry ID': createResult?.id || createResult?._id || 'Not returned',
+          'Name': createResult?.Name || createResult?.name || enquiryData.Name,
+          'Status': createResult?.Status || createResult?.status || enquiryData.Status,
+        });
+        console.log('========== ENQUIRY CREATION COMPLETED SUCCESSFULLY ==========');
+        
         Alert.alert(
           'Enquiry Created',
           'Your enquiry has been submitted successfully!',
@@ -402,23 +492,36 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
                 navigation.navigate('MainTabs', { screen: 'Enquiries' });
               },
             },
-          ]
+          ],
+          { cancelable: false }
         );
       }
     } catch (error) {
-      console.error(`Error ${isEditMode ? 'updating' : 'creating'} enquiry:`, error);
-      if (__DEV__) {
-        console.error('========== ENQUIRY CREATION ERROR ==========');
-        console.error('Error status:', error.status);
-        console.error('Error data:', error.data);
-        console.error('Error message:', error.message);
-        if (enquiryData) {
-          console.error('Enquiry data that was sent:', JSON.stringify(enquiryData, null, 2));
-        } else {
-          console.error('Enquiry data was not prepared (error occurred before data preparation)');
-        }
-        console.error('===========================================');
+      console.error('❌ ========== ENQUIRY CREATION ERROR ==========');
+      console.error('❌ Error Type:', isEditMode ? 'UPDATE' : 'CREATE');
+      console.error('❌ Timestamp:', new Date().toISOString());
+      console.error('❌ Error Status:', error.status);
+      console.error('❌ Error Status Code:', error.status || error?.data?.status || 'Unknown');
+      console.error('❌ Error Data:', JSON.stringify(error.data, null, 2));
+      console.error('❌ Error Message:', error.message || error?.data?.message || error?.data?.error || 'Unknown error');
+      console.error('❌ Full Error Object:', JSON.stringify(error, null, 2));
+      
+      if (enquiryData) {
+        console.error('📤 Enquiry data that was sent:', JSON.stringify(enquiryData, null, 2));
+        console.error('📊 Enquiry Data Summary:', {
+          'Name': enquiryData.Name,
+          'ClientId': enquiryData.ClientId,
+          'Priority': enquiryData.Priority,
+          'Category': enquiryData.Category,
+          'Has Images': !!enquiryData.ReferenceImages,
+          'Images Count': enquiryData.ReferenceImages?.length || 0,
+        });
+      } else {
+        console.error('⚠️ Enquiry data was not prepared (error occurred before data preparation)');
+        console.error('⚠️ Form Data available:', JSON.stringify(formData, null, 2));
       }
+      
+      console.error('❌ ===========================================');
       
       // Provide more detailed error message
       let errorMessage = `Failed to ${isEditMode ? 'update' : 'create'} enquiry.`;
@@ -454,8 +557,12 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       
       Alert.alert(
         'Error',
-        errorMessage
+        errorMessage,
+        [{ text: 'OK', onPress: () => {} }],
+        { cancelable: false }
       );
+      // Don't navigate on error - stay on the form
+      return;
     }
   };
 

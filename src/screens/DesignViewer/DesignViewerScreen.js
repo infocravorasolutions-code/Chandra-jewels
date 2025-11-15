@@ -12,6 +12,7 @@ import {
   Alert,
   Modal,
   StatusBar,
+  TextInput,
 } from 'react-native';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input, AnimatedLogoLoader } from '../../components/common';
@@ -21,7 +22,7 @@ import { fonts } from '../../constants/fonts';
 import { CustomText } from '../../components/common/Text';
 import { useAuth } from '../../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery } from '../../store/api';
+import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery, useApproveDesignVersionMutation, useRejectDesignVersionMutation } from '../../store/api';
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import { API_BASE_URL } from '../../config/apiConfig';
@@ -42,13 +43,21 @@ const DesignViewerScreen = ({ route, navigation }) => {
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingImage, setIsDownloadingImage] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
   
   // API mutation for updating asset description
   const [updateAssetDescription, { isLoading: isUpdatingDescription }] = useUpdateAssetDescriptionMutation();
   
+  // Approve/Reject mutations
+  const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
+  const [rejectDesignVersion, { isLoading: isRejecting }] = useRejectDesignVersionMutation();
+  
   // Check if user is Coral or CAD designer (hide admin features)
   const isDesigner = user?.role === 'coral' || user?.role === 'cad';
   const isAdmin = user?.role === 'admin';
+  const isClient = user?.roleId === 4 || user?.roleNumber === 4 || user?.role === 'client';
 
   // Load auth token for image headers
   useEffect(() => {
@@ -776,6 +785,206 @@ const DesignViewerScreen = ({ route, navigation }) => {
     );
   };
 
+  const handleShare = async () => {
+    if (isSharing) {
+      return; // Prevent multiple simultaneous shares
+    }
+
+    if (images.length === 0) {
+      Alert.alert('Error', 'No images available to share');
+      return;
+    }
+
+    setIsSharing(true);
+
+    try {
+      // Get auth token
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication token not found');
+      }
+
+      // Get client pricing message from selected design
+      const pricing = selectedDesign?.Pricing || selectedDesign?.pricing || {};
+      const clientPricingMessage = pricing?.ClientPricingMessage || selectedDesign?.ClientPricingMessage || '';
+      
+      // Get design code and version info for the message
+      const versionText = currentVersionNumber 
+        ? `Version ${currentVersionNumber}` 
+        : 'Latest Version';
+      const designTypeText = designType === 'coral' ? 'Coral' : 'CAD';
+      
+      // Prepare share message
+      let shareMessage = `*${designTypeText} Design - ${versionText}*\n`;
+      shareMessage += `Design Code: ${designCode || 'N/A'}\n\n`;
+      
+      if (clientPricingMessage) {
+        shareMessage += `*Pricing Details:*\n${clientPricingMessage}\n\n`;
+      }
+      
+      shareMessage += `Total Images: ${images.length}`;
+
+      // Download all images to temporary files for sharing
+      const imageFiles = [];
+      
+      for (let i = 0; i < images.length; i++) {
+        const image = images[i];
+        let imageKey = '';
+        
+        if (typeof image === 'object' && image !== null) {
+          imageKey = image.Key || image.key || '';
+        } else if (typeof image === 'string') {
+          imageKey = image.split('/').pop() || image;
+        }
+
+        if (!imageKey) {
+          console.warn(`Skipping image ${i} - no key found`);
+          continue;
+        }
+
+        try {
+          // Build download URL
+          const encodedKey = encodeURIComponent(imageKey);
+          const downloadUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}?download=true`;
+
+          // Fetch the image
+          const response = await fetch(downloadUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (!response.ok) {
+            console.warn(`Failed to download image ${i}: HTTP ${response.status}`);
+            continue;
+          }
+
+          // Check if response is JSON (signed URL) or image file stream
+          const contentType = response.headers.get('content-type') || '';
+          
+          let actualImageUrl = downloadUrl;
+          
+          if (contentType.includes('application/json')) {
+            // Backend returned signed URL - download from S3
+            const jsonData = await response.json();
+            if (jsonData.url) {
+              actualImageUrl = jsonData.url;
+            }
+          }
+
+          // Download image to temporary file
+          const s3Response = await fetch(actualImageUrl, {
+            method: 'GET',
+          });
+
+          if (!s3Response.ok) {
+            console.warn(`Failed to fetch image ${i} from S3`);
+            continue;
+          }
+
+          // Get file extension
+          const fileExtension = imageKey.includes('.') 
+            ? imageKey.split('.').pop()?.toLowerCase() || 'jpg'
+            : 'jpg';
+          
+          // Create temporary file path
+          const tempFilePath = `${RNFS.CachesDirectoryPath}/share_image_${i}_${Date.now()}.${fileExtension}`;
+          
+          // Get image as array buffer
+          const arrayBuffer = await s3Response.arrayBuffer();
+          
+          // Convert to base64
+          const bytes = new Uint8Array(arrayBuffer);
+          const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+          let base64 = '';
+          let j = 0;
+          
+          while (j < bytes.length) {
+            const a = bytes[j++];
+            const b = j < bytes.length ? bytes[j++] : 0;
+            const c = j < bytes.length ? bytes[j++] : 0;
+            
+            const bitmap = (a << 16) | (b << 8) | c;
+            
+            base64 += base64Chars.charAt((bitmap >> 18) & 63);
+            base64 += base64Chars.charAt((bitmap >> 12) & 63);
+            base64 += j - 2 < bytes.length ? base64Chars.charAt((bitmap >> 6) & 63) : '=';
+            base64 += j - 1 < bytes.length ? base64Chars.charAt(bitmap & 63) : '=';
+          }
+
+          // Write to temporary file
+          await RNFS.writeFile(tempFilePath, base64, 'base64');
+          
+          // Verify file exists
+          const fileExists = await RNFS.exists(tempFilePath);
+          if (fileExists) {
+            imageFiles.push(`file://${tempFilePath}`);
+          }
+        } catch (error) {
+          console.error(`Error preparing image ${i} for share:`, error);
+        }
+      }
+
+      if (imageFiles.length === 0) {
+        throw new Error('No images could be prepared for sharing');
+      }
+
+      // Share via WhatsApp
+      // Share first image with message (WhatsApp typically supports one image at a time)
+      try {
+        await Share.open({
+          message: shareMessage,
+          url: imageFiles[0],
+          type: 'image/jpeg',
+          social: Share.Social.WHATSAPP,
+        });
+      } catch (shareError) {
+        // If WhatsApp sharing fails, try general share
+        if (shareError.message !== 'User did not share') {
+          await Share.open({
+            message: `${shareMessage}\n\nImage: ${imageFiles[0]}`,
+            url: imageFiles[0],
+            type: 'image/jpeg',
+          });
+        }
+      }
+      
+      // Clean up temporary files after a delay
+      setTimeout(async () => {
+        for (const filePath of imageFiles) {
+          try {
+            const localPath = filePath.replace('file://', '');
+            if (await RNFS.exists(localPath)) {
+              await RNFS.unlink(localPath);
+            }
+          } catch (error) {
+            console.warn('Error cleaning up temp file:', error);
+          }
+        }
+      }, 5000);
+      
+      // Inform user if there are more images
+      if (imageFiles.length > 1) {
+        setTimeout(() => {
+          Alert.alert(
+            'Share Complete',
+            `Shared first image with pricing details. ${imageFiles.length - 1} more image(s) available. You can share them individually if needed.`,
+            [{ text: 'OK' }]
+          );
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error sharing:', error);
+      Alert.alert(
+        'Share Failed',
+        error?.message || 'Failed to share images. Please try again.'
+      );
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
   const handleDownloadExcel = async () => {
     if (!designCode) {
       Alert.alert('Error', 'Excel file not available - design code missing');
@@ -1001,6 +1210,121 @@ const DesignViewerScreen = ({ route, navigation }) => {
     }
   };
 
+  const handleApprove = async () => {
+    if (!selectedDesign) {
+      Alert.alert('Error', 'No design version found to approve');
+      return;
+    }
+
+    const version = selectedDesign?.Version || selectedDesign?.version || `Version ${currentVersionNumber}`;
+    const enquiryId = enquiry?.id || enquiry?._id;
+    
+    if (!enquiryId) {
+      Alert.alert('Error', 'Enquiry ID not found');
+      return;
+    }
+
+    Alert.alert(
+      'Approve Design Version',
+      `Are you sure you want to approve ${designType.toUpperCase()} ${version}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Approve',
+          onPress: async () => {
+            try {
+              if (__DEV__) {
+                console.log('========== APPROVING DESIGN VERSION FROM DESIGN VIEWER ==========');
+                console.log('Enquiry ID:', enquiryId);
+                console.log('Design Type:', designType);
+                console.log('Version:', version);
+              }
+
+              await approveDesignVersion({
+                enquiryId,
+                designType,
+                version,
+              }).unwrap();
+
+              Alert.alert('Success', `${designType.toUpperCase()} ${version} approved successfully`);
+              
+              // Refetch enquiry data to get updated approval status
+              if (enquiryId) {
+                refetchEnquiry();
+              }
+            } catch (error) {
+              console.error('Error approving design version:', error);
+              Alert.alert(
+                'Error',
+                error?.data?.error || error?.message || 'Failed to approve design version. Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReject = () => {
+    if (!selectedDesign) {
+      Alert.alert('Error', 'No design version found to reject');
+      return;
+    }
+    setShowRejectModal(true);
+  };
+
+  const confirmReject = async () => {
+    if (!rejectionReason.trim()) {
+      Alert.alert('Error', 'Please provide a reason for rejection');
+      return;
+    }
+
+    if (!selectedDesign) {
+      Alert.alert('Error', 'No design version found to reject');
+      return;
+    }
+
+    const version = selectedDesign?.Version || selectedDesign?.version || `Version ${currentVersionNumber}`;
+    const enquiryId = enquiry?.id || enquiry?._id;
+    
+    if (!enquiryId) {
+      Alert.alert('Error', 'Enquiry ID not found');
+      return;
+    }
+
+    try {
+      if (__DEV__) {
+        console.log('========== REJECTING DESIGN VERSION FROM DESIGN VIEWER ==========');
+        console.log('Enquiry ID:', enquiryId);
+        console.log('Design Type:', designType);
+        console.log('Version:', version);
+        console.log('Reason:', rejectionReason);
+      }
+
+      await rejectDesignVersion({
+        enquiryId,
+        designType,
+        version,
+        reason: rejectionReason.trim(),
+      }).unwrap();
+
+      Alert.alert('Success', `${designType.toUpperCase()} ${version} rejected successfully`);
+      setShowRejectModal(false);
+      setRejectionReason('');
+      
+      // Refetch enquiry data to get updated rejection status
+      if (enquiryId) {
+        refetchEnquiry();
+      }
+    } catch (error) {
+      console.error('Error rejecting design version:', error);
+      Alert.alert(
+        'Error',
+        error?.data?.error || error?.message || 'Failed to reject design version. Please try again.'
+      );
+    }
+  };
+
   const handleSaveComment = async () => {
     if (!comment || comment.trim() === '') {
       Alert.alert('Error', 'Please enter a description');
@@ -1130,99 +1454,121 @@ const DesignViewerScreen = ({ route, navigation }) => {
               <>
                 {/* Try Image component with headers first (iOS only, Android uses fetch directly) */}
                 {!imageDataUri && !useFetchDirectly && (
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => setIsFullScreen(true)}
-                    style={styles.imageTouchable}
-                  >
-                    <Image
-                      source={{
-                        uri: currentImageUrl,
-                        headers: imageHeaders,
-                      }}
-                      style={styles.image}
-                      resizeMode="contain"
-                      onLoadStart={() => {
-                        console.log('🖼️ Image component load started for URL:', currentImageUrl);
-                        console.log('🖼️ Using headers:', imageHeaders);
-                        setImageLoadingError(false);
-                      }}
-                      onLoad={() => {
-                        console.log('✅ Image loaded successfully via Image component:', currentImageUrl);
-                        setImageLoadingError(false);
-                      }}
-                      onError={(error) => {
-                        const errorObj = error.nativeEvent?.error || {};
-                        const is401 = errorObj.code === 401 || 
-                                     errorObj.message?.includes('401') ||
-                                     String(errorObj).includes('401');
-                        
-                        console.error('❌ Image component load ERROR:', {
-                          error: errorObj,
-                          errorCode: errorObj.code,
-                          errorMessage: errorObj.message,
-                          fullError: String(errorObj),
-                          httpCode: is401 ? '401 Unauthorized' : 'Unknown',
-                          url: currentImageUrl,
+                  <View style={styles.imageWrapper}>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => setIsFullScreen(true)}
+                      style={styles.imageTouchable}
+                    >
+                      <Image
+                        source={{
+                          uri: currentImageUrl,
                           headers: imageHeaders,
-                          imageIndex: currentImageIndex,
-                          imageObject: images[currentImageIndex],
-                        });
-                        
-                        // If 401, trigger fetch fallback immediately
-                        if (is401) {
-                          console.error('❌ 401 Unauthorized - Triggering fetch fallback immediately');
-                          setImageLoadingError(true);
-                          fetchImageWithAuth();
-                        }
-                      }}
-                      onLoadEnd={() => {
-                        console.log('🖼️ Image component load ended');
-                      }}
-                    />
-                  </TouchableOpacity>
+                        }}
+                        style={styles.image}
+                        resizeMode="contain"
+                        onLoadStart={() => {
+                          console.log('🖼️ Image component load started for URL:', currentImageUrl);
+                          console.log('🖼️ Using headers:', imageHeaders);
+                          setImageLoadingError(false);
+                        }}
+                        onLoad={() => {
+                          console.log('✅ Image loaded successfully via Image component:', currentImageUrl);
+                          setImageLoadingError(false);
+                        }}
+                        onError={(error) => {
+                          const errorObj = error.nativeEvent?.error || {};
+                          const is401 = errorObj.code === 401 || 
+                                       errorObj.message?.includes('401') ||
+                                       String(errorObj).includes('401');
+                          
+                          console.error('❌ Image component load ERROR:', {
+                            error: errorObj,
+                            errorCode: errorObj.code,
+                            errorMessage: errorObj.message,
+                            fullError: String(errorObj),
+                            httpCode: is401 ? '401 Unauthorized' : 'Unknown',
+                            url: currentImageUrl,
+                            headers: imageHeaders,
+                            imageIndex: currentImageIndex,
+                            imageObject: images[currentImageIndex],
+                          });
+                          
+                          // If 401, trigger fetch fallback immediately
+                          if (is401) {
+                            console.error('❌ 401 Unauthorized - Triggering fetch fallback immediately');
+                            setImageLoadingError(true);
+                            fetchImageWithAuth();
+                          }
+                        }}
+                        onLoadEnd={() => {
+                          console.log('🖼️ Image component load ended');
+                        }}
+                      />
+                    </TouchableOpacity>
+                    {/* Share button - enabled for all users including clients */}
+                    <TouchableOpacity
+                      style={styles.shareImageButton}
+                      onPress={handleShare}
+                      disabled={isSharing}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="share" size={24} color={colors.textWhite} />
+                    </TouchableOpacity>
+                  </View>
                 )}
                 
                 {/* Use data URI (fetched image) - for both Android (direct) and iOS (fallback) */}
                 {imageDataUri && (
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => setIsFullScreen(true)}
-                    style={styles.imageTouchable}
-                  >
-                    <Image
-                      source={{ uri: imageDataUri }}
-                      style={styles.image}
-                      resizeMode="contain"
-                      onLoadStart={() => {
-                        console.log('🖼️ Data URI image load started');
-                        console.log('Data URI length:', imageDataUri.length);
-                        console.log('Data URI starts with:', imageDataUri.substring(0, 50));
-                        console.log('Data URI format check:', imageDataUri.startsWith('data:image'));
-                      }}
-                      onLoad={() => {
-                        console.log('✅ Image loaded successfully via data URI');
-                        setImageLoadingError(false);
-                      }}
-                      onError={(error) => {
-                        const errorObj = error.nativeEvent?.error || {};
-                        console.error('❌ Data URI image load ERROR:', {
-                          error: errorObj,
-                          errorCode: errorObj.code,
-                          errorMessage: errorObj.message,
-                          fullErrorString: String(errorObj),
-                          dataUriLength: imageDataUri?.length,
-                          dataUriPreview: imageDataUri?.substring(0, 150),
-                          dataUriStartsWith: imageDataUri?.substring(0, 50),
-                          isValidDataUri: imageDataUri?.startsWith('data:image'),
-                        });
-                        setImageLoadingError(true);
-                      }}
-                      onLoadEnd={() => {
-                        console.log('🖼️ Data URI image load ended');
-                      }}
-                    />
-                  </TouchableOpacity>
+                  <View style={styles.imageWrapper}>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => setIsFullScreen(true)}
+                      style={styles.imageTouchable}
+                    >
+                      <Image
+                        source={{ uri: imageDataUri }}
+                        style={styles.image}
+                        resizeMode="contain"
+                        onLoadStart={() => {
+                          console.log('🖼️ Data URI image load started');
+                          console.log('Data URI length:', imageDataUri.length);
+                          console.log('Data URI starts with:', imageDataUri.substring(0, 50));
+                          console.log('Data URI format check:', imageDataUri.startsWith('data:image'));
+                        }}
+                        onLoad={() => {
+                          console.log('✅ Image loaded successfully via data URI');
+                          setImageLoadingError(false);
+                        }}
+                        onError={(error) => {
+                          const errorObj = error.nativeEvent?.error || {};
+                          console.error('❌ Data URI image load ERROR:', {
+                            error: errorObj,
+                            errorCode: errorObj.code,
+                            errorMessage: errorObj.message,
+                            fullErrorString: String(errorObj),
+                            dataUriLength: imageDataUri?.length,
+                            dataUriPreview: imageDataUri?.substring(0, 150),
+                            dataUriStartsWith: imageDataUri?.substring(0, 50),
+                            isValidDataUri: imageDataUri?.startsWith('data:image'),
+                          });
+                          setImageLoadingError(true);
+                        }}
+                        onLoadEnd={() => {
+                          console.log('🖼️ Data URI image load ended');
+                        }}
+                      />
+                    </TouchableOpacity>
+                    {/* Share button - enabled for all users including clients */}
+                    <TouchableOpacity
+                      style={styles.shareImageButton}
+                      onPress={handleShare}
+                      disabled={isSharing}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="share" size={24} color={colors.textWhite} />
+                    </TouchableOpacity>
+                  </View>
                 )}
                 
                 {/* Show loading/error state */}
@@ -1299,8 +1645,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
         <Card style={styles.actionsCard}>
           {/* Comment Field - Show for all users */}
           <View style={styles.commentSection}>
-            {isDesigner ? (
-              // Designer view: Read-only comment display
+            {isDesigner || isClient ? (
+              // Designer/Client view: Read-only comment display
               <>
                 <View style={styles.commentHeader}>
                   <View style={styles.commentHeaderLeft}>
@@ -1348,10 +1694,36 @@ const DesignViewerScreen = ({ route, navigation }) => {
             )}
           </View>
 
-          {/* Action Buttons - Different for designers vs admin */}
-          <View style={styles.actionsDivider} />
+          {/* Client Pricing Message - Read-only for clients */}
+          {isClient && (
+            <View style={styles.commentSection}>
+              <View style={styles.commentHeader}>
+                <View style={styles.commentHeaderLeft}>
+                  <Icon name="attach-money" size={20} color={colors.primary} />
+                  <CustomText variant="label" style={styles.commentLabel}>
+                    Client Pricing Message
+                  </CustomText>
+                </View>
+              </View>
+              <View style={styles.commentDisplayBox}>
+                <CustomText variant="body" style={styles.commentText}>
+                  {(() => {
+                    const pricing = selectedDesign?.Pricing || selectedDesign?.pricing || {};
+                    const clientPricingMessage = pricing?.ClientPricingMessage || selectedDesign?.ClientPricingMessage || '';
+                    return clientPricingMessage || 'No pricing message available';
+                  })()}
+                </CustomText>
+              </View>
+            </View>
+          )}
+
+          {/* Action Buttons - Different for designers vs admin vs client */}
+          {!isClient && <View style={styles.actionsDivider} />}
           
-          {isDesigner ? (
+          {isClient ? (
+            // Client view: No action buttons - view only
+            null
+          ) : isDesigner ? (
             // Designer view: Only Download buttons
             <View style={styles.designerActions}>
               <TouchableOpacity
@@ -1443,10 +1815,100 @@ const DesignViewerScreen = ({ route, navigation }) => {
                   </View>
                 </TouchableOpacity>
               )}
+
+              {/* Approve and Reject Buttons - Admin only */}
+              {isAdmin && (
+                <View style={styles.actionButtonsRow}>
+                  <TouchableOpacity
+                    onPress={handleApprove}
+                    disabled={isApproving || isRejecting}
+                    style={[styles.actionBtn, styles.actionBtnHalf, styles.approveBtn, (isApproving || isRejecting) && styles.btnDisabled]}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.btnContent}>
+                      <Icon name="check-circle" size={18} color={colors.textWhite} />
+                      <Text style={styles.btnText}>
+                        {isApproving ? "Approving..." : "Approve"}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    onPress={handleReject}
+                    disabled={isApproving || isRejecting}
+                    style={[styles.actionBtn, styles.actionBtnHalf, styles.rejectBtn, (isApproving || isRejecting) && styles.btnDisabled]}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.btnContent}>
+                      <Icon name="cancel" size={18} color={colors.textWhite} />
+                      <Text style={styles.btnText}>
+                        {isRejecting ? "Rejecting..." : "Reject"}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
         </Card>
       </ScrollView>
+
+      {/* Reject Modal */}
+      <Modal
+        visible={showRejectModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowRejectModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Reject Design Version</Text>
+            <Text style={styles.modalSubtitle}>
+              {designType.toUpperCase()} {selectedDesign?.Version || selectedDesign?.version || `Version ${currentVersionNumber}`}
+            </Text>
+            <Text style={styles.modalLabel}>
+              Please provide a reason for rejection:
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Enter rejection reason..."
+              value={rejectionReason}
+              onChangeText={setRejectionReason}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowRejectModal(false);
+                  setRejectionReason('');
+                }}
+                style={[styles.modalButton, styles.modalCancelBtn]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
+                  <Icon name="close" size={18} color={colors.textWhite} />
+                  <Text style={styles.btnText}>Cancel</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={confirmReject}
+                disabled={isRejecting}
+                style={[styles.modalButton, styles.modalRejectBtn, isRejecting && styles.btnDisabled]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
+                  <Icon name="cancel" size={18} color={colors.textWhite} />
+                  <Text style={styles.btnText}>
+                    {isRejecting ? "Rejecting..." : "Reject"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Full Screen Image Modal */}
       <Modal
@@ -1712,12 +2174,41 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     width: '100%',
   },
+  shareBtn: {
+  backgroundColor: colors.primary,
+    width: '100%',
+  },
   btnDisabled: {
     opacity: 0.6,
+  },
+  imageWrapper: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
   },
   imageTouchable: {
     width: '100%',
     height: '100%',
+  },
+  shareImageButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: colors.primary, // WhatsApp green with transparency
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    shadowColor: colors.textPrimary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
   },
   fullScreenContainer: {
     flex: 1,
@@ -1746,6 +2237,75 @@ const styles = StyleSheet.create({
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  approveBtn: {
+    backgroundColor: colors.success,
+  },
+  rejectBtn: {
+    backgroundColor: colors.error,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: colors.modalBackground || colors.background,
+    borderRadius: 12,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    marginHorizontal: 20,
+  },
+  modalTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    marginBottom: 16,
+  },
+  modalLabel: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginBottom: 8,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
+    backgroundColor: colors.backgroundSecondary,
+    minHeight: 100,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    minHeight: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCancelBtn: {
+    backgroundColor: colors.textSecondary,
+  },
+  modalRejectBtn: {
+    backgroundColor: colors.error,
   },
 });
 

@@ -1256,27 +1256,16 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={[styles.actionButton, styles.editButton]}
       />
 
-      <Button
-        title="Enquiry History"
-        onPress={() => setShowHistoryModal(true)}
-        style={[styles.actionButton, styles.historyButton]}
-      />
+      {/* Hide enquiry history for clients (role 4) */}
+      {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
+        <Button
+          title="Enquiry History"
+          onPress={() => setShowHistoryModal(true)}
+          style={[styles.actionButton, styles.historyButton]}
+        />
+      )}
 
-      <View style={styles.actionButtons}>
-        <Button
-          title={isApproving ? "Approving..." : "Approve"}
-          onPress={handleApprove}
-          style={[styles.actionButton, styles.approveButton]}
-          disabled={isApproving || isRejecting}
-        />
-        <Button
-          title={isRejecting ? "Rejecting..." : "Reject"}
-          variant="outline"
-          onPress={handleReject}
-          style={[styles.actionButton, styles.rejectButton]}
-          disabled={isApproving || isRejecting}
-        />
-      </View>
+      {/* Approve and Reject buttons removed for clients - clients don't have permission for these actions */}
 
       <TouchableOpacity
         style={styles.chatButton}
@@ -1301,11 +1290,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={styles.uploadButton}
       />
 
-      <Button
-        title="Enquiry History"
-        onPress={() => setShowHistoryModal(true)}
-        style={[styles.actionButton, styles.historyButton]}
-      />
+      {/* Enquiry History button removed for coral and CAD designers - only visible for admin */}
 
       <TouchableOpacity
         style={styles.chatButton}
@@ -1469,8 +1454,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
-        {renderEnquiryDetails()}
         {renderImages()}
+        {renderEnquiryDetails()}
         {renderVersions()}
 
         {user.role === 'client' && renderClientActions()}

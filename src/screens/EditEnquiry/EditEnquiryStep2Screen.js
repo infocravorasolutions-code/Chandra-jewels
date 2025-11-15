@@ -276,18 +276,16 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
           {
             text: 'OK',
             onPress: () => {
-              // Navigate back to single enquiry screen with updated data
+              // Go back to SingleEnquiry screen (removes EditEnquiryStep2 from stack)
+              // The SingleEnquiry screen will automatically refresh due to cache invalidation
               if (__DEV__) {
-                console.log('✅ Alert OK pressed, navigating to SingleEnquiry...');
+                console.log('✅ Alert OK pressed, going back to SingleEnquiry...');
               }
-              navigation.navigate('SingleEnquiry', { 
-                enquiryId: enquiry.id, 
-                enquiry: updatedEnquiry,
-                shouldRefresh: true,
-              });
+              navigation.goBack();
             },
           },
-        ]
+        ],
+        { cancelable: false }
       );
     } catch (error) {
       console.error('Error updating enquiry:', error);

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,8 +7,10 @@ import {
   RefreshControl,
   Text,
   Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { useGetDashboardDataQuery, useGetClientsQuery, useGetEnquiriesQuery } from '../../store/api';
 import { StatusCard, Card, EnquiryStatusCard } from '../../components/cards/Cards';
@@ -24,22 +26,179 @@ import { FILE_BASE_URL } from '../../config/apiConfig';
 // Client Card Component with Image Support
 const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
   const [imageError, setImageError] = useState(false);
+  const [actualImageUrl, setActualImageUrl] = useState(null);
+  const [imageHeaders, setImageHeaders] = useState({});
+  const [isLoadingImage, setIsLoadingImage] = useState(false);
+  
+  // Load auth token for image headers
+  useEffect(() => {
+    const loadAuthToken = async () => {
+      try {
+        const token = await AsyncStorage.getItem('token');
+        if (token) {
+          setImageHeaders({
+            'Authorization': `Bearer ${token}`,
+          });
+        }
+      } catch (error) {
+        console.error('Error loading auth token:', error);
+      }
+    };
+    loadAuthToken();
+  }, []);
+  
+  // Extract actual image URL from Google redirect URLs
+  useEffect(() => {
+    if (!imageUrl) {
+      setActualImageUrl(null);
+      setIsLoadingImage(false);
+      setImageError(false);
+      return;
+    }
+    
+    // Reset error state when URL changes
+    setImageError(false);
+    setIsLoadingImage(true);
+    
+    const processImageUrl = async () => {
+      try {
+        let urlToUse = imageUrl;
+        
+        // Check if it's a Google redirect URL
+        if (imageUrl.includes('google.com/url') && imageUrl.includes('url=')) {
+          const urlMatch = imageUrl.match(/url=([^&]+)/);
+          if (urlMatch) {
+            urlToUse = decodeURIComponent(urlMatch[1]);
+            if (__DEV__) {
+              console.log('🔍 Extracted URL from Google redirect:', urlToUse);
+            }
+          }
+        }
+        
+        // Check if the URL is actually an image (has image extension)
+        const isImageUrl = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?|$)/i.test(urlToUse) || 
+                          urlToUse.includes('amazonaws.com') || 
+                          urlToUse.includes('s3.') ||
+                          urlToUse.includes('cloudinary.com') ||
+                          urlToUse.includes('imgur.com');
+        
+        // Check if URL is an HTML page (not an image)
+        const isHtmlPage = /\.(html|htm)(\?|$)/i.test(urlToUse) || 
+                          urlToUse.includes('.html') ||
+                          urlToUse.includes('.htm');
+        
+        // If it's an HTML page, don't try to load it as an image
+        if (isHtmlPage && !isImageUrl) {
+          if (__DEV__) {
+            console.warn('⚠️ URL is an HTML page, not an image:', urlToUse);
+          }
+          setActualImageUrl(null);
+          setIsLoadingImage(false);
+          return;
+        }
+        
+        // Check if URL is an API endpoint (needs auth)
+        const isApiEndpoint = urlToUse.includes(FILE_BASE_URL) || urlToUse.includes('/api/');
+        
+        if (isApiEndpoint) {
+          // Try to fetch and check if it returns JSON with image URL
+          try {
+            const token = await AsyncStorage.getItem('token');
+            const response = await fetch(urlToUse, {
+              headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            
+            if (response.ok) {
+              const contentType = response.headers.get('content-type') || '';
+              
+              // Check if response is JSON (API returns a URL object)
+              if (contentType.includes('application/json')) {
+                const jsonData = await response.json();
+                const imageUrlFromJson = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
+                if (imageUrlFromJson) {
+                  setActualImageUrl(imageUrlFromJson);
+                  setIsLoadingImage(false);
+                  return;
+                }
+              } else if (contentType.startsWith('image/')) {
+                // Direct image response from API
+                setActualImageUrl(urlToUse);
+                setIsLoadingImage(false);
+                return;
+              } else if (contentType.includes('text/html')) {
+                // API returned HTML, not an image
+                if (__DEV__) {
+                  console.warn('⚠️ API returned HTML instead of image:', urlToUse);
+                }
+                setActualImageUrl(null);
+                setIsLoadingImage(false);
+                return;
+              }
+            }
+          } catch (fetchError) {
+            if (__DEV__) {
+              console.error('Error fetching image from API:', fetchError);
+            }
+          }
+        }
+        
+        // Use URL directly only if it looks like an image URL
+        if (isImageUrl || isApiEndpoint) {
+          setActualImageUrl(urlToUse);
+        } else {
+          // Not a recognized image URL, show placeholder
+          if (__DEV__) {
+            console.warn('⚠️ URL does not appear to be an image:', urlToUse);
+          }
+          setActualImageUrl(null);
+        }
+        setIsLoadingImage(false);
+      } catch (error) {
+        console.error('Error processing image URL:', error);
+        setActualImageUrl(null);
+        setIsLoadingImage(false);
+      }
+    };
+    
+    processImageUrl();
+  }, [imageUrl]);
   
   return (
     <TouchableOpacity
       style={styles.clientCard}
       onPress={onPress}
     >
-      {imageUrl && !imageError ? (
+      {actualImageUrl && !imageError ? (
         <Image
-          source={{ uri: imageUrl }}
+          source={{ 
+            uri: actualImageUrl,
+            headers: imageHeaders,
+          }}
           style={styles.clientImage}
           resizeMode="contain"
-          onError={() => setImageError(true)}
+          onError={(error) => {
+            if (__DEV__) {
+              console.error('❌ Client image failed to load:', {
+                url: actualImageUrl,
+                error: error.nativeEvent?.error || error,
+              });
+            }
+            setImageError(true);
+          }}
+          onLoad={() => {
+            if (__DEV__) {
+              console.log('✅ Client image loaded successfully');
+            }
+            setIsLoadingImage(false);
+          }}
         />
       ) : (
         <View style={styles.clientImagePlaceholder}>
-          <Icon name="account" size={24} color={colors.textSecondary} />
+          {isLoadingImage ? (
+            <AnimatedLogoLoader size={20} />
+          ) : (
+            <Icon name="account" size={24} color={colors.textSecondary} />
+          )}
         </View>
       )}
       <Text style={styles.clientCount}>{client.enquiryCount || 0}</Text>
@@ -52,13 +211,20 @@ const DashboardScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
 
   // Redux hooks for data fetching
+  // Pass both role and userId to get user-specific counts
   const { 
     data: dashboardData, 
     isLoading: dashboardLoading, 
     refetch: refetchDashboard 
-  } = useGetDashboardDataQuery(user?.role || 'client', {
-    skip: !user,
-  });
+  } = useGetDashboardDataQuery(
+    { 
+      role: user?.role || 'client',
+      userId: user?.id || user?._id || user?.userId,
+    },
+    {
+      skip: !user,
+    }
+  );
 
   const { 
     data: clientsData = [], 
@@ -132,24 +298,63 @@ const DashboardScreen = ({ navigation }) => {
       <View style={styles.sectionContainer}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Status </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Enquiries')}>
-            <Text style={styles.viewAllText}>View all</Text>
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('StatusStatistics')}
+            style={styles.viewAllButton}
+          >
+            <Text style={styles.viewAllText}>View All</Text>
+            <Icon name="keyboard-arrow-up" size={20} color={colors.primary} />
           </TouchableOpacity>
         </View>
         <View style={styles.enquiryStatusGrid}>
+          {(() => {
+            const allValue = dashboardData?.totalEnquiries || dashboardData?.categorizedCounts?.['All'] || '0';
+            const pendingValue = dashboardData?.pendingEnquiries || dashboardData?.categorizedCounts?.['Pending'] || '0';
+            const approvalPendingValue = dashboardData?.approvalPendingEnquiries || dashboardData?.categorizedCounts?.['Approval Pending'] || '0';
+            const completedValue = dashboardData?.completedEnquiries || dashboardData?.categorizedCounts?.['Completed'] || '0';
+            
+            console.log('📊 [UI DEBUG] ============================================');
+            console.log('📊 [UI DEBUG] DISPLAYING STATUS CARDS:');
+            console.log('📊 [UI DEBUG] - All:', allValue, '(from totalEnquiries:', dashboardData?.totalEnquiries, '| categorizedCounts.All:', dashboardData?.categorizedCounts?.['All'], ')');
+            console.log('📊 [UI DEBUG] - Pending:', pendingValue, '(from pendingEnquiries:', dashboardData?.pendingEnquiries, '| categorizedCounts.Pending:', dashboardData?.categorizedCounts?.['Pending'], ')');
+            console.log('📊 [UI DEBUG] - Approval Pending:', approvalPendingValue, '(from approvalPendingEnquiries:', dashboardData?.approvalPendingEnquiries, '| categorizedCounts["Approval Pending"]:', dashboardData?.categorizedCounts?.['Approval Pending'], ')');
+            console.log('📊 [UI DEBUG] - Completed:', completedValue, '(from completedEnquiries:', dashboardData?.completedEnquiries, '| categorizedCounts.Completed:', dashboardData?.categorizedCounts?.['Completed'], ')');
+            console.log('📊 [UI DEBUG] - Full dashboardData:', JSON.stringify(dashboardData, null, 2));
+            console.log('📊 [UI DEBUG] - Sum Check (Pending + Approval Pending + Completed):', Number(pendingValue) + Number(approvalPendingValue) + Number(completedValue));
+            console.log('📊 [UI DEBUG] - Does sum match All?', (Number(pendingValue) + Number(approvalPendingValue) + Number(completedValue)) === Number(allValue));
+            console.log('📊 [UI DEBUG] ============================================');
+            
+            return null;
+          })()}
           <EnquiryStatusCard
-            status="PENDING"
-            value={dashboardData?.pendingEnquiries || '0'}
-            color={colors.warning}
-            icon={<View style={[styles.simpleIcon, { backgroundColor: colors.warning }]} />}
+            status="All"
+            value={dashboardData?.totalEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
+            color="#D4A574"
+            borderColor="#D4A574"
+            style={styles.enquiryStatusItem}
+            onPress={() => navigation.navigate('Enquiries')}
+          />
+          <EnquiryStatusCard
+            status="Pending"
+            value={dashboardData?.pendingEnquiries || dashboardData?.categorizedCounts?.['Pending'] || '0'}
+            color="#F97316"
+            borderColor="#F97316"
             style={styles.enquiryStatusItem}
             onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
           />
           <EnquiryStatusCard
-            status="COMPLETED"
-            value={dashboardData?.completedEnquiries || '0'}
-            color={colors.success}
-            icon={<View style={[styles.simpleIcon, { backgroundColor: colors.success }]} />}
+            status="Approval Pending"
+            value={dashboardData?.approvalPendingEnquiries || dashboardData?.categorizedCounts?.['Approval Pending'] || '0'}
+            color="#EF4444"
+            borderColor="#EF4444"
+            style={styles.enquiryStatusItem}
+            onPress={() => navigation.navigate('Enquiries', { filter: 'approval_pending' })}
+          />
+          <EnquiryStatusCard
+            status="Completed"
+            value={dashboardData?.completedEnquiries || dashboardData?.categorizedCounts?.['Completed'] || '0'}
+            color="#14B8A6"
+            borderColor="#14B8A6"
             style={styles.enquiryStatusItem}
             onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
           />
@@ -178,6 +383,7 @@ const DashboardScreen = ({ navigation }) => {
                 
                 // If it's already a full URL, use it directly
                 if (client.imageUrl.startsWith('http://') || client.imageUrl.startsWith('https://')) {
+                  // Check if it's a Google redirect URL - ClientCardWithImage will handle it
                   return client.imageUrl;
                 }
                 
@@ -241,23 +447,30 @@ const DashboardScreen = ({ navigation }) => {
     <View style={styles.statsGrid}>
       <StatusCard
         title="My Enquiries"
-        value={dashboardData?.myEnquiries || '0'}
+        value={dashboardData?.myEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
         icon={<Icon name="assignment" size={20} color={colors.textWhite} />}
         color={colors.primary}
         onPress={() => navigation.navigate('Enquiries')}
       />
       <StatusCard
-        title="Pending Approvals"
-        value={dashboardData?.pendingApprovals || '0'}
+        title="Pending"
+        value={dashboardData?.pendingApprovals || dashboardData?.categorizedCounts?.['Pending'] || '0'}
         icon={<Icon name="schedule" size={20} color={colors.textWhite} />}
-        color={colors.primary}
+        color={colors.warning}
         onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
       />
       <StatusCard
+        title="Approval Pending"
+        value={dashboardData?.approvalPending || dashboardData?.categorizedCounts?.['Approval Pending'] || '0'}
+        icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
+        color={colors.info || colors.primary}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'approval_pending' })}
+      />
+      <StatusCard
         title="Completed Orders"
-        value={dashboardData?.completedOrders || '0'}
+        value={dashboardData?.completedOrders || dashboardData?.categorizedCounts?.['Completed'] || '0'}
         icon={<Icon name="check-circle" size={20} color={colors.textWhite} />}
-        color={colors.primary}
+        color={colors.success}
         onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
       />
       <StatusCard
@@ -274,31 +487,31 @@ const DashboardScreen = ({ navigation }) => {
     <View style={styles.statsGrid}>
       <StatusCard
         title="Assigned Enquiries"
-        value={dashboardData?.assignedEnquiries || '0'}
+        value={dashboardData?.assignedEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
         icon={<Icon name="work" size={20} color={colors.textWhite} />}
         color={colors.primary}
         onPress={() => navigation.navigate('Enquiries', { filter: 'assigned' })}
       />
       <StatusCard
-        title="Completed Designs"
-        value={dashboardData?.completedDesigns || '0'}
-        icon={<Icon name="palette" size={20} color={colors.textWhite} />}
-        color={colors.primary}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
-      />
-      <StatusCard
         title="Pending Designs"
-        value={dashboardData?.pendingDesigns || '0'}
+        value={dashboardData?.pendingDesigns || dashboardData?.categorizedCounts?.['Pending'] || '0'}
         icon={<Icon name="pending" size={20} color={colors.textWhite} />}
-        color={colors.primary}
+        color={colors.primaryDark}
         onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
       />
       <StatusCard
-        title="Average Rating"
-        value={dashboardData?.averageRating || '0.0'}
-        icon={<Icon name="star" size={20} color={colors.textWhite} />}
+        title="Approval Pending"
+        value={dashboardData?.approvalPendingDesigns || dashboardData?.categorizedCounts?.['Approval Pending'] || '0'}
+        icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
+        color={colors.primaryLight}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'approval_pending' })}
+      />
+      <StatusCard
+        title="Completed Designs"
+        value={dashboardData?.completedDesigns || dashboardData?.categorizedCounts?.['Completed'] || '0'}
+        icon={<Icon name="palette" size={20} color={colors.textWhite} />}
         color={colors.primary}
-        onPress={() => navigation.navigate('DesignerProfile')}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
       />
     </View>
   );
@@ -453,10 +666,12 @@ const DashboardScreen = ({ navigation }) => {
         {user?.role === 'client' && renderClientDashboard()}
         {(user?.role === 'coral' || user?.role === 'cad') && renderDesignerDashboard(user.role)}
 
-        {/* Quick Actions */}
-        <View style={styles.quickActionsSection}>
-          {renderQuickActions()}
-        </View>
+        {/* Quick Actions - Hidden for coral and CAD designers */}
+        {(user?.role !== 'coral' && user?.role !== 'cad') && (
+          <View style={styles.quickActionsSection}>
+            {renderQuickActions()}
+          </View>
+        )}
 
         {/* Recent Activity */}
         <View style={styles.recentActivitySection}>
@@ -555,6 +770,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     letterSpacing: 0.3,
   },
+  viewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   viewAllText: {
     fontSize: fonts.sm,
     fontFamily: fonts.medium,
@@ -578,13 +798,15 @@ const styles = StyleSheet.create({
   // Enquiry Status Grid
   enquiryStatusGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginTop: 4,
+    gap: 6,
   },
   enquiryStatusItem: {
-    width: '48%',
+    flex: 1,
     marginBottom: 12,
+    marginHorizontal: 1,
+    minWidth: 0, // Allow flex items to shrink below their content size
   },
   simpleIcon: {
     width: 10,
@@ -689,7 +911,7 @@ const styles = StyleSheet.create({
   actionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    justifyContent: 'space-between',
   },
   actionButton: {
     width: '48%',
@@ -701,11 +923,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     minHeight: 110,
-    // shadowColor: colors.shadow,
-    // shadowOffset: { width: 0, height: 2 },
-    // shadowOpacity: 0.05,
-    // shadowRadius: 4,
-    // elevation: 2,
+    marginBottom: 12,
   },
   actionIcon: {
     // width: 48,

@@ -14,6 +14,8 @@ import EditEnquiryStep2Screen from '../screens/EditEnquiry/EditEnquiryStep2Scree
 import ChatDetailScreen from '../screens/Chats/ChatDetailScreen';
 import MetalPricesScreen from '../screens/Admin/MetalPricesScreen';
 import ClientsListScreen from '../screens/Admin/ClientsListScreen';
+import CreateClientScreen from '../screens/Admin/CreateClientScreen';
+import StatusStatisticsScreen from '../screens/Admin/StatusStatisticsScreen';
 import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
 import DesignViewerScreen from '../screens/DesignViewer/DesignViewerScreen';
 import PricingScreen from '../screens/Pricing/PricingScreen';
@@ -103,6 +105,20 @@ const StackNavigator = ({ isAuthenticated }) => {
             component={ClientsListScreen}
             options={{
               title: 'Clients',
+            }}
+          />
+          <Stack.Screen
+            name="CreateClient"
+            component={CreateClientScreen}
+            options={{
+              title: 'Create Client',
+            }}
+          />
+          <Stack.Screen
+            name="StatusStatistics"
+            component={StatusStatisticsScreen}
+            options={{
+              title: 'Status Statistics',
             }}
           />
           <Stack.Screen

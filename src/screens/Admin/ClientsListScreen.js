@@ -7,6 +7,7 @@ import {
   RefreshControl,
   Alert,
   Text,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useGetClientsQuery } from '../../store/api';
@@ -17,8 +18,16 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
 import { formatCurrency, formatDate } from '../../utils/helpers';
+import { FILE_BASE_URL } from '../../config/apiConfig';
+import { useAuth } from '../../context/AuthContext';
 
-const ClientsListScreen = () => {
+const ClientsListScreen = ({ navigation }) => {
+  const { user } = useAuth();
+  // Check admin role in multiple ways for compatibility
+  const isAdmin = user?.role === 'admin' || 
+                  user?.role === 'AD' || 
+                  user?.roleNumber === 1 || 
+                  user?.roleId === 1;
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -56,30 +65,126 @@ const ClientsListScreen = () => {
   };
 
   const handleAddClient = () => {
-    Alert.alert(
-      'Add New Client',
-      'This would open a form to add a new client',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Add',
-          onPress: () => {
-            Alert.alert('Success', 'New client added successfully');
-          },
-        },
-      ]
-    );
+    if (__DEV__) {
+      console.log('========== CREATE CLIENT DEBUG ==========');
+      console.log('User object:', user);
+      console.log('User role:', user?.role);
+      console.log('User roleNumber:', user?.roleNumber);
+      console.log('User roleId:', user?.roleId);
+      console.log('Is Admin:', isAdmin);
+      console.log('==========================================');
+    }
+    
+    if (!isAdmin) {
+      Alert.alert('Access Denied', 'Only administrators can create clients.');
+      return;
+    }
+    
+    try {
+      navigation.navigate('CreateClient');
+    } catch (error) {
+      console.error('Navigation error:', error);
+      Alert.alert('Error', `Failed to navigate: ${error.message}`);
+    }
   };
 
-  const renderClientItem = (client) => (
-    <TouchableOpacity
-      key={client.id}
-      style={styles.clientItem}
-      onPress={() => handleClientPress(client)}>
+  const renderClientItem = (client) => {
+    // Construct image URL
+    const getClientImageUrl = () => {
+      if (!client.imageUrl) return null;
       
-      <View style={styles.clientAvatar}>
-        <Icon name="account" size={20} color={colors.textWhite} />
-      </View>
+      let urlToUse = client.imageUrl;
+      
+      // If it's already a full URL, use it directly
+      if (client.imageUrl.startsWith('http://') || client.imageUrl.startsWith('https://')) {
+        // Check if it's a Google redirect URL
+        if (client.imageUrl.includes('google.com/url') && client.imageUrl.includes('url=')) {
+          try {
+            // Extract the actual URL from Google redirect
+            const urlMatch = client.imageUrl.match(/url=([^&]+)/);
+            if (urlMatch) {
+              urlToUse = decodeURIComponent(urlMatch[1]);
+            }
+          } catch (error) {
+            console.error('Error parsing Google redirect URL:', error);
+            return null;
+          }
+        }
+      } else {
+        // If it starts with /, it's a path - construct full URL
+        if (client.imageUrl.startsWith('/')) {
+          urlToUse = `${FILE_BASE_URL}${client.imageUrl}`;
+        } else {
+          // Otherwise, treat as file key and construct URL
+          urlToUse = `${FILE_BASE_URL}/api/clients/files/${encodeURIComponent(client.imageUrl)}`;
+        }
+      }
+      
+      // Check if the URL is actually an image (has image extension)
+      const isImageUrl = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?|$)/i.test(urlToUse) || 
+                        urlToUse.includes('amazonaws.com') || 
+                        urlToUse.includes('s3.') ||
+                        urlToUse.includes('cloudinary.com') ||
+                        urlToUse.includes('imgur.com');
+      
+      // Check if URL is an HTML page (not an image)
+      const isHtmlPage = /\.(html|htm)(\?|$)/i.test(urlToUse) || 
+                        urlToUse.includes('.html') ||
+                        urlToUse.includes('.htm');
+      
+      // If it's an HTML page, don't return it
+      if (isHtmlPage && !isImageUrl) {
+        if (__DEV__) {
+          console.warn('⚠️ Client image URL is an HTML page, not an image:', urlToUse);
+        }
+        return null;
+      }
+      
+      // Return URL if it looks like an image or is an API endpoint
+      const isApiEndpoint = urlToUse.includes(FILE_BASE_URL) || urlToUse.includes('/api/');
+      if (isImageUrl || isApiEndpoint) {
+        return urlToUse;
+      }
+      
+      // Not a recognized image URL
+      if (__DEV__) {
+        console.warn('⚠️ Client image URL does not appear to be an image:', urlToUse);
+      }
+      return null;
+    };
+    
+    const imageUrl = getClientImageUrl();
+    
+    return (
+      <TouchableOpacity
+        key={client.id}
+        style={styles.clientItem}
+        onPress={() => handleClientPress(client)}>
+        
+        {imageUrl ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={styles.clientAvatar}
+            resizeMode="cover"
+            onError={(error) => {
+              if (__DEV__) {
+                console.error('❌ Client image failed to load in list:', {
+                  url: imageUrl,
+                  error: error.nativeEvent?.error || error,
+                });
+              }
+            }}
+            onLoad={() => {
+              if (__DEV__) {
+                console.log('✅ Client image loaded in list:', imageUrl);
+              }
+            }}
+          />
+        ) : (
+          <View style={styles.clientAvatar}>
+            <Icon name="account" size={20} color={colors.textWhite} />
+          </View>
+        )}
 
       <View style={styles.clientContent}>
         <View style={styles.clientHeader}>
@@ -130,7 +235,8 @@ const ClientsListScreen = () => {
         <Text style={{ fontSize: 16, color: colors.textSecondary }}>⋮</Text>
       </TouchableOpacity>
     </TouchableOpacity>
-  );
+    );
+  };
 
   const renderStatsCards = () => (
     <View style={styles.statsContainer}>
@@ -170,9 +276,11 @@ const ClientsListScreen = () => {
           onClear={() => setSearchQuery('')}
         />
         
-        <TouchableOpacity style={styles.addButton} onPress={handleAddClient}>
-          <Text style={{ fontSize: 20, color: colors.primary }}>➕</Text>
-        </TouchableOpacity>
+        {isAdmin && (
+          <TouchableOpacity style={styles.addButton} onPress={handleAddClient}>
+            <Icon name="add" size={24} color={colors.primary} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -184,8 +292,24 @@ const ClientsListScreen = () => {
         {renderStatsCards()}
 
         <Card style={styles.clientsHeader}>
-          <Text style={styles.allClientsTitle}>All Clients</Text>
-          <Text style={styles.allClientsSubtitle}>{filteredClients.length} clients found</Text>
+          <View style={styles.clientsHeaderContent}>
+            <View>
+              <Text style={styles.allClientsTitle}>All Clients</Text>
+              <Text style={styles.allClientsSubtitle}>{filteredClients.length} clients found</Text>
+            </View>
+            {isAdmin && (
+              <TouchableOpacity 
+                style={styles.createClientButton} 
+                onPress={handleAddClient}
+                activeOpacity={0.8}
+              >
+                <View style={styles.createClientButtonContent}>
+                  <Icon name="add" size={18} color={colors.textWhite} />
+                  <Text style={[styles.createClientButtonText, { marginLeft: 6 }]}>Create Client</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
         </Card>
 
         {filteredClients.length === 0 ? (
@@ -250,6 +374,36 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 6,
     marginBottom: 8,
+  },
+  clientsHeaderContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  createClientButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: colors.cardShadow,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  createClientButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  createClientButtonText: {
+    color: colors.textWhite,
+    fontSize: fonts.sm,
+    fontFamily: fonts.semiBold,
   },
   clientsList: {
     paddingHorizontal: 20,

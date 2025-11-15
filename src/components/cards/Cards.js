@@ -39,19 +39,11 @@ export const StatusCard = ({ title, value, icon, color = colors.primary, onPress
   </Card>
 );
 
-export const EnquiryStatusCard = ({ status, value, color, icon, onPress, style }) => (
-  <Card style={[styles.enquiryStatusCard, style]} onPress={onPress}>
-    <View style={styles.enquiryStatusHeader}>
-      <View style={styles.statusIndicatorContainer}>
-        <View style={[styles.statusIndicator, { backgroundColor: color }]} />
-        {icon && (
-          <View style={styles.statusIconContainer}>
-            {icon}
-          </View>
-        )}
-      </View>
-      <Text style={styles.statusLabel}>{status}</Text>
-    </View>
+export const EnquiryStatusCard = ({ status, value, color, borderColor, icon, onPress, style }) => (
+  <Card style={[styles.enquiryStatusCard, { borderColor: borderColor || color }, style]} onPress={onPress}>
+    <Text style={styles.statusLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
+      {status}
+    </Text>
     <Text style={styles.statusValue}>{formatCount(value)}</Text>
   </Card>
 );
@@ -904,20 +896,23 @@ const styles = StyleSheet.create({
   
   // Enquiry Status Card (like the image)
   enquiryStatusCard: {
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    padding: 10,
+    backgroundColor: colors.textWhite || '#FFFFFF',
+    borderRadius: 10,
+    padding: 12,
     marginBottom: 12,
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: '#E5E5E5',
     shadowColor: colors.cardShadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,
-    minHeight: 110,
+    minHeight: 90,
     justifyContent: 'center',
     alignItems: 'center',
+    flex: 1,
+    marginHorizontal: 1,
+    maxWidth: '24%', // Ensure cards don't get too wide
   },
   enquiryStatusHeader: {
     flexDirection: 'row',
@@ -939,17 +934,18 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   statusLabel: {
-    fontSize: fonts.xs,
-    fontFamily: fonts.bold,
-    color: colors.textPrimary,
-    letterSpacing: 0.5,
+    fontSize: fonts.xs || 11,
+    fontFamily: fonts.medium || fonts.regular,
+    color: colors.textPrimary || '#000000',
+    textAlign: 'center',
+    marginBottom: 6,
+    flexWrap: 'wrap',
   },
   statusValue: {
-    fontSize: fonts.lg,
+    fontSize: fonts.xl || 24,
     fontFamily: fonts.bold,
-    color: colors.textPrimary,
+    color: colors.textPrimary || '#000000',
     textAlign: 'center',
-    marginBottom: 8,
   },
   
   // Modern Enquiry Card

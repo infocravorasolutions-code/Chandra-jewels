@@ -62,9 +62,17 @@ const EnquiryListScreen = ({ navigation }) => {
   const selectedStatus = useSelector(state => state.enquiries.selectedStatus);
   const selectedClient = useSelector(state => state.enquiries.selectedClient);
   
+  // Get current user ID for filtering assigned enquiries
+  // This is used to filter enquiries by assigned user for non-admin roles
+  const currentUserId = user?.id || user?._id || user?.userId;
+  
   // RTK Query hook - replaces loadEnquiries and all filtering logic
+  // Role-based filtering:
+  // - Admin users: See ALL enquiries (no assignedTo filter)
+  // - Non-admin users (designers, clients, etc.): See ONLY enquiries assigned to them (assignedTo={userId})
+  // The hook automatically determines whether to apply assignedTo filter based on role
   const { enquiries: filteredEnquiries, allEnquiries: enquiries, isLoading: loading, refetch, pagination } = 
-    useFilteredEnquiries(user?.role);
+    useFilteredEnquiries(user?.role, currentUserId);
   
   // Get pagination state from Redux
   const currentPage = useSelector(state => state.enquiries.pagination.currentPage);
@@ -719,29 +727,32 @@ const EnquiryListScreen = ({ navigation }) => {
             </ScrollView>
           </View>
 
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
-              Client
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {getClientOptions().map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.filterOption,
-                    filters.client === option.value && styles.filterOptionActive,
-                  ]}
-                  onPress={() => handleFilterChange('client', option.value)}>
-                  <Text style={{ 
-                    color: filters.client === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: 13 
-                  }}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+          {/* Hide client filter for clients (role 4) */}
+          {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
+                Client
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {getClientOptions().map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.filterOption,
+                      filters.client === option.value && styles.filterOptionActive,
+                    ]}
+                    onPress={() => handleFilterChange('client', option.value)}>
+                    <Text style={{ 
+                      color: filters.client === option.value ? colors.textWhite : colors.textSecondary, 
+                      fontSize: 13 
+                    }}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
         </ScrollView>
 
         <View style={styles.filterFooter}>
@@ -866,7 +877,8 @@ const EnquiryListScreen = ({ navigation }) => {
         }>
         
         {renderStatusChips()}
-        {renderClientChips()}
+        {/* Hide client filter for clients (role 4) */}
+        {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && renderClientChips()}
         
         {enrichedFilteredEnquiries.length === 0 ? (
           <Card style={styles.emptyCard}>

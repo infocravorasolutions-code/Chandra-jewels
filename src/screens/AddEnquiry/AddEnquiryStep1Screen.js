@@ -203,10 +203,31 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   const handleNext = () => {
     if (validateForm()) {
+      console.log('📝 ========== ADD ENQUIRY STEP 1 COMPLETED ==========');
+      console.log('📝 Navigating to Step 2 with form data:');
+      console.log('📝 Form Data:', JSON.stringify(formData, null, 2));
+      console.log('📝 Form Data Summary:', {
+        'Title': formData.title,
+        'ClientId': formData.clientId,
+        'ClientName': formData.clientName,
+        'Priority': formData.priority,
+        'Category': formData.category,
+        'StoneType': formData.stoneType,
+        'Metal Color': formData.metalColor,
+        'Metal Quality': formData.metalQuality,
+        'Quantity': formData.quantity,
+        'Status': formData.status,
+        'AssignedTo': formData.assignedTo,
+      });
+      console.log('📝 ===========================================');
+      
       navigation.navigate('AddEnquiryStep2', { 
         formData,
         isEditMode: false,
       });
+    } else {
+      console.warn('⚠️ Form validation failed - cannot proceed to Step 2');
+      console.warn('⚠️ Validation Errors:', errors);
     }
   };
 
@@ -305,12 +326,13 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
             <View style={styles.priorityContainer}>
               <Text style={styles.priorityLabel}>Priority</Text>
               <View style={styles.priorityOptions}>
-                {priorityOptions.map(option => (
+                {priorityOptions.map((option, index) => (
                   <TouchableOpacity
                     key={option.value}
                     style={[
                       styles.priorityOption,
                       formData.priority === option.value && styles.priorityOptionActive,
+                      index === priorityOptions.length - 1 && styles.priorityOptionLast,
                     ]}
                     onPress={() => handleInputChange('priority', option.value)}>
                     <Text
@@ -487,25 +509,35 @@ const styles = StyleSheet.create({
   },
   priorityOptions: {
     flexDirection: 'row',
-    gap: 12,
+    flexWrap: 'wrap',
   },
   priorityOption: {
-    flex: 1,
-    paddingVertical: 12,
     paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: colors.backgroundSecondary,
-    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  priorityOptionLast: {
+    marginRight: 0,
   },
   priorityOptionActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.background, // Light background for black text readability
+    borderColor: colors.primary,
+    borderWidth: 2, // Thicker border to indicate selection
   },
   priorityOptionText: {
-    fontSize: fonts.base,
-    color: colors.textPrimary,
+    fontSize: fonts.sm,
+    color: colors.textPrimary, // Black text
+    fontWeight: '500',
   },
   priorityOptionTextActive: {
-    color: colors.textWhite,
+    fontSize: fonts.sm,
+    color: colors.textPrimary, // Black text when selected
+    fontWeight: '600',
   },
   formRow: {
     flexDirection: 'row',

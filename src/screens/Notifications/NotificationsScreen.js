@@ -124,7 +124,7 @@ const NotificationsScreen = ({ navigation }) => {
       <View style={styles.notificationIcon}>
         <Icon 
           name={getNotificationIcon(notification.type)} 
-          size={16} 
+          size={20} 
           color={colors.primary} 
         />
       </View>
@@ -132,31 +132,19 @@ const NotificationsScreen = ({ navigation }) => {
       <View style={styles.notificationContent}>
         <View style={styles.notificationHeader}>
           <Text
-            numberOfLines={1}
+            numberOfLines={2}
             ellipsizeMode="tail"
-            style={[
-              styles.notificationTitle,
-              { 
-                color: colors.textPrimary, 
-                fontSize: 16, // 12pt = 16px
-                fontFamily: fonts.bold 
-              }
-            ]}>
+            style={styles.notificationTitle}>
             {notification.title}
           </Text>
-          <Text style={{ color: colors.textLight, fontSize: 13, fontFamily: fonts.regular }}>
+          <Text style={styles.notificationDate}>
             {formatDateTime(notification.timestamp)}
           </Text>
         </View>
         <Text
-          style={[
-            styles.notificationMessage,
-            { 
-              color: colors.textSecondary, 
-              fontSize: 13, // 10pt = 13px
-              fontFamily: fonts.regular 
-            }
-          ]}>
+          numberOfLines={3}
+          ellipsizeMode="tail"
+          style={styles.notificationMessage}>
           {notification.message}
         </Text>
       </View>
@@ -177,13 +165,13 @@ const NotificationsScreen = ({ navigation }) => {
           onPress={() => navigation.goBack()}>
           <Icon name="back" size={24} color={colors.textWhite} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.textWhite, fontSize: 16, fontFamily: fonts.bold }]}>
+        <Text style={styles.headerTitle} numberOfLines={1}>
           Notifications
         </Text>
         <TouchableOpacity
           style={styles.markAllButton}
           onPress={markAllAsRead}>
-          <Text style={[styles.markAllText, { color: colors.textWhite, fontSize: 13, fontFamily: fonts.medium }]}>
+          <Text style={styles.markAllText} numberOfLines={1}>
             Mark All Read
           </Text>
         </TouchableOpacity>
@@ -198,10 +186,10 @@ const NotificationsScreen = ({ navigation }) => {
         {notifications.length === 0 ? (
           <Card style={styles.emptyCard}>
             <Icon name="notification" size={40} color={colors.textLight} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 16, fontFamily: fonts.bold }]}>
+            <Text style={styles.emptyText}>
               No notifications yet
             </Text>
-            <Text style={{ color: colors.textLight, fontSize: 13, fontFamily: fonts.regular }}>
+            <Text style={styles.emptySubtext}>
               You'll see notifications here when you receive them
             </Text>
           </Card>
@@ -224,25 +212,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     backgroundColor: colors.primary,
     borderBottomWidth: 1,
     borderBottomColor: colors.primaryDark,
+    minHeight: 56,
   },
   backButton: {
     padding: 8,
+    minWidth: 40,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    marginHorizontal: 16,
+    marginHorizontal: 8,
+    color: colors.textWhite,
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
   },
   markAllButton: {
     padding: 8,
+    minWidth: 80,
+    alignItems: 'flex-end',
   },
   markAllText: {
     textAlign: 'right',
+    color: colors.textWhite,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
   },
   scrollView: {
     flex: 1,
@@ -254,7 +252,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: colors.textWhite,
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     marginBottom: 12,
     alignItems: 'flex-start',
     shadowColor: colors.textPrimary,
@@ -271,29 +269,45 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.primary,
   },
   notificationIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    flexShrink: 0,
   },
   notificationContent: {
     flex: 1,
+    minWidth: 0, // Prevents overflow
   },
   notificationHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   notificationTitle: {
     flex: 1,
-    marginRight: 8,
+    color: colors.textPrimary,
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+    lineHeight: fonts.base * 1.4,
+    minWidth: 0, // Prevents overflow
+  },
+  notificationDate: {
+    color: colors.textLight,
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    flexShrink: 0,
+    marginTop: 2,
   },
   notificationMessage: {
-    lineHeight: 20,
+    color: colors.textSecondary,
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    lineHeight: fonts.sm * 1.4,
   },
   unreadDot: {
     width: 8,
@@ -302,6 +316,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     marginTop: 8,
     marginLeft: 8,
+    flexShrink: 0,
   },
   emptyCard: {
     margin: 16,
@@ -311,6 +326,15 @@ const styles = StyleSheet.create({
   emptyText: {
     marginTop: 16,
     marginBottom: 8,
+    color: colors.textSecondary,
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+  },
+  emptySubtext: {
+    color: colors.textLight,
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    textAlign: 'center',
   },
 });
 

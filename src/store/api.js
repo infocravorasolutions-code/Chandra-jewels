@@ -31,7 +31,15 @@ const baseQuery = fetchBaseQuery({
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Enquiry', 'Client', 'MetalPrice', 'Dashboard', 'Chat'],
+  tagTypes: [
+    'Enquiry',
+    'Client',
+    'Dashboard',
+    'MetalPrice',
+    'Chat',
+    'Message',
+    'StatusStatistics',
+  ],
   // Prevent memory buildup by removing unused data after 60 seconds
   keepUnusedDataFor: 60,
   endpoints: (builder) => ({
@@ -256,10 +264,27 @@ export const api = createApi({
     // ==================== ENQUIRIES ====================
     getEnquiries: builder.query({
       query: (arg) => {
-        // Support both object format { role, page } and simple role string
+        // Support both object format { role, page, search, limit, assignedTo } and simple role string
         const role = typeof arg === 'object' ? arg?.role : arg;
         const page = typeof arg === 'object' ? (arg?.page || 1) : 1;
-        return `/api/enquiries/search?page=${page}`;
+        const search = typeof arg === 'object' ? arg?.search : undefined;
+        const limit = typeof arg === 'object' ? arg?.limit : undefined;
+        const assignedTo = typeof arg === 'object' ? arg?.assignedTo : undefined;
+        
+        // Build query string
+        let queryString = `page=${page}`;
+        if (limit) {
+          queryString += `&limit=${limit}`;
+        }
+        if (search && search.trim()) {
+          queryString += `&search=${encodeURIComponent(search.trim())}`;
+        }
+        // Add assignedTo filter for non-admin users (or when explicitly provided)
+        if (assignedTo) {
+          queryString += `&assignedTo=${encodeURIComponent(assignedTo)}`;
+        }
+        
+        return `/api/enquiries/search?${queryString}`;
       },
       providesTags: ['Enquiry'],
       transformResponse: (data, meta, arg) => {
@@ -593,11 +618,53 @@ export const api = createApi({
     }),
 
     createEnquiry: builder.mutation({
-      query: (data) => ({
-        url: '/api/enquiries',
-        method: 'POST',
-        body: data,
-      }),
+      queryFn: async (data, { dispatch }, extraOptions, baseQuery) => {
+        console.log('🌐 ========== CREATE ENQUIRY API REQUEST ==========');
+        console.log('🌐 Endpoint: POST /api/enquiries');
+        console.log('🌐 Timestamp:', new Date().toISOString());
+        console.log('🌐 Request Payload:', JSON.stringify(data, null, 2));
+        console.log('🌐 Payload Size:', JSON.stringify(data).length, 'bytes');
+        console.log('🌐 Payload Summary:', {
+          'Name': data.Name,
+          'ClientId': data.ClientId,
+          'Priority': data.Priority,
+          'Category': data.Category,
+          'StoneType': data.StoneType,
+          'Quantity': data.Quantity,
+          'Has Reference Images': !!data.ReferenceImages,
+          'Reference Images Count': data.ReferenceImages?.length || 0,
+          'Has Metal Weight': !!(data.MetalWeight?.From || data.MetalWeight?.To || data.MetalWeight?.Exact),
+          'Has Diamond Weight': !!(data.DiamondWeight?.From || data.DiamondWeight?.To || data.DiamondWeight?.Exact),
+        });
+        
+        try {
+          const result = await baseQuery({
+            url: '/api/enquiries',
+            method: 'POST',
+            body: data,
+          });
+          
+          if (result.error) {
+            console.error('❌ API Error Response:', JSON.stringify(result.error, null, 2));
+            console.error('❌ ===========================================');
+            return result;
+          }
+          
+          console.log('✅ API Success Response:', JSON.stringify(result.data, null, 2));
+          console.log('✅ Response Summary:', {
+            'Status': 'Success',
+            'Enquiry ID': result.data?.id || result.data?._id || 'Not returned',
+            'Name': result.data?.Name || result.data?.name || data.Name,
+          });
+          console.log('🌐 ===========================================');
+          
+          return result;
+        } catch (error) {
+          console.error('❌ API Request Exception:', error);
+          console.error('❌ ===========================================');
+          return { error: { status: 'CUSTOM_ERROR', data: error.message } };
+        }
+      },
       invalidatesTags: ['Enquiry', 'Dashboard'],
     }),
 
@@ -706,21 +773,142 @@ export const api = createApi({
       },
     }),
 
+    createClient: builder.mutation({
+      query: ({ Name, ImageUrl, Pricing }) => ({
+        url: '/api/clients',
+        method: 'POST',
+        body: { 
+          Name,
+          ...(ImageUrl && { ImageUrl }),
+          ...(Pricing && { Pricing }),
+        },
+      }),
+      invalidatesTags: ['Client'],
+      transformResponse: (response) => {
+        return {
+          success: true,
+          client: response.client || response,
+          message: response.message || 'Client created successfully',
+        };
+      },
+      transformErrorResponse: (response) => {
+        return {
+          success: false,
+          error: response.data?.message || response.data?.error || 'Failed to create client',
+        };
+      },
+    }),
+
+    // ==================== STATUS STATISTICS ====================
+    getStatusStatistics: builder.query({
+      queryFn: async (arg, { dispatch }, extraOptions, baseQuery) => {
+        try {
+          // Fetch all status counts using aggregate endpoint without assignedTo filter
+          const aggregateUrl = '/api/enquiries/aggregate?groupBy=status';
+          
+          if (__DEV__) {
+            console.log('📊 [STATUS STATS API] Fetching from:', aggregateUrl);
+          }
+          
+          const response = await baseQuery(aggregateUrl);
+          
+          if (__DEV__) {
+            console.log('📊 [STATUS STATS API] Response:', JSON.stringify(response, null, 2));
+          }
+          
+          if (response.error) {
+            if (__DEV__) {
+              console.error('📊 [STATUS STATS API] Error:', response.error);
+            }
+            return {
+              error: {
+                status: response.error.status || 'FETCH_ERROR',
+                data: response.error.data || 'Failed to fetch status statistics',
+              },
+            };
+          }
+
+          const statusStats = Array.isArray(response.data) ? response.data : [];
+          
+          if (__DEV__) {
+            console.log('📊 [STATUS STATS API] Parsed Status Stats:', statusStats);
+            console.log('📊 [STATUS STATS API] Total Count:', statusStats.reduce((sum, item) => sum + (item.count || 0), 0));
+          }
+          
+          return {
+            data: {
+              statusStats,
+              total: statusStats.reduce((sum, item) => sum + (item.count || 0), 0),
+            },
+          };
+        } catch (error) {
+          if (__DEV__) {
+            console.error('📊 [STATUS STATS API] Exception:', error);
+          }
+          return {
+            error: {
+              status: 'CUSTOM_ERROR',
+              data: error.message || 'Failed to fetch status statistics',
+            },
+          };
+        }
+      },
+      providesTags: ['StatusStatistics'],
+    }),
+
     // ==================== DASHBOARD ====================
     // Dashboard data is computed from enquiries and clients
     // This uses queryFn to aggregate data from multiple endpoints
     getDashboardData: builder.query({
-      queryFn: async (role, { dispatch, getState }, extraOptions, baseQuery) => {
+      queryFn: async (arg, { dispatch, getState }, extraOptions, baseQuery) => {
         try {
-          // Fetch status aggregates, enquiries, and clients in parallel
-          // Use new aggregate endpoint for status counts
-          const [statusAggregateResult, enquiriesResult, clientsResult] = await Promise.all([
-            baseQuery('/api/enquiries/aggregate?groupBy=status'),
-            baseQuery('/api/enquiries/search?page=1'),
+          // Extract role and userId from argument
+          const role = typeof arg === 'object' ? arg?.role : arg;
+          const userId = typeof arg === 'object' ? arg?.userId : undefined;
+          
+          // Determine if we should use aggregate endpoint
+          // Admin: Use regular enquiries data (no aggregate)
+          // Coral/CAD/Client: Use aggregate endpoint with assignedTo filter
+          const isAdmin = role === 'admin' || role === 'AD';
+          const shouldUseAggregate = !isAdmin && userId; // Only for non-admin users
+          
+          // Build aggregate URL - only for non-admin users (coral, cad, client)
+          let aggregateUrl = null;
+          if (shouldUseAggregate) {
+            aggregateUrl = `/api/enquiries/aggregate?groupBy=status&assignedTo=${encodeURIComponent(userId)}`;
+          }
+          
+          // Fetch data in parallel
+          // Admin: Fetch ALL enquiries (use large limit to get all data for accurate counts)
+          // Non-admin: Fetch aggregate + enquiries
+          const enquiriesSearchUrl = isAdmin 
+            ? '/api/enquiries/search?page=1&limit=10000' // Fetch all enquiries for admin
+            : '/api/enquiries/search?page=1'; // Non-admin only need first page
+          
+          const fetchPromises = [
+            baseQuery(enquiriesSearchUrl),
             role === 'admin' ? baseQuery('/api/clients') : Promise.resolve({ data: [] }),
-          ]);
+          ];
+          
+          // Only fetch aggregate for non-admin users
+          if (shouldUseAggregate && aggregateUrl) {
+            fetchPromises.unshift(baseQuery(aggregateUrl));
+          } else {
+            // For admin, add a resolved promise to maintain array structure
+            fetchPromises.unshift(Promise.resolve({ data: null }));
+          }
+          
+          const [statusAggregateResult, enquiriesResult, clientsResult] = await Promise.all(fetchPromises);
 
-          // Handle status aggregate response
+          // Handle status aggregate response and categorize
+          let categorizedCounts = {
+            'Pending': 0,
+            'Approval Pending': 0,
+            'Completed': 0,
+            'All': 0,
+          };
+          
+          // Legacy status counts for backward compatibility
           let statusCounts = {
             pending: 0,
             completed: 0,
@@ -729,24 +917,48 @@ export const api = createApi({
             total: 0,
           };
           
-          if (statusAggregateResult.data && !statusAggregateResult.error) {
+          // Only process aggregate data for non-admin users (coral, cad, client)
+          if (shouldUseAggregate && statusAggregateResult.data && !statusAggregateResult.error) {
             const aggregateData = statusAggregateResult.data;
             
-            if (__DEV__) {
-              console.log('Status Aggregate API Response:', aggregateData);
-            }
+            console.log('🔍 [DASHBOARD DEBUG] ============================================');
+            console.log('🔍 [DASHBOARD DEBUG] Role:', role);
+            console.log('🔍 [DASHBOARD DEBUG] UserId:', userId);
+            console.log('🔍 [DASHBOARD DEBUG] Is Admin:', isAdmin);
+            console.log('🔍 [DASHBOARD DEBUG] Should Use Aggregate:', shouldUseAggregate, '(boolean)');
+            console.log('🔍 [DASHBOARD DEBUG] Aggregate URL:', aggregateUrl);
+            console.log('🔍 [DASHBOARD DEBUG] Status Aggregate API Response:', JSON.stringify(aggregateData, null, 2));
             
             // Handle different response formats
             if (Array.isArray(aggregateData)) {
-              aggregateData.forEach(item => {
-                const status = (item.status || item.Status || item._id || item.group || '').toLowerCase();
+              console.log('🔍 [DASHBOARD DEBUG] Aggregate data is an array with', aggregateData.length, 'items');
+              
+              aggregateData.forEach((item, index) => {
+                const statusName = (item.name || item.status || item.Status || item._id || item.group || '').toUpperCase();
                 const count = item.count || item.Count || item.value || item.total || 0;
                 
-                if (__DEV__) {
-                  console.log('Processing status aggregate item:', { status, count });
+                console.log(`🔍 [DASHBOARD DEBUG] Item ${index + 1}:`, {
+                  rawItem: item,
+                  statusName,
+                  count,
+                  itemKeys: Object.keys(item)
+                });
+                
+                // Categorize status into Pending, Approval Pending, or Completed
+                let category = 'Pending';
+                if (statusName.includes('APPROVAL') && !statusName.includes('APPROVED')) {
+                  category = 'Approval Pending';
+                } else if (statusName.includes('APPROVED') || statusName.includes('COMPLETED')) {
+                  category = 'Completed';
                 }
                 
-                // Map backend status to normalized status
+                console.log(`🔍 [DASHBOARD DEBUG] Categorized "${statusName}" (count: ${count}) → "${category}"`);
+                
+                categorizedCounts[category] += count;
+                categorizedCounts['All'] += count;
+                
+                // Also populate legacy status counts for backward compatibility
+                const status = statusName.toLowerCase();
                 if (status === 'pending' || status === 'enquiry created' || status.includes('pending') || status === 'design approval pending') {
                   statusCounts.pending += count;
                 } else if (status === 'completed' || status.includes('completed') || status.includes('approved')) {
@@ -761,36 +973,63 @@ export const api = createApi({
             } else if (typeof aggregateData === 'object') {
               // Handle object format { pending: 10, completed: 5, ... }
               Object.keys(aggregateData).forEach(key => {
-                const normalizedKey = key.toLowerCase();
+                const normalizedKey = key.toUpperCase();
                 const value = aggregateData[key];
                 
-                if (normalizedKey === 'pending' || normalizedKey.includes('pending')) {
+                // Categorize
+                let category = 'Pending';
+                if (normalizedKey.includes('APPROVAL') && !normalizedKey.includes('APPROVED')) {
+                  category = 'Approval Pending';
+                } else if (normalizedKey.includes('APPROVED') || normalizedKey.includes('COMPLETED')) {
+                  category = 'Completed';
+                }
+                
+                categorizedCounts[category] += value || 0;
+                categorizedCounts['All'] += value || 0;
+                
+                // Legacy mapping
+                const keyLower = normalizedKey.toLowerCase();
+                if (keyLower === 'pending' || keyLower.includes('pending')) {
                   statusCounts.pending = value || 0;
-                } else if (normalizedKey === 'completed' || normalizedKey.includes('completed')) {
+                } else if (keyLower === 'completed' || keyLower.includes('completed')) {
                   statusCounts.completed = value || 0;
-                } else if (normalizedKey === 'in_progress' || normalizedKey.includes('progress')) {
+                } else if (keyLower === 'in_progress' || keyLower.includes('progress')) {
                   statusCounts.in_progress = value || 0;
-                } else if (normalizedKey === 'rejected' || normalizedKey.includes('rejected')) {
+                } else if (keyLower === 'rejected' || keyLower.includes('rejected')) {
                   statusCounts.rejected = value || 0;
-                } else if (normalizedKey === 'total') {
+                } else if (keyLower === 'total') {
                   statusCounts.total = value || 0;
                 }
               });
             }
             
-            if (__DEV__) {
-              console.log('Parsed status counts:', statusCounts);
-            }
-          } else if (statusAggregateResult.error) {
-            if (__DEV__) {
-              console.warn('Status aggregate API error, falling back to counting from enquiries:', statusAggregateResult.error);
-            }
+            console.log('🔍 [DASHBOARD DEBUG] Final Categorized Counts:', categorizedCounts);
+            console.log('🔍 [DASHBOARD DEBUG] Final Status Counts (legacy):', statusCounts);
+            console.log('🔍 [DASHBOARD DEBUG] Total from categorized counts:', categorizedCounts['All']);
+            console.log('🔍 [DASHBOARD DEBUG] Total from status counts:', statusCounts.total);
+          } else if (shouldUseAggregate && statusAggregateResult.error) {
+            console.warn('🔍 [DASHBOARD DEBUG] Status aggregate API error, falling back to counting from enquiries:', statusAggregateResult.error);
+          } else if (isAdmin) {
+            console.log('🔍 [DASHBOARD DEBUG] Admin user - Using regular enquiries data (no aggregate endpoint)');
           }
 
           // Handle paginated response from new aggregated endpoint
           const enquiries = Array.isArray(enquiriesResult.data) 
             ? enquiriesResult.data 
             : (enquiriesResult.data?.data || enquiriesResult.data?.enquiries || []);
+          
+          // For admin, also check pagination total if available (more accurate than array length)
+          const paginationTotal = enquiriesResult.data?.pagination?.total || enquiriesResult.data?.total || null;
+          
+          console.log('🔍 [DASHBOARD DEBUG] Enquiries from search API:', enquiries.length, 'enquiries');
+          console.log('🔍 [DASHBOARD DEBUG] Enquiries result structure:', {
+            isArray: Array.isArray(enquiriesResult.data),
+            hasData: !!enquiriesResult.data?.data,
+            hasEnquiries: !!enquiriesResult.data?.enquiries,
+            totalFromPagination: paginationTotal,
+            enquiriesArrayLength: enquiries.length,
+            fullResult: enquiriesResult.data,
+          });
 
           const clients = role === 'admin' && clientsResult.data
             ? (Array.isArray(clientsResult.data) 
@@ -841,29 +1080,55 @@ export const api = createApi({
           });
 
           // Calculate dashboard stats based on role
-          // Use status aggregate data for status counts (more efficient)
+          // Admin: Use regular enquiries data (count from normalizedEnquiries)
+          // Non-admin (coral/cad/client): Use categorized counts from aggregate API
           if (role === 'admin') {
-            const totalEnquiries = statusCounts.total || normalizedEnquiries.length;
-            const pendingEnquiries = statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
-            const completedEnquiries = statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
+            // Admin: Count from normalizedEnquiries (all enquiries, no aggregate)
+            // Use pagination total if available (more accurate), otherwise use array length
+            const totalEnquiries = paginationTotal !== null ? paginationTotal : normalizedEnquiries.length;
+            const pendingEnquiries = normalizedEnquiries.filter(e => e.status === 'pending').length;
+            const approvalPendingEnquiries = normalizedEnquiries.filter(e => {
+              const status = (e.status || '').toLowerCase();
+              return status.includes('approval') && !status.includes('approved');
+            }).length;
+            const completedEnquiries = normalizedEnquiries.filter(e => {
+              const status = (e.status || '').toLowerCase();
+              return status.includes('completed') || status.includes('approved');
+            }).length;
             const totalClients = clients.length;
             const revenue = normalizedEnquiries
               .filter(e => e.status === 'completed')
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
             
+            console.log('🔍 [DASHBOARD DEBUG] ============================================');
+            console.log('🔍 [DASHBOARD DEBUG] ADMIN DASHBOARD CALCULATIONS (from enquiries data, NO aggregate):');
+            console.log('🔍 [DASHBOARD DEBUG] - Total Enquiries:', totalEnquiries, '(from pagination.total:', paginationTotal, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Pending Enquiries:', pendingEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
+            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Enquiries:', approvalPendingEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
+            console.log('🔍 [DASHBOARD DEBUG] - Completed Enquiries:', completedEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
+            console.log('🔍 [DASHBOARD DEBUG] - Total Clients:', totalClients);
+            console.log('🔍 [DASHBOARD DEBUG] - Revenue:', revenue);
+            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', pendingEnquiries + approvalPendingEnquiries + completedEnquiries);
+            console.log('🔍 [DASHBOARD DEBUG] - Note: Status counts are from fetched enquiries array, total uses pagination.total if available');
+            console.log('🔍 [DASHBOARD DEBUG] ============================================');
+            
             return {
               data: {
                 totalEnquiries,
                 pendingEnquiries,
+                approvalPendingEnquiries,
                 completedEnquiries,
                 totalClients,
                 revenue,
+                // Include categorized counts for direct access (empty for admin)
+                categorizedCounts,
               },
             };
           } else if (role === 'client') {
-            const myEnquiries = statusCounts.total || normalizedEnquiries.length;
-            const pendingApprovals = statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
-            const completedOrders = statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
+            const myEnquiries = categorizedCounts['All'] || statusCounts.total || normalizedEnquiries.length;
+            const pendingApprovals = categorizedCounts['Pending'] || statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
+            const approvalPending = categorizedCounts['Approval Pending'] || 0;
+            const completedOrders = categorizedCounts['Completed'] || statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
             const totalSpent = normalizedEnquiries
               .filter(e => e.status === 'completed')
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
@@ -872,22 +1137,38 @@ export const api = createApi({
               data: {
                 myEnquiries,
                 pendingApprovals,
+                approvalPending,
                 completedOrders,
                 totalSpent,
+                categorizedCounts,
               },
             };
           } else if (role === 'coral' || role === 'cad') {
-            const assignedEnquiries = statusCounts.total || normalizedEnquiries.length;
-            const completedDesigns = statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
-            const pendingDesigns = (statusCounts.pending + statusCounts.in_progress) || normalizedEnquiries.filter(e => e.status === 'pending' || e.status === 'in_progress').length;
+            const assignedEnquiries = categorizedCounts['All'] || statusCounts.total || normalizedEnquiries.length;
+            const completedDesigns = categorizedCounts['Completed'] || statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
+            const pendingDesigns = categorizedCounts['Pending'] || statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
+            const approvalPendingDesigns = categorizedCounts['Approval Pending'] || 0;
             const averageRating = 4.8; // TODO: Fetch from API when available
+            
+            console.log('🔍 [DASHBOARD DEBUG] ============================================');
+            console.log('🔍 [DASHBOARD DEBUG] DESIGNER DASHBOARD CALCULATIONS (from aggregate API):');
+            console.log('🔍 [DASHBOARD DEBUG] - Role:', role, '(should use aggregate endpoint)');
+            console.log('🔍 [DASHBOARD DEBUG] - Assigned Enquiries:', assignedEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs:', pendingDesigns, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], '| statusCounts.pending:', statusCounts.pending, ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Designs:', approvalPendingDesigns, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Completed Designs:', completedDesigns, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', pendingDesigns + approvalPendingDesigns + completedDesigns);
+            console.log('🔍 [DASHBOARD DEBUG] - Does sum match assigned?', (pendingDesigns + approvalPendingDesigns + completedDesigns) === assignedEnquiries);
+            console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
               data: {
                 assignedEnquiries,
                 completedDesigns,
                 pendingDesigns,
+                approvalPendingDesigns,
                 averageRating,
+                categorizedCounts,
               },
             };
           }
@@ -1143,8 +1424,10 @@ export const api = createApi({
 
     uploadImage: builder.mutation({
       queryFn: async (image, { dispatch }, extraOptions, baseQuery) => {
-        // Try multiple possible upload endpoints
+        // Try multiple possible upload endpoints (including client-specific)
         const uploadEndpoints = [
+          '/api/clients/upload',
+          '/api/clients/image/upload',
           '/api/upload',
           '/api/files/upload',
           '/api/images/upload',
@@ -1904,9 +2187,13 @@ export const {
   
   // Clients
   useGetClientsQuery,
+  useCreateClientMutation,
   
   // Dashboard
   useGetDashboardDataQuery,
+  
+  // Status Statistics
+  useGetStatusStatisticsQuery,
   
   // Metal Prices
   useGetMetalPricesQuery,

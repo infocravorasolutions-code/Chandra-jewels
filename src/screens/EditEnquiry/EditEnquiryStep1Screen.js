@@ -14,11 +14,16 @@ import { Heading, CustomText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
-import { useGetEnquiryByIdQuery, useGetClientsQuery, useGetUsersQuery } from '../../store/api';
+import { useGetEnquiryByIdQuery, useGetClientsQuery, useGetUsersQuery, useUpdateEnquiryMutation } from '../../store/api';
+import { useAuth } from '../../context/AuthContext';
 
 const EditEnquiryStep1Screen = ({ route, navigation }) => {
+  const { user } = useAuth();
   const enquiryToEdit = route.params?.enquiry || null;
   const enquiryIdFromRoute = route.params?.enquiryId || null;
+  
+  // API mutations
+  const [updateEnquiry, { isLoading: isUpdating }] = useUpdateEnquiryMutation();
   
   // Fetch full enquiry data if we only have an ID or incomplete data
   const enquiryId = enquiryToEdit?.id || enquiryToEdit?._id || enquiryIdFromRoute;
@@ -349,12 +354,92 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     </View>
   );
 
-  const handleNext = () => {
-    if (validateForm()) {
-      navigation.navigate('EditEnquiryStep2', { 
-        formData,
-        enquiry: finalEnquiryToEdit,
-      });
+  const handleNext = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
+    if (!user?.id) {
+      Alert.alert('Error', 'User not authenticated');
+      return;
+    }
+
+    if (!finalEnquiryToEdit?.id && !enquiryId) {
+      Alert.alert('Error', 'Enquiry ID is missing');
+      return;
+    }
+
+    const enquiryIdToUpdate = finalEnquiryToEdit?.id || enquiryId;
+
+    try {
+      // Priority mapping for API
+      const priorityForAPI = formData.priority || 'Normal';
+
+      // Prepare enquiry data according to API payload structure
+      const enquiryData = {
+        Id: enquiryIdToUpdate,
+        Name: formData.title,
+        ClientId: formData.clientId || finalEnquiryToEdit?.clientId || finalEnquiryToEdit?.ClientId,
+        AssignedTo: formData.assignedTo || finalEnquiryToEdit?.AssignedTo || finalEnquiryToEdit?.assignedTo || null,
+        Status: formData.status || finalEnquiryToEdit?.Status || finalEnquiryToEdit?.status || 'Enquiry Created',
+        Priority: priorityForAPI,
+        Quantity: formData.quantity && formData.quantity.trim() ? parseInt(formData.quantity) : null,
+        Metal: {
+          Color: formData.metalColor || 'Gold',
+          Quality: formData.metalQuality || '10K',
+        },
+        StyleNumber: formData.styleNumber && formData.styleNumber.trim() ? formData.styleNumber : null,
+        GatiOrderNumber: formData.gatiOrderNumber && formData.gatiOrderNumber.trim() ? formData.gatiOrderNumber : null,
+        StoneType: formData.stoneType || 'NaturalRegular',
+        MetalWeight: {
+          From: formData.metalWeightFrom && formData.metalWeightFrom.trim() ? formData.metalWeightFrom.toString() : null,
+          To: formData.metalWeightTo && formData.metalWeightTo.trim() ? formData.metalWeightTo.toString() : null,
+          Exact: formData.metalWeightExact && formData.metalWeightExact.trim() ? formData.metalWeightExact.toString() : null,
+        },
+        DiamondWeight: {
+          From: formData.diamondWeightFrom && formData.diamondWeightFrom.trim() ? formData.diamondWeightFrom.toString() : null,
+          To: formData.diamondWeightTo && formData.diamondWeightTo.trim() ? formData.diamondWeightTo.toString() : null,
+          Exact: formData.diamondWeightExact && formData.diamondWeightExact.trim() ? formData.diamondWeightExact.toString() : null,
+        },
+        Stamping: formData.stamping && formData.stamping.trim() ? formData.stamping : null,
+        Remarks: formData.description && formData.description.trim() ? formData.description : null,
+        ShippingDate: null, // Not in Step 1
+        CoralCode: finalEnquiryToEdit?.CoralCode || finalEnquiryToEdit?.coralCode || null,
+        CadCode: finalEnquiryToEdit?.CadCode || finalEnquiryToEdit?.cadCode || null,
+        Category: formData.category || 'Ring',
+      };
+
+      if (__DEV__) {
+        console.log('Updating enquiry with data:', enquiryData);
+      }
+
+      await updateEnquiry({ id: enquiryIdToUpdate, ...enquiryData }).unwrap();
+      
+      Alert.alert(
+        'Enquiry Updated',
+        'Your enquiry has been updated successfully!',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Go back to SingleEnquiry screen (removes EditEnquiryStep1 from stack)
+              // The SingleEnquiry screen will automatically refresh due to cache invalidation
+              navigation.goBack();
+            },
+          },
+        ],
+        { cancelable: false }
+      );
+    } catch (error) {
+      console.error('Error updating enquiry:', error);
+      Alert.alert(
+        'Error',
+        error?.data?.error || error?.message || 'Failed to update enquiry. Please try again.',
+        [{ text: 'OK', onPress: () => {} }],
+        { cancelable: false }
+      );
+      // Don't navigate on error - stay on the form
+      return;
     }
   };
 
@@ -688,9 +773,10 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         </View>
 
         <Button
-          title="Save"
+          title={isUpdating ? "Saving..." : "Save"}
           onPress={handleNext}
           style={styles.nextButton}
+          disabled={isUpdating}
         />
       </View>
     </ScrollView>
@@ -785,7 +871,6 @@ const styles = StyleSheet.create({
   priorityOptions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
   },
   priorityOption: {
     paddingHorizontal: 16,
@@ -794,10 +879,23 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.border,
+    marginRight: 8,
+    marginBottom: 8,
   },
   priorityOptionActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.background, // Light background for black text readability
     borderColor: colors.primary,
+    borderWidth: 2, // Thicker border to indicate selection
+  },
+  priorityOptionText: {
+    fontSize: fonts.sm,
+    color: colors.textPrimary, // Black text
+    fontWeight: '500',
+  },
+  priorityOptionTextActive: {
+    fontSize: fonts.sm,
+    color: colors.textPrimary, // Black text when selected
+    fontWeight: '600',
   },
   formRow: {
     flexDirection: 'row',

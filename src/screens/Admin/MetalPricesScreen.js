@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useGetMetalPricesQuery, useAddMetalPriceMutation, useUpdateMetalPriceMutation, useDeleteMetalPriceMutation } from '../../store/api';
 import { Card } from '../../components/cards/Cards';
-import { Button, Input } from '../../components/common';
+import { Input } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -341,7 +341,7 @@ const MetalPricesScreen = () => {
               </>
             ) : (
               <>
-                <Text style={styles.summaryPrice}>₹{item.price || 0}</Text>
+                <Text style={styles.summaryPrice}>${item.price || 0}</Text>
                 <Text style={styles.summaryUpdated}>
                   {item.lastUpdated ? `Last up: ${formatDate(item.lastUpdated)}` : 'No date'}
                 </Text>
@@ -386,9 +386,9 @@ const MetalPricesScreen = () => {
         ) : (
           <View style={styles.priceDisplay}>
             <View style={{flexDirection:'row', alignItems:'center', justifyContent:'center'}}>
-              <Icon name="attach-money" size={24} color={colors.primary} style={{marginRight:4}} />
+              <Icon name="monetization-on" size={24} color={colors.primary} style={{marginRight:4}} />
               <Text style={[styles.priceValue, { fontSize: fonts['2xl'], fontFamily: fonts.bold, color: colors.textPrimary }]}>
-                ₹{data.price || 0}
+                ${data.price || 0}
               </Text>
             </View>
             <Text style={[styles.priceUnit, { color: colors.textSecondary, fontSize: fonts.sm }]}>
@@ -481,45 +481,78 @@ const MetalPricesScreen = () => {
               placeholder="YYYY-MM-DD"
               style={styles.addInput}
             />
-            <Button
-              title="Add Metal Price"
+            <TouchableOpacity
               onPress={handleAddMetalPrice}
-              style={styles.saveButton}
-            />
-            <Button
-              title="Cancel"
-              variant="outline"
+              disabled={isAddingPrice}
+              style={[styles.actionBtn, styles.saveBtn, isAddingPrice && styles.btnDisabled]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="add" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>
+                  {isAddingPrice ? "Adding..." : "Add Metal Price"}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
               onPress={handleCancelEdit}
-              style={styles.cancelButton}
-            />
+              style={[styles.actionBtn, styles.cancelBtn]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="close" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>Cancel</Text>
+              </View>
+            </TouchableOpacity>
           </>
         ) : isEditing ? (
           <>
-            <Button
-              title="Save Changes"
+            <TouchableOpacity
               onPress={handleSavePrices}
-              style={styles.saveButton}
-            />
-            <Button
-              title="Cancel"
-              variant="outline"
+              disabled={isUpdatingPrice}
+              style={[styles.actionBtn, styles.saveBtn, isUpdatingPrice && styles.btnDisabled]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="save" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>
+                  {isUpdatingPrice ? "Saving..." : "Save Changes"}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
               onPress={handleCancelEdit}
-              style={styles.cancelButton}
-            />
+              style={[styles.actionBtn, styles.cancelBtn]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="close" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>Cancel</Text>
+              </View>
+            </TouchableOpacity>
           </>
         ) : (
           <>
-            <Button
-              title="Edit Prices"
+            <TouchableOpacity
               onPress={handleStartEditing}
-              style={styles.editButton}
-            />
-            <Button
-              title="Add Metal Price"
-              variant="outline"
+              style={[styles.actionBtn, styles.editBtn]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="edit" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>Edit Prices</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
               onPress={() => setIsAdding(true)}
-              style={styles.addButton}
-            />
+              style={[styles.actionBtn, styles.addBtn]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.btnContent}>
+                <Icon name="add" size={20} color={colors.textWhite} />
+                <Text style={styles.btnText}>Add Metal Price</Text>
+              </View>
+            </TouchableOpacity>
           </>
         )}
       </View>
@@ -681,17 +714,41 @@ const styles = StyleSheet.create({
   actionButtons: {
     gap: 12,
   },
-  editButton: {
+  actionBtn: {
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    minHeight: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
     width: '100%',
   },
-  saveButton: {
-    backgroundColor: colors.success,
+  btnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
-  cancelButton: {
-    borderColor: colors.error,
+  btnText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.sm,
+    letterSpacing: 0.2,
   },
-  addButton: {
-    marginTop: 8,
+  editBtn: {
+    backgroundColor: colors.primary,
+  },
+  saveBtn: {
+    backgroundColor: colors.primary,
+  },
+  cancelBtn: {
+    backgroundColor: colors.textSecondary,
+  },
+  addBtn: {
+    backgroundColor: colors.primary,
+  },
+  btnDisabled: {
+    opacity: 0.6,
   },
   addInput: {
     marginBottom: 12,
