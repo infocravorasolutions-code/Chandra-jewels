@@ -22,7 +22,7 @@ import { fonts } from '../../constants/fonts';
 import { CustomText } from '../../components/common/Text';
 import { useAuth } from '../../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery, useApproveDesignVersionMutation, useRejectDesignVersionMutation } from '../../store/api';
+import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery, useApproveDesignVersionMutation, useRejectDesignVersionMutation, useUpdateShowToClientMutation } from '../../store/api';
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import { API_BASE_URL } from '../../config/apiConfig';
@@ -53,6 +53,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
   // Approve/Reject mutations
   const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
   const [rejectDesignVersion, { isLoading: isRejecting }] = useRejectDesignVersionMutation();
+  const [updateShowToClient, { isLoading: isUpdatingShowToClient }] = useUpdateShowToClientMutation();
   
   // Check if user is Coral or CAD designer (hide admin features)
   const isDesigner = user?.role === 'coral' || user?.role === 'cad';
@@ -277,9 +278,16 @@ const DesignViewerScreen = ({ route, navigation }) => {
   
   // Get design data based on type
   const originalData = currentEnquiry?._originalData || currentEnquiry;
-  const designData = designType === 'coral' 
+  let designData = designType === 'coral' 
     ? (originalData?.Coral || currentEnquiry?.Coral || [])
     : (originalData?.Cad || currentEnquiry?.Cad || []);
+  
+  // Filter versions for clients - only show versions with ShowToClient: true
+  if (isClient && Array.isArray(designData)) {
+    designData = designData.filter(version => 
+      version?.ShowToClient === true || version?.showToClient === true || version?.IsVisibleToClient === true || version?.isVisibleToClient === true
+    );
+  }
 
   // Get selected design version (use versionIndex if provided, otherwise use latest)
   const selectedDesign = versionIndex !== undefined && versionIndex >= 0 && versionIndex < designData.length
@@ -1325,6 +1333,67 @@ const DesignViewerScreen = ({ route, navigation }) => {
     }
   };
 
+  const handleShowToClient = async () => {
+    if (!selectedDesign) {
+      Alert.alert('Error', 'No design version found');
+      return;
+    }
+
+    const version = selectedDesign?.Version || selectedDesign?.version || `Version ${currentVersionNumber}`;
+    const enquiryId = enquiry?.id || enquiry?._id;
+    
+    if (!enquiryId) {
+      Alert.alert('Error', 'Enquiry ID not found');
+      return;
+    }
+
+    // Get current ShowToClient status
+    const currentShowToClient = selectedDesign?.ShowToClient || selectedDesign?.showToClient || false;
+    const newShowToClient = !currentShowToClient;
+
+    Alert.alert(
+      newShowToClient ? 'Show to Client' : 'Hide from Client',
+      `Are you sure you want to ${newShowToClient ? 'show' : 'hide'} ${designType.toUpperCase()} ${version} ${newShowToClient ? 'to' : 'from'} clients?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: newShowToClient ? 'Show' : 'Hide',
+          onPress: async () => {
+            try {
+              if (__DEV__) {
+                console.log('========== UPDATING SHOW TO CLIENT ==========');
+                console.log('Enquiry ID:', enquiryId);
+                console.log('Design Type:', designType);
+                console.log('Version:', version);
+                console.log('ShowToClient:', newShowToClient);
+              }
+
+              await updateShowToClient({
+                enquiryId,
+                designType,
+                version,
+                showToClient: newShowToClient,
+              }).unwrap();
+
+              Alert.alert('Success', `${designType.toUpperCase()} ${version} ${newShowToClient ? 'is now visible to clients' : 'is now hidden from clients'}`);
+              
+              // Refetch enquiry data to get updated ShowToClient status
+              if (enquiryId) {
+                refetchEnquiry();
+              }
+            } catch (error) {
+              console.error('Error updating ShowToClient:', error);
+              Alert.alert(
+                'Error',
+                error?.data?.error || error?.message || 'Failed to update ShowToClient. Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleSaveComment = async () => {
     if (!comment || comment.trim() === '') {
       Alert.alert('Error', 'Please enter a description');
@@ -1848,6 +1917,37 @@ const DesignViewerScreen = ({ route, navigation }) => {
                   </TouchableOpacity>
                 </View>
               )}
+
+              {/* Show to Client Button - Admin only */}
+              {isAdmin && (
+                <TouchableOpacity
+                  onPress={handleShowToClient}
+                  disabled={isUpdatingShowToClient}
+                  style={[
+                    styles.actionBtn, 
+                    (selectedDesign?.ShowToClient || selectedDesign?.showToClient) 
+                      ? styles.showToClientBtnActive 
+                      : styles.showToClientBtn,
+                    isUpdatingShowToClient && styles.btnDisabled
+                  ]}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.btnContent}>
+                    <Icon 
+                      name={(selectedDesign?.ShowToClient || selectedDesign?.showToClient) ? "visibility" : "visibility-off"} 
+                      size={20} 
+                      color={colors.textWhite} 
+                    />
+                    <Text style={styles.btnText}>
+                      {isUpdatingShowToClient 
+                        ? "Updating..." 
+                        : (selectedDesign?.ShowToClient || selectedDesign?.showToClient) 
+                          ? "Hide from Client" 
+                          : "Show to Client"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </Card>
@@ -2243,6 +2343,14 @@ const styles = StyleSheet.create({
   },
   rejectBtn: {
     backgroundColor: colors.error,
+  },
+  showToClientBtn: {
+    backgroundColor: colors.info || '#2196F3',
+    width: '100%',
+  },
+  showToClientBtnActive: {
+    backgroundColor: colors.success || '#4CAF50',
+    width: '100%',
   },
   modalOverlay: {
     flex: 1,

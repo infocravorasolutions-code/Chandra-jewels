@@ -30,6 +30,7 @@ import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
 import Icon from '../../components/common/Icon';
+import EnquiryFiltersModal from '../../components/filters/EnquiryFiltersModal';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 // Import PDF generator module
@@ -139,12 +140,16 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Enrich enquiries with client names from the clients API
   // Use useMemo to prevent unnecessary recomputation
+  // IMPORTANT: Use filteredEnquiries (already filtered by client) instead of all enquiries
   const enrichedEnquiries = useMemo(() => {
-    if (!enquiries || enquiries.length === 0) {
+    // Use filteredEnquiries instead of all enquiries to preserve client filtering
+    const enquiriesToEnrich = filteredEnquiries && filteredEnquiries.length > 0 ? filteredEnquiries : enquiries;
+    
+    if (!enquiriesToEnrich || enquiriesToEnrich.length === 0) {
       return [];
     }
     
-    return enquiries.map(enquiry => {
+    return enquiriesToEnrich.map(enquiry => {
       // If clientName is 'Unknown Client' or missing, try to fetch from clientNameMap
       let finalClientName = enquiry.clientName;
       if ((!enquiry.clientName || enquiry.clientName === 'Unknown Client') && enquiry.clientId) {
@@ -175,7 +180,7 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       return { ...enquiry, clientName: finalClientName };
     });
-  }, [enquiries, clientNameMap]);
+  }, [filteredEnquiries, enquiries, clientNameMap]);
 
   // Re-apply filtering on enriched enquiries
   const enrichedFilteredEnquiries = useMemo(() => {
@@ -184,6 +189,30 @@ const EnquiryListScreen = ({ navigation }) => {
     }
 
     let filtered = [...enrichedEnquiries];
+    
+    // CRITICAL: For client users, ensure we only show their enquiries
+    // For client users, enquiries are created with USER ID as ClientId
+    // So we filter by user.id (not client record ID)
+    const isClient = user?.role === 'client' || user?.roleId === 4 || user?.roleNumber === 4;
+    if (isClient && user?.id) {
+      const beforeCount = filtered.length;
+      const userClientId = user.id; // Use user ID as ClientId
+      
+      filtered = filtered.filter(e => {
+        const enquiryClientId = e.clientId || e.ClientId || '';
+        const matches = String(enquiryClientId).trim() === String(userClientId).trim();
+        if (__DEV__ && !matches) {
+          console.log(`🔍 Screen: Filtering out enquiry ${e.id || e._id}: ClientId mismatch (expected: ${userClientId}, got: ${enquiryClientId})`);
+        }
+        return matches;
+      });
+      
+      if (__DEV__) {
+        console.log(`🔐 Screen-level client filter: ${beforeCount} → ${filtered.length} enquiries`);
+        console.log(`🔐 Filtering by user ID (ClientId): ${userClientId}`);
+        console.log(`🔐 User: ${user.name} (${user.email})`);
+      }
+    }
     
     // Apply status filter
     if (filters.status && filters.status !== 'all') {
@@ -195,9 +224,14 @@ const EnquiryListScreen = ({ navigation }) => {
       filtered = filtered.filter(e => e.priority === filters.priority);
     }
     
-    // Apply client filter - use enriched client names
-    if (filters.client && filters.client !== 'all') {
-      filtered = filtered.filter(e => e.clientName === filters.client);
+    // Apply client filter - use enriched client names (only for admin users)
+    // For client users, this filter should not be needed as we already filtered above
+    if (!isClient && filters.clientId && filters.clientId !== 'all') {
+      filtered = filtered.filter(e => {
+        const clientId = e.clientId || e.ClientId || '';
+        const clientName = e.clientName || e.ClientName || '';
+        return String(clientId) === String(filters.clientId) || clientName === filters.clientId;
+      });
     }
     
     // Apply search query
@@ -241,7 +275,7 @@ const EnquiryListScreen = ({ navigation }) => {
     });
     
     return filtered;
-  }, [enrichedEnquiries, filters, searchQuery, sortBy, sortOrder, filteredEnquiries]);
+  }, [enrichedEnquiries, filters, searchQuery, sortBy, sortOrder, filteredEnquiries, user, clients]);
 
   // Get unique client list from enriched enquiries
   const clientList = useMemo(() => {
@@ -292,7 +326,7 @@ const EnquiryListScreen = ({ navigation }) => {
       dispatch(setPage(1));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.status, filters.priority, filters.client, searchQuery]);
+  }, [filters.status, filters.priority, filters.clientId, searchQuery]);
   
   // Pagination handlers
   const handlePageChange = (newPage) => {
@@ -437,6 +471,11 @@ const EnquiryListScreen = ({ navigation }) => {
     dispatch(setFilters({ [filterType]: value }));
   };
 
+  const handleApplyFilters = (newFilters) => {
+    dispatch(setFilters(newFilters));
+    dispatch(setPage(1)); // Reset to first page when filters change
+  };
+
   const handleClearFilters = () => {
     dispatch(clearFilters());
   };
@@ -533,6 +572,7 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Sort options
   const sortOptions = [
+    { key: 'assignedDate', label: 'Assigned Date', icon: 'schedule' },
     { key: 'createdAt', label: 'Date Created', icon: 'schedule' },
     { key: 'title', label: 'Title', icon: 'title' },
     { key: 'clientName', label: 'Client', icon: 'person' },
@@ -663,108 +703,6 @@ const EnquiryListScreen = ({ navigation }) => {
     );
   };
 
-  const renderFilterModal = () => (
-    <Modal
-      visible={showFilters}
-      animationType="slide"
-      presentationStyle="pageSheet">
-      <View style={styles.filterModal}>
-        <View style={styles.filterHeader}>
-          <Text style={{ fontSize: 16, fontFamily: fonts.bold, color: colors.textPrimary }}>
-            Filters
-          </Text>
-          <TouchableOpacity onPress={() => setShowFilters(false)}>
-            <Text style={{ fontSize: 20, color: colors.textPrimary }}>✕</Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={styles.filterContent}>
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
-              Status
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {getStatusOptions().map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.filterOption,
-                    filters.status === option.value && styles.filterOptionActive,
-                  ]}
-                  onPress={() => handleFilterChange('status', option.value)}>
-                  <Text style={{ 
-                    color: filters.status === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: 13 
-                  }}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
-              Priority
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {getPriorityOptions().map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.filterOption,
-                    filters.priority === option.value && styles.filterOptionActive,
-                  ]}
-                  onPress={() => handleFilterChange('priority', option.value)}>
-                  <Text style={{ 
-                    color: filters.priority === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: 13 
-                  }}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Hide client filter for clients (role 4) */}
-          {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
-            <View style={styles.filterSection}>
-              <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
-                Client
-              </Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {getClientOptions().map(option => (
-                  <TouchableOpacity
-                    key={option.value}
-                    style={[
-                      styles.filterOption,
-                      filters.client === option.value && styles.filterOptionActive,
-                    ]}
-                    onPress={() => handleFilterChange('client', option.value)}>
-                    <Text style={{ 
-                      color: filters.client === option.value ? colors.textWhite : colors.textSecondary, 
-                      fontSize: 13 
-                    }}>
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-        </ScrollView>
-
-        <View style={styles.filterFooter}>
-          <Button
-            title="Apply Filters"
-            onPress={() => setShowFilters(false)}
-            style={styles.applyButton}
-          />
-        </View>
-      </View>
-    </Modal>
-  );
 
   const renderSortModal = () => (
     <Modal
@@ -981,7 +919,14 @@ const EnquiryListScreen = ({ navigation }) => {
         </View>
       )}
 
-      {renderFilterModal()}
+      <EnquiryFiltersModal
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        filters={filters}
+        onApplyFilters={handleApplyFilters}
+        onClearFilters={handleClearFilters}
+        user={user}
+      />
       {renderSortModal()}
     </SafeAreaView>
   );
