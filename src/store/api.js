@@ -1702,6 +1702,114 @@ export const api = createApi({
       providesTags: (result, error, { enquiryId }) => [{ type: 'Chat', id: enquiryId }],
     }),
 
+    // Get all chats for an enquiry (both admin-client and admin-designer)
+    getChatsByEnquiry: builder.query({
+      query: ({ enquiryId }) => {
+        if (!enquiryId) {
+          throw new Error('enquiryId is required');
+        }
+        return `/api/chats/enquiry/${enquiryId}`;
+      },
+      providesTags: (result, error, { enquiryId }) => [{ type: 'Chat', id: enquiryId }],
+      transformResponse: (data, meta, arg) => {
+        if (__DEV__) {
+          console.log('getChatsByEnquiry API Response:', data);
+        }
+
+        // Handle different response formats
+        let chatsArray = [];
+        if (Array.isArray(data)) {
+          chatsArray = data;
+        } else if (data && typeof data === 'object') {
+          if (data.Data && Array.isArray(data.Data)) {
+            chatsArray = data.Data;
+          } else if (data.chats && Array.isArray(data.chats)) {
+            chatsArray = data.chats;
+          } else if (data.data && Array.isArray(data.data)) {
+            chatsArray = data.data;
+          }
+        }
+
+        // Normalize chats similar to getChats
+        const normalizedChats = chatsArray.map(chat => {
+          let enquiryId = chat.EnquiryId || chat.enquiryId;
+          if (enquiryId?.$oid) {
+            enquiryId = enquiryId.$oid;
+          } else if (enquiryId?._id) {
+            enquiryId = enquiryId._id;
+          }
+          
+          let chatId = chat._id;
+          if (chatId?.$oid) {
+            chatId = chatId.$oid;
+          } else if (chatId?._id) {
+            chatId = chatId._id;
+          } else {
+            chatId = chatId || chat.id;
+          }
+          
+          let lastMessageTime = chat.LastMessageTime || chat.lastMessageTime || chat.updatedAt || chat.UpdatedAt;
+          if (lastMessageTime?.$date) {
+            lastMessageTime = lastMessageTime.$date;
+          } else if (lastMessageTime?.Timestamp) {
+            lastMessageTime = lastMessageTime.Timestamp;
+          }
+          
+          let lastMessageText = '';
+          const lastMessageObj = chat.LastMessage || chat.lastMessage;
+          if (lastMessageObj) {
+            if (typeof lastMessageObj === 'string') {
+              lastMessageText = lastMessageObj;
+            } else if (typeof lastMessageObj === 'object') {
+              lastMessageText = lastMessageObj.Message || 
+                               lastMessageObj.message || 
+                               lastMessageObj.text || 
+                               lastMessageObj.Text || 
+                               '';
+            }
+          } else {
+            lastMessageText = chat.message || '';
+          }
+          
+          let lastSenderName = '';
+          const lastSenderObj = chat.LastSender || chat.lastSender;
+          if (lastSenderObj) {
+            if (typeof lastSenderObj === 'string') {
+              lastSenderName = lastSenderObj;
+            } else if (typeof lastSenderObj === 'object') {
+              lastSenderName = lastSenderObj.Name || 
+                              lastSenderObj.name || 
+                              lastSenderObj.SenderName || 
+                              lastSenderObj.senderName || 
+                              '';
+            }
+          } else {
+            lastSenderName = chat.sender || '';
+          }
+          
+          return {
+            id: chatId,
+            enquiryId: enquiryId || chat.Enquiry?.id || chat.enquiry?.id,
+            enquiryTitle: chat.EnquiryTitle || chat.enquiryTitle || chat.Enquiry?.Name || chat.Enquiry?.title || 'Untitled Chat',
+            clientName: chat.ClientName || chat.clientName || chat.Client?.Name || chat.client?.name || 'Unknown Client',
+            lastMessage: lastMessageText,
+            lastMessageTime: lastMessageTime || new Date().toISOString(),
+            unreadCount: chat.UnreadCount || chat.unreadCount || chat.unread || 0,
+            isGroup: chat.IsGroup || chat.isGroup || false,
+            participants: chat.Participants || chat.participants || [],
+            lastSender: lastSenderName,
+            status: chat.Status || chat.status || 'active',
+            isClient: chat.IsClient || chat.isClient || false,
+            type: chat.Type || chat.type || null,
+            Type: chat.Type || chat.type || null,
+            _originalData: chat,
+          };
+        });
+
+        return normalizedChats;
+      },
+    }),
+
     // Get all chats (for chat list)
     getChats: builder.query({
       query: ({ page = 1, limit = 10, search = '', type } = {}) => {
@@ -1937,6 +2045,7 @@ export const api = createApi({
             if (__DEV__) {
               console.error('❌ Backend returned HTML instead of JSON. This usually means the endpoint does not exist.');
               console.error('Expected endpoint: /api/message/:chatId/messages');
+              console.error('Actual endpoint used: /api/message/' + chatId + '/messages');
               console.error('ChatId:', chatId);
               console.error('Response preview:', responseText.substring(0, 200));
             }
@@ -2214,6 +2323,7 @@ export const {
   // Chats
   useGetChatsQuery,
   useGetChatByEnquiryQuery,
+  useGetChatsByEnquiryQuery,
   useGetChatMessagesQuery,
   useUploadChatMediaMutation,
 } = api;

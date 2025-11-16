@@ -10,9 +10,10 @@ import { API_BASE_URL } from '../config/apiConfig';
  * Custom hook for managing chat functionality
  * @param {string} enquiryId - The enquiry ID
  * @param {string} chatType - 'admin-client' or 'admin-designer'
+ * @param {string} chatId - Optional: Direct chat ID to use (if available, skips search)
  * @returns {object} Chat state and methods
  */
-export const useChat = (enquiryId, chatType) => {
+export const useChat = (enquiryId, chatType, chatId = null) => {
   const { user } = useAuth();
   const [chat, setChat] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -65,6 +66,42 @@ export const useChat = (enquiryId, chatType) => {
     try {
       const token = await AsyncStorage.getItem('token');
 
+      // If we have a direct chatId, fetch that specific chat first
+      if (chatId) {
+        if (__DEV__) {
+          console.log('🔍 Fetching chat directly by chatId:', chatId);
+        }
+        
+        try {
+          // Try to get the specific chat by ID
+          const chatResponse = await fetch(`${API_BASE_URL}/api/chats/${chatId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (chatResponse.ok) {
+            const chatData = await chatResponse.json();
+            const foundChat = chatData.Data || chatData.data || chatData;
+            
+            if (foundChat && (foundChat._id || foundChat.id)) {
+              if (__DEV__) {
+                console.log('✅ Chat found by ID:', foundChat);
+              }
+              setChat(foundChat);
+              setIsLoadingChat(false);
+              return;
+            }
+          }
+        } catch (chatIdError) {
+          if (__DEV__) {
+            console.warn('⚠️ Error fetching chat by ID, falling back to search:', chatIdError.message);
+          }
+          // Fall through to search by enquiryId
+        }
+      }
+
       // Search for chat in the chats list by enquiryId and type
       // Backend filters chats by type and user participation
       const searchParams = new URLSearchParams({
@@ -84,25 +121,29 @@ export const useChat = (enquiryId, chatType) => {
         const result = await response.json();
         const chats = result.Data || result.data || result;
         
-        // Find chat for this enquiryId
-        const foundChat = Array.isArray(chats) 
-          ? chats.find(chat => {
-              const chatEnquiryId = chat.EnquiryId || chat.enquiryId;
-              return String(chatEnquiryId).trim() === String(enquiryId).trim();
-            })
-          : null;
+        // If we have a chatId, find that specific chat, otherwise find by enquiryId
+        let foundChat = null;
+        if (chatId && Array.isArray(chats)) {
+          foundChat = chats.find(chat => {
+            const cId = chat._id || chat.id;
+            return String(cId).trim() === String(chatId).trim();
+          });
+        }
+        
+        // If not found by chatId, fall back to finding by enquiryId
+        if (!foundChat && Array.isArray(chats)) {
+          foundChat = chats.find(chat => {
+            const chatEnquiryId = chat.EnquiryId || chat.enquiryId;
+            return String(chatEnquiryId).trim() === String(enquiryId).trim() &&
+                   (chat.Type || chat.type) === type;
+          });
+        }
 
         if (foundChat) {
           if (__DEV__) {
             console.log('✅ Chat found in list:', foundChat);
           }
-          setChat({
-            _id: foundChat._id || foundChat.id,
-            EnquiryId: foundChat.EnquiryId || foundChat.enquiryId || enquiryId,
-            EnquiryName: foundChat.EnquiryName || foundChat.enquiryTitle || foundChat.enquiryName || 'Chat',
-            Type: foundChat.Type || foundChat.type || type,
-            CreatedAt: foundChat.CreatedAt || foundChat.createdAt || new Date().toISOString(),
-          });
+          setChat(foundChat);
           setIsLoadingChat(false);
           return;
         }
@@ -117,7 +158,7 @@ export const useChat = (enquiryId, chatType) => {
       // We need to get the enquiry name if possible, but for now use a placeholder
       // The chat will be created with proper name when first message is sent
       const virtualChat = {
-        _id: null, // Will be set when chat is created
+        _id: chatId || null, // Use provided chatId if available
         EnquiryId: enquiryId,
         EnquiryName: 'New Chat', // Will be updated when chat is created
         Type: type,
@@ -132,7 +173,7 @@ export const useChat = (enquiryId, chatType) => {
       }
       // Fallback: use virtual chat (backend will create real chat on first message)
       const fallbackChat = {
-        _id: null,
+        _id: chatId || null,
         EnquiryId: enquiryId,
         EnquiryName: 'Chat',
         Type: getChatType(),
@@ -143,7 +184,7 @@ export const useChat = (enquiryId, chatType) => {
     } finally {
       setIsLoadingChat(false);
     }
-  }, [enquiryId, user, getChatType]);
+  }, [enquiryId, user, getChatType, chatId]);
 
   // Step 2 & 3: Connect to socket and join chat
   // Note: If chat._id is null (virtual chat), we'll join after chat is created
@@ -735,12 +776,12 @@ export const useChat = (enquiryId, chatType) => {
     socketService.sendTyping(chat._id, user.id, isTyping);
   }, [chat?._id, user]);
 
-  // Load chat on mount or when enquiryId changes
+  // Load chat on mount or when enquiryId or chatId changes
   useEffect(() => {
     if (enquiryId && user) {
       fetchChat();
     }
-  }, [enquiryId, user, fetchChat]);
+  }, [enquiryId, chatId, user, fetchChat]);
 
   // Refetch messages when chat is loaded or screen is revisited
   const chatIdRef = useRef(null);

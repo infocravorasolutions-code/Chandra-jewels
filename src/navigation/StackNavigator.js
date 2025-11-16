@@ -12,6 +12,7 @@ import AddEnquiryStep2Screen from '../screens/AddEnquiry/AddEnquiryStep2Screen';
 import EditEnquiryStep1Screen from '../screens/EditEnquiry/EditEnquiryStep1Screen';
 import EditEnquiryStep2Screen from '../screens/EditEnquiry/EditEnquiryStep2Screen';
 import ChatDetailScreen from '../screens/Chats/ChatDetailScreen';
+import ChatGroupsScreen from '../screens/Chats/ChatGroupsScreen';
 import MetalPricesScreen from '../screens/Admin/MetalPricesScreen';
 import ClientsListScreen from '../screens/Admin/ClientsListScreen';
 import CreateClientScreen from '../screens/Admin/CreateClientScreen';
@@ -87,10 +88,18 @@ const StackNavigator = ({ isAuthenticated }) => {
             }}
           />
           <Stack.Screen
+            name="ChatGroups"
+            component={ChatGroupsScreen}
+            options={{
+              title: 'Chat Groups',
+            }}
+          />
+          <Stack.Screen
             name="ChatDetail"
             component={ChatDetailScreen}
             options={{
               title: 'Chat',
+              headerShown: false,
             }}
           />
           <Stack.Screen

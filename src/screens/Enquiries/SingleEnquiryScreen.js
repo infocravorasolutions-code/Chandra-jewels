@@ -30,6 +30,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { enquiry: initialEnquiry, enquiryId: routeEnquiryId, shouldRefresh } = route.params || {};
   
+  console.log('initialEnquiry', enquiry);
   // Log route params when screen loads or params change
   useEffect(() => {
     if (__DEV__) {
@@ -1269,7 +1270,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
       <TouchableOpacity
         style={styles.chatButton}
-        onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
+        onPress={() => navigation.navigate('ChatGroups', { enquiry, enquiryId: enquiry?.id || enquiry?._id })}>
         <Icon name="chat" size={16} color={colors.primary} />
         <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
           Open Chat
@@ -1294,7 +1295,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
       <TouchableOpacity
         style={styles.chatButton}
-        onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
+        onPress={() => navigation.navigate('ChatGroups', { enquiry, enquiryId: enquiry?.id || enquiry?._id })}>
         <Icon name="chat" size={16} color={colors.primary} />
         <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
           Open Chat
@@ -1388,7 +1389,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           <TouchableOpacity
             style={[styles.adminActionButton, styles.adminActionButtonOutline]}
             activeOpacity={0.85}
-            onPress={() => navigation.navigate('ChatDetail', { enquiry })}
+            onPress={() =>  navigation.navigate('ChatGroups', { enquiry, enquiryId: enquiry?.id || enquiry?._id })}
           >
             <Icon name="chat" size={18} color={colors.primary} />
             <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>Open Chat</Text>

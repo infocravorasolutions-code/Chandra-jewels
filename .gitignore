@@ -160,20 +160,39 @@ ios/Pods/
 
 # Android
 android/app/build/
+android/app/build */
+android/app/build [0-9]*/
 android/build/
+android/build */
+android/build [0-9]*/
 android/.gradle/
 android/gradle/
 android/gradlew
 android/gradlew.bat
 android/local.properties
 android/app/release/
+# Numbered build artifacts
+android/app/*/build [0-9]*/
+android/app/*/intermediates [0-9]*/
+android/app/*/generated [0-9]*/
+android/app/*/outputs [0-9]*/
+android/app/*/kotlin [0-9]*/
 
 # iOS
 ios/build/
+ios/build */
+ios/build [0-9]*/
 ios/Pods/
+ios/Pods */
+ios/Pods [0-9]*/
 ios/*.xcworkspace
 ios/*.xcuserstate
 ios/DerivedData/
+# Numbered generated folders
+ios/build/generated */
+ios/build/generated [0-9]*/
+# Numbered Pods subdirectories
+ios/Pods/* [0-9]*/
 
 # Temporary files
 *.tmp
