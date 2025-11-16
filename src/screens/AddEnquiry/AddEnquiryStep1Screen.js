@@ -15,10 +15,12 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
 import { useGetClientsQuery, useGetUsersQuery } from '../../store/api';
+import { useAuth } from '../../context/AuthContext';
 
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // This screen is only for creating new enquiries
   const isEditMode = false;
+  const { user } = useAuth();
   
   // Initialize form data for new enquiry
   const getInitialFormData = () => {
@@ -101,6 +103,30 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     setFormData(initialData);
   }, []); // Only run once on mount
 
+  // Auto-set clientId for client users
+  // For client users: Use their USER ID as clientId (not client record ID)
+  // For admin users: They can select any client
+  useEffect(() => {
+    // Check if user is a client (role === 'client' or roleId === 4)
+    const isClient = user?.role === 'client' || user?.roleId === 4 || user?.roleNumber === 4;
+    
+    if (isClient && !formData.clientId && user?.id) {
+      // For client users, use their USER ID as clientId
+      // The enquiry will be linked to the user account, not a client record
+      console.log('✅ ========== AUTO-SET CLIENT FOR CLIENT USER ==========');
+      console.log('✅ Client user detected');
+      console.log('✅ Using USER ID as clientId:', user.id);
+      console.log('✅ User:', { id: user.id, email: user.email, name: user.name, role: user.role });
+      console.log('✅ =====================================================');
+      
+      setFormData(prev => ({
+        ...prev,
+        clientId: user.id, // Use user ID as clientId
+        clientName: user.name || 'My Enquiries', // Use user name as client name
+      }));
+    }
+  }, [user, formData.clientId]);
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
@@ -111,13 +137,22 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   const validateForm = () => {
     const newErrors = {};
+    const isClient = user?.role === 'client' || user?.roleId === 4 || user?.roleNumber === 4;
 
     if (!formData.title.trim()) {
       newErrors.title = 'Name is required';
     }
 
+    // For client users, clientId must be set (it should be auto-set)
+    // For admin users, either clientId or clientName is acceptable
+    if (isClient) {
+      if (!formData.clientId) {
+        newErrors.clientId = 'Client information is missing. Please contact support.';
+      }
+    } else {
     if (!formData.clientId && !formData.clientName.trim()) {
       newErrors.clientId = 'Client is required';
+      }
     }
 
     if (!formData.status) {
@@ -302,6 +337,22 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
             />
           </View>
           <View style={styles.formField}>
+            {/* Hide client dropdown for client users - it's auto-set */}
+            {(user?.role === 'client' || user?.roleId === 4 || user?.roleNumber === 4) ? (
+              <View style={styles.dropdownContainer}>
+                <Text style={styles.dropdownLabel}>Client*</Text>
+                <View style={[styles.dropdown, { opacity: 0.7 }]}>
+                  <Text style={styles.dropdownText}>
+                    {formData.clientName || 'Your Account'}
+                  </Text>
+                  <IconComponent name="lock" size={20} color={colors.textSecondary} />
+                </View>
+                <Text style={[styles.errorText, { color: colors.textSecondary, fontSize: fonts.xs }]}>
+                  (Automatically set to your account)
+                </Text>
+              </View>
+            ) : (
+              <>
             {renderDropdown(
               'Client*',
               formData.clientId,
@@ -316,6 +367,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
             )}
             {errors.clientId && (
               <Text style={styles.errorText}>{errors.clientId}</Text>
+                )}
+              </>
             )}
           </View>
         </View>

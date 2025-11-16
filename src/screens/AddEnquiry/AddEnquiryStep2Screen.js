@@ -300,11 +300,43 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       // Prepare enquiry data according to API structure
       console.log('🔨 Preparing enquiry data...');
       
+      // Determine the correct ClientId
+      // For client users: Use their USER ID as ClientId (not client record ID)
+      // For admin users: Use the selected client record ID
+      let finalClientId = formData.clientId || enquiryToEdit?.clientId || enquiryToEdit?.ClientId;
+      
+      // If user is a client, use their USER ID as ClientId
+      const isClientUser = user?.role === 'client' || user?.roleId === 4 || user?.roleNumber === 4;
+      if (isClientUser && !isEditMode) {
+        // For client users creating new enquiries, use their user ID as ClientId
+        finalClientId = user.id;
+        console.log('✅ ========== CLIENT USER ENQUIRY CREATION ==========');
+        console.log('✅ Client user creating enquiry');
+        console.log('✅ Using USER ID as ClientId:', user.id);
+        console.log('✅ User:', { id: user.id, email: user.email, name: user.name, role: user.role });
+        console.log('✅ ===================================================');
+      } else if (isClientUser && isEditMode && !finalClientId) {
+        // For editing, if no clientId found, use user ID
+        finalClientId = user.id;
+        console.log('✅ Client user editing enquiry - using USER ID as ClientId:', user.id);
+      }
+      
+      // Validate that we have a clientId before proceeding
+      if (!finalClientId && !isEditMode) {
+        console.error('❌ Cannot create enquiry: ClientId is required');
+        Alert.alert(
+          'Missing Client Information',
+          'Client information is required to create an enquiry. Please go back and select a client.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
       enquiryData = {
         // Only include Id for updates, not for new enquiries
         ...(isEditMode && enquiryToEdit?.id ? { Id: enquiryToEdit.id } : {}),
         Name: formData.title || '',
-        ClientId: formData.clientId || enquiryToEdit?.clientId || user.id, // Use formData.clientId first (from Step 1)
+        ClientId: finalClientId, // Use the determined clientId
         AssignedTo: formData.assignedTo || enquiryToEdit?.AssignedTo || null,
         Status: formData.status || enquiryToEdit?.status || 'Enquiry Created', // Use formData.status first
         Priority: mappedPriority,

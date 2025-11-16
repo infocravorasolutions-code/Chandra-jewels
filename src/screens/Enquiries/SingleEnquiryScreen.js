@@ -9,6 +9,7 @@ import {
   Text,
   Platform,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -67,8 +68,25 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     refetch 
   } = useGetEnquiryByIdQuery(enquiryId, {
     skip: !enquiryId,
+    refetchOnFocus: true, // ✅ Refetch when screen comes into focus (to get latest status updates)
+    refetchOnMountOrArgChange: true, // ✅ Refetch when enquiryId changes
+    pollingInterval: 10000, // ✅ Poll every 10 seconds to get latest updates (when admin changes status)
   });
   
+  // Watch for status changes and log them
+  useEffect(() => {
+    if (enquiryData && enquiryId) {
+      const currentStatus = enquiryData?.status || enquiryData?.Status || enquiryData?._originalData?.Status;
+      if (__DEV__) {
+        console.log('🔄 ========== ENQUIRY STATUS CHECK ==========');
+        console.log('🔄 Enquiry ID:', enquiryId);
+        console.log('🔄 Current Status:', currentStatus);
+        console.log('🔄 Data Updated:', enquiryData?.updatedAt || enquiryData?._originalData?.UpdatedDate);
+        console.log('🔄 =========================================');
+      }
+    }
+  }, [enquiryData, enquiryId]);
+
   // Log enquiryData changes - reduced logging to prevent performance issues
   useEffect(() => {
     if (__DEV__ && enquiryData && shouldRefresh) {
@@ -345,15 +363,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // Refresh enquiry data when screen comes into focus (if needed)
   useFocusEffect(
     React.useCallback(() => {
-      // Only refetch if shouldRefresh changed from false to true
-      const shouldRefetch = shouldRefresh && shouldRefresh !== lastShouldRefreshRef.current && enquiryId;
-      
-      if (__DEV__ && shouldRefresh) {
-        console.log('🔄 useFocusEffect - shouldRefresh:', shouldRefresh, 'will refetch:', shouldRefetch);
-      }
-      
-      if (shouldRefetch) {
-        lastShouldRefreshRef.current = shouldRefresh;
+      // Always refetch when screen comes into focus to get latest updates
+      // This ensures client sees status changes made by admin
+      if (enquiryId) {
+        if (__DEV__) {
+          console.log('🔄 useFocusEffect - Screen focused, refetching enquiry:', enquiryId);
+        }
         
         // Use a small delay to ensure navigation is complete
         const timeoutId = setTimeout(() => {
@@ -361,6 +376,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             .then((result) => {
               if (__DEV__) {
                 console.log('✅ Refetch completed:', !!result?.data);
+                console.log('✅ Latest status:', result?.data?.status || result?.data?.Status);
               }
             })
             .catch((error) => {
@@ -368,11 +384,14 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 console.error('❌ Refetch error:', error);
               }
             });
-        }, 100);
+        }, 300);
         
         return () => clearTimeout(timeoutId);
-      } else {
-        // Update ref even if not refetching
+      }
+      
+      // Also handle shouldRefresh flag if provided
+      const shouldRefetch = shouldRefresh && shouldRefresh !== lastShouldRefreshRef.current && enquiryId;
+      if (shouldRefetch) {
         lastShouldRefreshRef.current = shouldRefresh;
       }
     }, [shouldRefresh, enquiryId, refetch])
@@ -1080,8 +1099,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const cadCode = originalData?.CadCode || enquiry?.CadCode || enquiry?.cadCode || enquiry?.cadVersion;
     
     // Get all versions
-    const coralVersions = originalData?.Coral || enquiry?.Coral || [];
-    const cadVersions = originalData?.Cad || enquiry?.Cad || [];
+    let coralVersions = originalData?.Coral || enquiry?.Coral || [];
+    let cadVersions = originalData?.Cad || enquiry?.Cad || [];
+    
+    // Filter versions for clients - only show versions with ShowToClient: true
+    if (user?.role === 'client') {
+      coralVersions = Array.isArray(coralVersions) ? coralVersions.filter(version => 
+        version?.ShowToClient === true || version?.showToClient === true || version?.IsVisibleToClient === true || version?.isVisibleToClient === true
+      ) : [];
+      cadVersions = Array.isArray(cadVersions) ? cadVersions.filter(version => 
+        version?.ShowToClient === true || version?.showToClient === true || version?.IsVisibleToClient === true || version?.isVisibleToClient === true
+      ) : [];
+    }
     
     // Check if Coral/CAD data exists
     const hasCoral = coralCode || coralVersions.length > 0;
@@ -1251,11 +1280,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         Actions
         </Text>
       
-      <Button
-        title="Edit Enquiry"
-        onPress={handleEditEnquiry}
-        style={[styles.actionButton, styles.editButton]}
-      />
+      {/* Clients cannot edit enquiries - removed Edit Enquiry button */}
+      {/* Clients can only view their enquiries, not edit them */}
 
       {/* Hide enquiry history for clients (role 4) */}
       {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
@@ -1360,19 +1386,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {/* {hasCAD && (
-          <View style={styles.adminActionsRow}>
-            <TouchableOpacity
-              style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
-              activeOpacity={0.85}
-              onPress={handleViewCAD}
-            >
-              <Icon name="precision-manufacturing" size={18} color={colors.textWhite} />
-              <Text style={styles.adminActionText}>View CAD</Text>
-            </TouchableOpacity>
-          </View> */}
-          <></>
-        {/* )} */}
+        {/* Upload Design Buttons for Admin */}
+        <View style={styles.adminActionsRow}>
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+            activeOpacity={0.85}
+            onPress={handleUploadCoral}
+          >
+            <Icon name="cloud-upload" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>Upload Coral</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+            activeOpacity={0.85}
+            onPress={handleUploadCAD}
+          >
+            <Icon name="cloud-upload" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>Upload CAD</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.adminActionsRow}>
           <TouchableOpacity
@@ -1454,6 +1487,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => {
+              if (__DEV__) {
+                console.log('🔄 Manual refresh triggered by pull-to-refresh');
+              }
+              refetch();
+            }}
+            tintColor={colors.primary}
+          />
+        }
       >
         {renderImages()}
         {renderEnquiryDetails()}
