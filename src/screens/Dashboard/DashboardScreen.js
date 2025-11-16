@@ -9,7 +9,7 @@ import {
   Image,
   Platform,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { useGetDashboardDataQuery, useGetClientsQuery, useGetEnquiriesQuery } from '../../store/api';
@@ -209,7 +209,6 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
 const DashboardScreen = ({ navigation }) => {
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const insets = useSafeAreaInsets();
 
   // Redux hooks for data fetching
   // Pass both role and userId to get user-specific counts
@@ -224,8 +223,6 @@ const DashboardScreen = ({ navigation }) => {
     },
     {
       skip: !user,
-      refetchOnFocus: true, // Refetch when screen comes into focus
-      refetchOnMountOrArgChange: true, // Refetch when arguments change
     }
   );
 
@@ -681,17 +678,6 @@ const DashboardScreen = ({ navigation }) => {
           {renderRecentActivity()}
         </View>
       </ScrollView>
-
-      {/* Floating Action Button - Add New Enquiry */}
-      {(user?.role === 'admin' || user?.role === 'client') && (
-        <TouchableOpacity
-          style={[styles.fab, { bottom: insets.bottom + 5 }]} // Position just above bottom tab bar (tab bar is 60px + 10px spacing)
-          onPress={() => navigation.navigate('AddEnquiryStep1')}
-          activeOpacity={0.8}
-        >
-          <Icon name="add-circle" size={28} color={colors.textWhite} />
-        </TouchableOpacity>
-      )}
     </SafeAreaView>
   );
 };
@@ -1009,22 +995,6 @@ const styles = StyleSheet.create({
     color: colors.textLight,
     lineHeight: 16,
     letterSpacing: 0.1,
-  },
-  // Floating Action Button
-  fab: {
-    position: 'absolute',
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
   },
 });
 

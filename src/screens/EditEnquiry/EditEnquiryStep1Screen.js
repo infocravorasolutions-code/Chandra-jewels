@@ -161,33 +161,11 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     const rawPriority = originalData?.Priority || enquiry.Priority || enquiry.priority || 'Normal';
     const mappedPriority = priorityMap[rawPriority] || priorityMap[rawPriority?.toLowerCase()] || 'Normal';
     
-    // Get status from enquiry - normalize to match statusOptions
-    const rawStatus = originalData?.Status || enquiry?.Status || enquiry?.status || enquiry?.CurrentStatus || 'Enquiry Created';
-    // Normalize status to match statusOptions values (case-insensitive match)
-    let enquiryStatus = 'Enquiry Created'; // default
-    const statusLower = String(rawStatus).toLowerCase();
-    if (statusLower.includes('completed') || statusLower === 'completed') {
-      enquiryStatus = 'Completed';
-    } else if (statusLower.includes('approval') && statusLower.includes('pending')) {
-      enquiryStatus = 'Design Approval Pending';
-    } else if (statusLower === 'cad' || statusLower.includes('cad')) {
-      enquiryStatus = 'CAD';
-    } else if (statusLower === 'coral' || statusLower.includes('coral')) {
-      enquiryStatus = 'Coral';
-    } else if (statusLower.includes('progress') || statusLower === 'in progress') {
-      enquiryStatus = 'In Progress';
-    } else if (statusLower.includes('rejected') || statusLower === 'rejected') {
-      enquiryStatus = 'Rejected';
-    } else if (statusLower.includes('created') || statusLower.includes('pending')) {
-      enquiryStatus = 'Enquiry Created';
-    } else {
-      // Try to match exactly if it's already in the correct format
-      enquiryStatus = rawStatus;
-    }
+    // Get status from enquiry
+    const enquiryStatus = originalData?.Status || enquiry?.Status || enquiry?.status || 'Enquiry Created';
     
-    // Get AssignedTo from enquiry - ensure it's a string ID
-    const rawAssignedTo = originalData?.AssignedTo || enquiry?.AssignedTo || enquiry?.assignedTo || '';
-    const enquiryAssignedTo = rawAssignedTo ? String(rawAssignedTo).trim() : '';
+    // Get AssignedTo from enquiry
+    const enquiryAssignedTo = originalData?.AssignedTo || enquiry?.AssignedTo || enquiry?.assignedTo || '';
     
     // Extract weight data
     const metalWeight = originalData?.MetalWeight || enquiry.MetalWeight || enquiry.metalWeight || {};
@@ -280,14 +258,10 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         console.log('  - Title:', initialData.title);
         console.log('  - Description:', initialData.description);
         console.log('  - Client:', initialData.clientName);
-        console.log('  - Status:', initialData.status);
-        console.log('  - Assigned To:', initialData.assignedTo);
         console.log('  - Category:', initialData.category);
         console.log('  - Metal Color:', initialData.metalColor);
         console.log('  - Metal Quality:', initialData.metalQuality);
         console.log('  - Quantity:', initialData.quantity);
-        console.log('  - Status Options:', statusOptions.map(o => o.value));
-        console.log('  - Assigned To Options:', assignedToOptions.map(o => ({ label: o.label, value: o.value })));
       }
     }
     // Removed 'clients' from dependencies - use clientsData.length instead to track when clients are loaded
@@ -323,64 +297,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const renderDropdown = (label, value, options, onSelect, isVisible, onToggle, usersList = []) => {
-    // Find matching option - handle case-insensitive matching for status
-    const findOption = (val) => {
-      if (!val) return null;
-      // Exact match first
-      let option = options.find(opt => opt.value === val);
-      if (option) return option;
-      
-      // Case-insensitive match (for status field)
-      if (label.includes('Status')) {
-        option = options.find(opt => 
-          String(opt.value).toLowerCase() === String(val).toLowerCase()
-        );
-        if (option) return option;
-      }
-      
-      // For Assigned To, try to find by ID even if format differs
-      if (label.includes('Assigned')) {
-        option = options.find(opt => 
-          String(opt.value).trim() === String(val).trim()
-        );
-        if (option) return option;
-      }
-      
-      return null;
-    };
-    
-    const selectedOption = findOption(value);
-    
-    // Determine display text
-    let displayText = selectedOption?.label;
-    if (!displayText && value) {
-      if (label.includes('Assigned')) {
-        // For Assigned To, try to find user name from users list
-        const user = usersList.find(u => 
-          String(u.id || u._id).trim() === String(value).trim()
-        );
-        displayText = user ? (user.name || user.email || String(value)) : String(value);
-      } else {
-        // For other fields, just show the value
-        displayText = String(value);
-      }
-    }
-    if (!displayText) {
-      displayText = `Select ${label}`;
-    }
-    
-    if (__DEV__ && (label.includes('Status') || label.includes('Assigned'))) {
-      console.log(`🔍 Dropdown "${label}":`, {
-        value,
-        displayText,
-        hasMatch: !!selectedOption,
-        optionsCount: options.length,
-        allOptionValues: options.slice(0, 5).map(o => o.value), // Show first 5 for debugging
-      });
-    }
-    
-    return (
+  const renderDropdown = (label, value, options, onSelect, isVisible, onToggle) => (
     <View style={styles.dropdownContainer}>
       <Text style={styles.dropdownLabel}>{label}</Text>
       <TouchableOpacity
@@ -389,7 +306,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         activeOpacity={0.7}
       >
         <Text style={styles.dropdownText}>
-            {displayText}
+          {options.find(opt => opt.value === value)?.label || `Select ${label}`}
         </Text>
         <IconComponent name="arrow-drop-down" size={24} color={colors.textSecondary} />
       </TouchableOpacity>
@@ -436,7 +353,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       </Modal>
     </View>
   );
-  };
 
   const handleNext = async () => {
     if (!validateForm()) {
@@ -544,24 +460,15 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   ];
 
   // Create assigned-to options from users (exclude clients by role) - memoized to prevent recreation
-  const assignedToOptions = useMemo(() => {
-    const options = users
+  const assignedToOptions = useMemo(() => users
     .filter(user => {
       const roleString = String(user.role || '').toLowerCase();
       return roleString !== 'client';
     })
     .map(user => ({
       label: user.name || user.email || 'Unknown',
-        value: String(user.id || user._id).trim(), // Ensure value is a string
-      }));
-    
-    if (__DEV__) {
-      console.log('🔍 Assigned To Options:', options);
-      console.log('🔍 Users loaded:', users.length);
-    }
-    
-    return options;
-  }, [users]);
+      value: user.id || user._id,
+    })), [users]);
 
   const categoryOptions = [
     { label: 'Ring', value: 'Ring' },
@@ -715,8 +622,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
               statusOptions,
               (value) => handleInputChange('status', value),
               showStatusDropdown,
-              () => setShowStatusDropdown(!showStatusDropdown),
-              [] // No users needed for status
+              () => setShowStatusDropdown(!showStatusDropdown)
             )}
           </View>
           <View style={styles.formField}>
@@ -726,8 +632,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
               assignedToOptions,
               (value) => handleInputChange('assignedTo', value),
               showAssignedToDropdown,
-              () => setShowAssignedToDropdown(!showAssignedToDropdown),
-              users // Pass users list to find name if ID doesn't match options
+              () => setShowAssignedToDropdown(!showAssignedToDropdown)
             )}
           </View>
         </View>

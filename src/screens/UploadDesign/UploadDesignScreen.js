@@ -215,29 +215,8 @@ const UploadDesignScreen = ({ route, navigation }) => {
       );
     } catch (error) {
       console.error('Error uploading design:', error);
-      
-      // Extract error message with better handling
-      let errorMessage = 'Failed to upload design. Please try again.';
-      if (error?.data?.message) {
-        errorMessage = error.data.message;
-      } else if (error?.data?.error) {
-        errorMessage = error.data.error;
-      } else if (typeof error?.data === 'string') {
-        errorMessage = error.data;
-      } else if (error?.message) {
-        errorMessage = error.message;
-      }
-      
-      // Provide more context for pricing errors
-      if (errorMessage.includes('Pricing') || errorMessage.includes('pricing')) {
-        errorMessage = 'Excel file processing error: The pricing data in your Excel file is missing or invalid. Please check the Excel file format and ensure all required pricing columns are present.';
-      }
-      
-      Alert.alert(
-        'Upload Failed', 
-        errorMessage,
-        [{ text: 'OK' }]
-      );
+      const errorMessage = error?.data?.message || error?.data || error?.message || 'Failed to upload design. Please try again.';
+      Alert.alert('Upload Failed', errorMessage);
     }
   };
 

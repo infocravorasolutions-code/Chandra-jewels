@@ -6,9 +6,6 @@
 import Share from 'react-native-share';
 import { Platform, Alert } from 'react-native';
 import RNFS from 'react-native-fs';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { FILE_BASE_URL } from '../config/apiConfig';
-import { getUserName } from './userUtils';
 
 // Import PDF generation library
 let generatePDF = null;
@@ -135,160 +132,6 @@ const toBase64 = (str) => {
 };
 
 /**
- * Fetch image and convert to base64 data URL
- * This is needed because PDF libraries can't load authenticated images
- */
-const fetchImageAsBase64 = async (imageUrl) => {
-  if (!imageUrl) {
-    if (__DEV__) {
-      console.warn('fetchImageAsBase64: No image URL provided');
-    }
-    return '';
-  }
-  
-  try {
-    if (__DEV__) {
-      console.log('🖼️ Fetching image for PDF:', imageUrl.substring(0, 100));
-    }
-    
-    // Get auth token
-    const token = await AsyncStorage.getItem('token');
-    
-    // Fetch image with auth headers
-    const response = await fetch(imageUrl, {
-      method: 'GET',
-      headers: token ? {
-        'Authorization': `Bearer ${token}`,
-      } : {},
-    });
-    
-    if (!response.ok) {
-      if (__DEV__) {
-        console.warn('❌ Failed to fetch image for PDF:', imageUrl, 'Status:', response.status);
-      }
-      return '';
-    }
-    
-    // Check if response is JSON (API might return URL object)
-    const contentType = response.headers.get('content-type') || '';
-    if (__DEV__) {
-      console.log('📄 Image content-type:', contentType);
-    }
-    
-    if (contentType.includes('application/json')) {
-      const jsonData = await response.json();
-      const actualImageUrl = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
-      if (actualImageUrl) {
-        if (__DEV__) {
-          console.log('🔄 Found S3 URL in JSON response:', actualImageUrl.substring(0, 100));
-        }
-        // Return the S3 URL directly - PDF library can load it
-        // S3 presigned URLs are publicly accessible, so we can use them directly
-        return actualImageUrl;
-      }
-      if (__DEV__) {
-        console.warn('❌ No image URL found in JSON response');
-      }
-      return '';
-    }
-    
-    // Convert response to base64
-    const arrayBuffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    
-    if (__DEV__) {
-      console.log('📦 Image bytes length:', bytes.length);
-    }
-    
-    // Convert to base64 string - improved method
-    let base64 = '';
-    
-    // Try using Buffer if available (React Native polyfill)
-    if (typeof Buffer !== 'undefined') {
-      try {
-        base64 = Buffer.from(bytes).toString('base64');
-        if (__DEV__) {
-          console.log('✅ Base64 conversion successful using Buffer');
-        }
-      } catch (e) {
-        if (__DEV__) {
-          console.warn('Buffer conversion failed, trying manual method:', e);
-        }
-      }
-    }
-    
-    // Fallback: manual conversion
-    if (!base64) {
-      try {
-        // Convert bytes to binary string in chunks
-        let binary = '';
-        const chunkSize = 8192;
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
-          // Use Array.from to avoid "Maximum call stack size exceeded" error
-          binary += String.fromCharCode(...Array.from(chunk));
-        }
-        
-        // Try btoa first
-        if (typeof btoa !== 'undefined') {
-          try {
-            base64 = btoa(binary);
-            if (__DEV__) {
-              console.log('✅ Base64 conversion successful using btoa');
-            }
-          } catch (e) {
-            if (__DEV__) {
-              console.warn('btoa failed, using manual base64:', e);
-            }
-            base64 = toBase64(binary);
-          }
-        } else {
-          base64 = toBase64(binary);
-        }
-      } catch (error) {
-        if (__DEV__) {
-          console.error('❌ Error converting to base64:', error);
-        }
-        return '';
-      }
-    }
-    
-    if (!base64) {
-      if (__DEV__) {
-        console.error('❌ Failed to generate base64 string');
-      }
-      return '';
-    }
-    
-    // Determine image type
-    const imageType = contentType.split('/')[1] || 'jpeg';
-    // Normalize image type
-    const normalizedType = imageType.split(';')[0].toLowerCase();
-    
-    const dataUrl = `data:image/${normalizedType};base64,${base64}`;
-    
-    if (__DEV__) {
-      console.log('✅ Image converted to base64 data URL');
-      console.log('📏 Data URL length:', dataUrl.length);
-      console.log('🖼️ Image type:', normalizedType);
-      console.log('📊 Base64 length:', base64.length);
-    }
-    
-    return dataUrl;
-  } catch (error) {
-    if (__DEV__) {
-      console.error('❌ Error fetching image as base64:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        url: imageUrl.substring(0, 100),
-      });
-    }
-    return '';
-  }
-};
-
-/**
  * Format date for display
  */
 const formatDate = (dateString) => {
@@ -315,9 +158,8 @@ const formatCurrency = (amount) => {
 
 /**
  * Generate HTML content for enquiry PDF
- * Now async to fetch images as base64
  */
-export const generateEnquiryHTML = async (enquiry) => {
+export const generateEnquiryHTML = (enquiry) => {
   const metal = enquiry?.Metal || enquiry?.metal || {};
   const metalColor = metal.Color || metal.color || 'N/A';
   const metalQuality = metal.Quality || metal.quality || '';
@@ -362,112 +204,14 @@ export const generateEnquiryHTML = async (enquiry) => {
   const statusColor = statusColors[status] || statusColors.pending;
   const priorityColor = priorityColors[priority] || priorityColors.medium;
 
-  // Get images (first image URL if available) - improved to check all sources
-  const getFirstImageUrlForSingle = (enquiry) => {
-    if (!enquiry) return '';
-    
-    let referenceImages = [];
-    
-    // Priority 1: Check original data structure (before normalization) - most reliable
-    if (enquiry?._originalData?.ReferenceImages && Array.isArray(enquiry._originalData.ReferenceImages)) {
-      referenceImages = enquiry._originalData.ReferenceImages;
-    }
-    // Priority 2: Check direct ReferenceImages property
-    else if (enquiry?.ReferenceImages && Array.isArray(enquiry.ReferenceImages)) {
-      referenceImages = enquiry.ReferenceImages;
-    }
-    // Priority 3: Check normalized images (from API transform)
-    else if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
-      referenceImages = enquiry.images;
-    }
-    // Priority 4: Check Images property (fallback)
-    else if (enquiry?.Images && Array.isArray(enquiry.Images)) {
-      referenceImages = enquiry.Images;
-    }
-    
-    if (referenceImages.length === 0) {
-      return '';
-    }
-    
-    const firstImage = referenceImages[0];
-    
-    // Handle string format
+  // Get images (first image URL if available)
+  let imageUrl = '';
+  if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
+    const firstImage = enquiry.images[0];
     if (typeof firstImage === 'string') {
-      // If it's already a full URL, use it directly
-      if (firstImage.startsWith('http://') || firstImage.startsWith('https://')) {
-        return firstImage;
-      }
-      // If it starts with /, construct full URL
-      if (firstImage.startsWith('/')) {
-        return `${FILE_BASE_URL}${firstImage}`;
-      }
-      // Otherwise, treat as file key and construct URL
-      return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(firstImage)}`;
-    }
-    
-    // Handle object format
-    if (typeof firstImage === 'object' && firstImage !== null) {
-      // Priority 1: Use Key property (most reliable)
-      const imageKey = firstImage.Key || firstImage.key || firstImage.KeyName || firstImage.keyName || '';
-      if (imageKey) {
-        const encodedKey = encodeURIComponent(imageKey);
-        return `${FILE_BASE_URL}/api/enquiries/files/${encodedKey}`;
-      }
-      
-      // Priority 2: Use Id property as fallback
-      const imageId = firstImage.Id || firstImage.id || firstImage._id || firstImage.FileId || firstImage.fileId || '';
-      if (imageId) {
-        return `${FILE_BASE_URL}/api/enquiries/files/${imageId}`;
-      }
-      
-      // Priority 3: Check for URL properties
-      const imageUrl = firstImage.Url || firstImage.url || firstImage.URI || firstImage.uri || 
-                      firstImage.Location || firstImage.location || firstImage.UrlPath || firstImage.urlPath || '';
-      if (imageUrl) {
-        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-          return imageUrl;
-        }
-        if (imageUrl.startsWith('/')) {
-          return `${FILE_BASE_URL}${imageUrl}`;
-        }
-        return `${FILE_BASE_URL}/${imageUrl}`;
-      }
-    }
-    
-    return '';
-  };
-  
-  let imageUrl = getFirstImageUrlForSingle(enquiry);
-  
-  // Resolve API endpoint to S3 URL if needed
-  let finalImageUrl = imageUrl;
-  if (imageUrl && !imageUrl.includes('amazonaws.com') && !imageUrl.includes('s3.')) {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      const response = await fetch(imageUrl, {
-        method: 'GET',
-        headers: token ? {
-          'Authorization': `Bearer ${token}`,
-        } : {},
-      });
-      
-      if (response.ok) {
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const jsonData = await response.json();
-          const s3Url = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
-          if (s3Url) {
-            finalImageUrl = s3Url;
-            if (__DEV__) {
-              console.log('✅ Resolved single enquiry image to S3 URL');
-            }
-          }
-        }
-      }
-    } catch (error) {
-      if (__DEV__) {
-        console.warn('Failed to resolve image URL for single enquiry PDF:', error);
-      }
+      imageUrl = firstImage;
+    } else if (firstImage?.url || firstImage?.Url || firstImage?.uri) {
+      imageUrl = firstImage.url || firstImage.Url || firstImage.uri;
     }
   }
 
@@ -623,9 +367,9 @@ export const generateEnquiryHTML = async (enquiry) => {
     <span class="badge priority-badge">Priority: ${(enquiry?.priority || 'medium').toUpperCase()}</span>
   </div>
 
-  ${finalImageUrl ? `
+  ${imageUrl ? `
   <div class="image-section">
-    <img src="${finalImageUrl}" alt="Enquiry Image" class="enquiry-image" />
+    <img src="${imageUrl}" alt="Enquiry Image" class="enquiry-image" />
   </div>
   ` : ''}
 
@@ -725,7 +469,7 @@ export const generateEnquiryHTML = async (enquiry) => {
     <div class="section-title">Assignment Details</div>
     <div class="info-row">
       <div class="info-label">Assigned To</div>
-      <div class="info-value">${getUserName(enquiry.AssignedTo)}</div>
+      <div class="info-value">${enquiry.AssignedTo}</div>
     </div>
   </div>
   ` : ''}
@@ -746,8 +490,8 @@ export const generateEnquiryHTML = async (enquiry) => {
  */
 export const downloadEnquiryPDF = async (enquiry) => {
   try {
-    // Generate HTML content (now async to fetch images)
-    const htmlContent = await generateEnquiryHTML(enquiry);
+    // Generate HTML content
+    const htmlContent = generateEnquiryHTML(enquiry);
 
     // Create filename
     const enquiryName = (enquiry?.title || enquiry?.Name || 'Enquiry')
@@ -957,9 +701,8 @@ const generateEmptyHTML = (message) => {
 
 /**
  * Generate HTML content for multiple enquiries PDF (table format)
- * Now async to fetch images as base64
  */
-export const generateEnquiriesListHTML = async (enquiries) => {
+export const generateEnquiriesListHTML = (enquiries) => {
   // Validate input
   if (!enquiries) {
     console.error('generateEnquiriesListHTML: enquiries is null or undefined');
@@ -999,79 +742,15 @@ export const generateEnquiriesListHTML = async (enquiries) => {
     }
     console.log('===================================================');
   }
-  // Get first image URL for each enquiry - improved to check all sources
+  // Get first image URL for each enquiry
   const getFirstImageUrl = (enquiry) => {
-    if (!enquiry) return '';
-    
-    let referenceImages = [];
-    
-    // Priority 1: Check original data structure (before normalization) - most reliable
-    if (enquiry?._originalData?.ReferenceImages && Array.isArray(enquiry._originalData.ReferenceImages)) {
-      referenceImages = enquiry._originalData.ReferenceImages;
-    }
-    // Priority 2: Check direct ReferenceImages property
-    else if (enquiry?.ReferenceImages && Array.isArray(enquiry.ReferenceImages)) {
-      referenceImages = enquiry.ReferenceImages;
-    }
-    // Priority 3: Check normalized images (from API transform)
-    else if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
-      referenceImages = enquiry.images;
-    }
-    // Priority 4: Check Images property (fallback)
-    else if (enquiry?.Images && Array.isArray(enquiry.Images)) {
-      referenceImages = enquiry.Images;
-    }
-    
-    if (referenceImages.length === 0) {
-      return '';
-    }
-    
-    // Get the first image (or latest if preferred)
-    const firstImage = referenceImages[0];
-    
-    // Handle string format
-    if (typeof firstImage === 'string') {
-      // If it's already a full URL, use it directly
-      if (firstImage.startsWith('http://') || firstImage.startsWith('https://')) {
-        return firstImage;
-      }
-      // If it starts with /, construct full URL
-      if (firstImage.startsWith('/')) {
-        return `${FILE_BASE_URL}${firstImage}`;
-      }
-      // Otherwise, treat as file key and construct URL
-      return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(firstImage)}`;
-    }
-    
-    // Handle object format
-    if (typeof firstImage === 'object' && firstImage !== null) {
-      // Priority 1: Use Key property (most reliable)
-      const imageKey = firstImage.Key || firstImage.key || firstImage.KeyName || firstImage.keyName || '';
-      if (imageKey) {
-        const encodedKey = encodeURIComponent(imageKey);
-        return `${FILE_BASE_URL}/api/enquiries/files/${encodedKey}`;
-      }
-      
-      // Priority 2: Use Id property as fallback
-      const imageId = firstImage.Id || firstImage.id || firstImage._id || firstImage.FileId || firstImage.fileId || '';
-      if (imageId) {
-        return `${FILE_BASE_URL}/api/enquiries/files/${imageId}`;
-      }
-      
-      // Priority 3: Check for URL properties
-      const imageUrl = firstImage.Url || firstImage.url || firstImage.URI || firstImage.uri || 
-                      firstImage.Location || firstImage.location || firstImage.UrlPath || firstImage.urlPath || '';
-      if (imageUrl) {
-        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-          return imageUrl;
-        }
-        if (imageUrl.startsWith('/')) {
-          return `${FILE_BASE_URL}${imageUrl}`;
-        }
-        return `${FILE_BASE_URL}/${imageUrl}`;
+    if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
+      const firstImage = enquiry.images[0];
+      if (typeof firstImage === 'string') return firstImage;
+      if (firstImage?.url || firstImage?.Url || firstImage?.uri) {
+        return firstImage.url || firstImage.Url || firstImage.uri;
       }
     }
-    
     return '';
   };
 
@@ -1265,8 +944,8 @@ export const generateEnquiriesListHTML = async (enquiries) => {
       </tr>
     </thead>
     <tbody>
-      ${await (async () => {
-        // Generate table rows with async image fetching
+      ${(() => {
+        // Generate table rows
         if (!enquiries || enquiries.length === 0) {
           return '<tr><td colspan="13" style="text-align: center; padding: 20px;">No enquiries data available</td></tr>';
         }
@@ -1281,79 +960,6 @@ export const generateEnquiriesListHTML = async (enquiries) => {
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
         };
-        
-        // Get image URLs (S3 URLs) - use them directly instead of converting to base64
-        if (__DEV__) {
-          console.log('🔄 Getting image URLs for PDF...');
-        }
-        
-        const imageUrls = enquiries.map((enquiry, idx) => {
-          const originalData = enquiry?._originalData || {};
-          const normalizedEnquiry = enquiry || {};
-          const imageUrl = getFirstImageUrl(normalizedEnquiry) || getFirstImageUrl(originalData);
-          
-          if (imageUrl) {
-            if (__DEV__) {
-              console.log(`📸 [${idx + 1}/${enquiries.length}] Image URL:`, imageUrl.substring(0, 80));
-            }
-            // Fetch to get S3 URL if API endpoint
-            return imageUrl;
-          } else {
-            if (__DEV__) {
-              console.log(`⚠️ [${idx + 1}/${enquiries.length}] No image URL found`);
-            }
-          }
-          return '';
-        });
-        
-        // Resolve API endpoints to S3 URLs
-        const resolvedImageUrls = await Promise.all(imageUrls.map(async (imageUrl, idx) => {
-          if (!imageUrl) return '';
-          
-          // If it's already an S3 URL, use it directly
-          if (imageUrl.includes('amazonaws.com') || imageUrl.includes('s3.')) {
-            if (__DEV__) {
-              console.log(`✅ [${idx + 1}/${imageUrls.length}] Already S3 URL`);
-            }
-            return imageUrl;
-          }
-          
-          // If it's an API endpoint, fetch to get S3 URL
-          try {
-            const token = await AsyncStorage.getItem('token');
-            const response = await fetch(imageUrl, {
-              method: 'GET',
-              headers: token ? {
-                'Authorization': `Bearer ${token}`,
-              } : {},
-            });
-            
-            if (response.ok) {
-              const contentType = response.headers.get('content-type') || '';
-              if (contentType.includes('application/json')) {
-                const jsonData = await response.json();
-                const s3Url = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
-                if (s3Url) {
-                  if (__DEV__) {
-                    console.log(`✅ [${idx + 1}/${imageUrls.length}] Resolved to S3 URL`);
-                  }
-                  return s3Url;
-                }
-              }
-            }
-          } catch (error) {
-            if (__DEV__) {
-              console.warn(`⚠️ [${idx + 1}/${imageUrls.length}] Failed to resolve URL:`, error.message);
-            }
-          }
-          
-          return imageUrl; // Fallback to original URL
-        }));
-        
-        if (__DEV__) {
-          const successCount = resolvedImageUrls.filter(img => img !== '').length;
-          console.log(`📊 Image URL resolution complete: ${successCount}/${enquiries.length} URLs resolved`);
-        }
         
         let rowsGenerated = 0;
         const rows = enquiries.map((enquiry, index) => {
@@ -1402,11 +1008,9 @@ export const generateEnquiriesListHTML = async (enquiries) => {
             const createdAt = normalizedEnquiry?.createdAt || originalData?.createdAt || originalData?.CreatedDate || '';
             const shippingDate = normalizedEnquiry?.deadline || normalizedEnquiry?.ShippingDate || originalData?.ShippingDate || originalData?.deadline || '';
             
-            const imageUrl = resolvedImageUrls[index] || '';
+            const imageUrl = getFirstImageUrl(normalizedEnquiry) || getFirstImageUrl(originalData);
             const assignedDate = getAssignedDate(normalizedEnquiry) || getAssignedDate(originalData);
-            const assignedToId = normalizedEnquiry?.AssignedTo || originalData?.AssignedTo || normalizedEnquiry?.assignedTo || '';
-            // Resolve user ID to name
-            const assignedToName = assignedToId ? getUserName(assignedToId) : 'N/A';
+            const assignedTo = normalizedEnquiry?.AssignedTo || originalData?.AssignedTo || normalizedEnquiry?.assignedTo || '';
             
             rowsGenerated++;
             
@@ -1422,7 +1026,7 @@ export const generateEnquiriesListHTML = async (enquiries) => {
           <td class="image-cell">
             ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="Enquiry Image" class="enquiry-image" />` : '-'}
           </td>
-          <td>${escapeHtml(assignedToName)}</td>
+          <td>${escapeHtml(assignedTo) || 'N/A'}</td>
           <td>${escapeHtml(assignedDate) || 'N/A'}</td>
           <td>${formatDate(createdAt)}</td>
           <td>
@@ -1472,8 +1076,8 @@ export const generateEnquiriesListHTML = async (enquiries) => {
  */
 export const downloadAllEnquiriesPDF = async (enquiries) => {
   try {
-    // Generate HTML content (now async to fetch images)
-    const htmlContent = await generateEnquiriesListHTML(enquiries);
+    // Generate HTML content
+    const htmlContent = generateEnquiriesListHTML(enquiries);
     
     if (__DEV__) {
       console.log('Generated HTML content length:', htmlContent.length);
