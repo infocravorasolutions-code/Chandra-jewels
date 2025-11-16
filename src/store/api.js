@@ -1773,6 +1773,45 @@ export const api = createApi({
       },
     }),
 
+    // Delete design version (within 10 minutes of upload)
+    deleteDesignVersion: builder.mutation({
+      query: ({ enquiryId, designType, version }) => {
+        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
+        
+        if (__DEV__) {
+          console.log('🗑️ ========== DELETE VERSION API ==========');
+          console.log('🗑️ URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
+          console.log('🗑️ Method: DELETE');
+          console.log('🗑️ =========================================');
+        }
+        
+        return {
+          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
+          method: 'DELETE',
+        };
+      },
+      invalidatesTags: (result, error, { enquiryId }) => [
+        { type: 'Enquiry', id: enquiryId },
+        'Enquiry',
+      ],
+      transformResponse: (response) => {
+        if (__DEV__) {
+          console.log('✅ Version deleted successfully:', response);
+        }
+        return response;
+      },
+      transformErrorResponse: (response) => {
+        if (__DEV__) {
+          console.error('❌ Failed to delete version:', response);
+        }
+        return {
+          status: response.status,
+          data: response.data,
+          error: response.data?.message || response.data?.error || 'Failed to delete version',
+        };
+      },
+    }),
+
     uploadImage: builder.mutation({
       queryFn: async (image, { dispatch }, extraOptions, baseQuery) => {
         // Try multiple possible upload endpoints (including client-specific)
@@ -2563,6 +2602,7 @@ export const {
   useApproveDesignVersionMutation,
   useRejectDesignVersionMutation,
   useUpdateShowToClientMutation,
+  useDeleteDesignVersionMutation,
   
   // Chats
   useGetChatsQuery,

@@ -381,18 +381,18 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     }
     
     return (
-      <View style={styles.dropdownContainer}>
-        <Text style={styles.dropdownLabel}>{label}</Text>
-        <TouchableOpacity
-          style={styles.dropdown}
-          onPress={onToggle}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.dropdownText}>
+    <View style={styles.dropdownContainer}>
+      <Text style={styles.dropdownLabel}>{label}</Text>
+      <TouchableOpacity
+        style={styles.dropdown}
+        onPress={onToggle}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.dropdownText}>
             {displayText}
-          </Text>
-          <IconComponent name="arrow-drop-down" size={24} color={colors.textSecondary} />
-        </TouchableOpacity>
+        </Text>
+        <IconComponent name="arrow-drop-down" size={24} color={colors.textSecondary} />
+      </TouchableOpacity>
 
       <Modal
         visible={isVisible}
@@ -435,7 +435,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         </TouchableOpacity>
       </Modal>
     </View>
-    );
+  );
   };
 
   const handleNext = async () => {
@@ -546,12 +546,12 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   // Create assigned-to options from users (exclude clients by role) - memoized to prevent recreation
   const assignedToOptions = useMemo(() => {
     const options = users
-      .filter(user => {
-        const roleString = String(user.role || '').toLowerCase();
-        return roleString !== 'client';
-      })
-      .map(user => ({
-        label: user.name || user.email || 'Unknown',
+    .filter(user => {
+      const roleString = String(user.role || '').toLowerCase();
+      return roleString !== 'client';
+    })
+    .map(user => ({
+      label: user.name || user.email || 'Unknown',
         value: String(user.id || user._id).trim(), // Ensure value is a string
       }));
     

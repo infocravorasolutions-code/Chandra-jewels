@@ -22,7 +22,7 @@ import { fonts } from '../../constants/fonts';
 import { CustomText } from '../../components/common/Text';
 import { useAuth } from '../../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery, useApproveDesignVersionMutation, useRejectDesignVersionMutation, useUpdateShowToClientMutation } from '../../store/api';
+import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery, useApproveDesignVersionMutation, useRejectDesignVersionMutation, useUpdateShowToClientMutation, useDeleteDesignVersionMutation } from '../../store/api';
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import { API_BASE_URL } from '../../config/apiConfig';
@@ -46,6 +46,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
   const [isSharing, setIsSharing] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [currentTime, setCurrentTime] = useState(new Date()); // For periodic delete button state updates
   
   // API mutation for updating asset description
   const [updateAssetDescription, { isLoading: isUpdatingDescription }] = useUpdateAssetDescriptionMutation();
@@ -54,6 +55,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
   const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
   const [rejectDesignVersion, { isLoading: isRejecting }] = useRejectDesignVersionMutation();
   const [updateShowToClient, { isLoading: isUpdatingShowToClient }] = useUpdateShowToClientMutation();
+  const [deleteDesignVersion, { isLoading: isDeletingVersion }] = useDeleteDesignVersionMutation();
   
   // Check if user is Coral or CAD designer (hide admin features)
   const isDesigner = user?.role === 'coral' || user?.role === 'cad';
@@ -79,6 +81,20 @@ const DesignViewerScreen = ({ route, navigation }) => {
     };
     loadAuthToken();
   }, []);
+
+  // Timer to update delete button state every 30 seconds (to check if 10 minutes passed)
+  useEffect(() => {
+    if (!isDesigner || !selectedDesign) return;
+
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+      if (__DEV__) {
+        console.log('⏰ Timer tick - Updating current time for delete button check');
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [isDesigner, selectedDesign]);
 
   // Fetch image with authentication as fallback (for Android compatibility)
   const fetchImageWithAuth = async () => {
@@ -284,9 +300,22 @@ const DesignViewerScreen = ({ route, navigation }) => {
   
   // Filter versions for clients - only show versions with ShowToClient: true
   if (isClient && Array.isArray(designData)) {
+    const originalLength = designData.length;
     designData = designData.filter(version => 
       version?.ShowToClient === true || version?.showToClient === true || version?.IsVisibleToClient === true || version?.isVisibleToClient === true
     );
+    
+    if (__DEV__) {
+      console.log('🔍 ========== CLIENT VERSION FILTERING ==========');
+      console.log('🔍 Original versions count:', originalLength);
+      console.log('🔍 Filtered versions count:', designData.length);
+      console.log('🔍 Filtered versions:', designData.map(v => ({
+        Version: v?.Version || v?.version,
+        ShowToClient: v?.ShowToClient || v?.showToClient,
+        IsVisibleToClient: v?.IsVisibleToClient || v?.isVisibleToClient
+      })));
+      console.log('🔍 ==============================================');
+    }
   }
 
   // Get selected design version (use versionIndex if provided, otherwise use latest)
@@ -301,6 +330,109 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
   // Get images from selected design
   const images = selectedDesign?.Images || selectedDesign?.images || [];
+  
+  // Helper function to check if version can be deleted (within 10 minutes)
+  const canDeleteVersion = (version) => {
+    if (!version) {
+      if (__DEV__) {
+        console.warn('⚠️ canDeleteVersion: No version provided');
+      }
+      return false;
+    }
+    
+    // Only designers can delete versions
+    if (!isDesigner) {
+      if (__DEV__) {
+        console.log('⚠️ canDeleteVersion: User is not a designer');
+      }
+      return false;
+    }
+    
+    // Get upload timestamp from version
+    // Backend returns: CreatedDate (actual field name)
+    const uploadTime = version?.CreatedDate ||  // ← Backend uses this field
+                       version?.createdDate ||
+                       version?.UploadDate || 
+                       version?.CreatedAt || 
+                       version?.UploadedAt || 
+                       version?.Timestamp ||
+                       version?.uploadDate ||
+                       version?.createdAt ||
+                       version?.uploadedAt ||
+                       version?.timestamp ||
+                       version?.UploadedDate ||
+                       version?.uploadedDate;
+    
+    // Debug: Log all possible timestamp fields
+    if (__DEV__) {
+      console.log('🔍 ========== VERSION TIMESTAMP DEBUG ==========');
+      console.log('🔍 Version Object Keys:', Object.keys(version || {}));
+      console.log('🔍 UploadDate:', version?.UploadDate);
+      console.log('🔍 CreatedAt:', version?.CreatedAt);
+      console.log('🔍 UploadedAt:', version?.UploadedAt);
+      console.log('🔍 Timestamp:', version?.Timestamp);
+      console.log('🔍 uploadDate:', version?.uploadDate);
+      console.log('🔍 createdAt:', version?.createdAt);
+      console.log('🔍 uploadedAt:', version?.uploadedAt);
+      console.log('🔍 timestamp:', version?.timestamp);
+      console.log('🔍 UploadedDate:', version?.UploadedDate);
+      console.log('🔍 CreatedDate:', version?.CreatedDate);  // ← Backend uses this!
+      console.log('🔍 createdDate:', version?.createdDate);
+      console.log('🔍 Full Version Object:', JSON.stringify(version, null, 2));
+      console.log('🔍 ==============================================');
+    }
+    
+    if (!uploadTime) {
+      // If no timestamp, assume it's old (can't delete)
+      if (__DEV__) {
+        console.warn('⚠️ No upload timestamp found for version:', version?.Version || version?.version);
+        console.warn('⚠️ This version cannot be deleted - no timestamp available');
+        console.warn('⚠️ Backend should return UploadDate, CreatedAt, UploadedAt, or Timestamp field');
+      }
+      return false;
+    }
+    
+    // Calculate time difference
+    // Use currentTime state to trigger re-renders when time passes
+    const now = currentTime || new Date();
+    let upload;
+    try {
+      upload = new Date(uploadTime);
+      
+      // Check if date is valid
+      if (isNaN(upload.getTime())) {
+        if (__DEV__) {
+          console.error('❌ Invalid date format:', uploadTime);
+        }
+        return false;
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.error('❌ Error parsing upload time:', error);
+        console.error('❌ Upload time value:', uploadTime);
+      }
+      return false;
+    }
+    
+    const diffMinutes = (now - upload) / (1000 * 60); // Convert to minutes
+    
+    // Can delete if less than or equal to 10 minutes
+    const canDelete = diffMinutes <= 10;
+    
+    if (__DEV__) {
+      console.log('⏰ ========== DELETE VERSION CHECK ==========');
+      console.log('⏰ Version:', version?.Version || version?.version);
+      console.log('⏰ Upload Time (raw):', uploadTime);
+      console.log('⏰ Upload Time (parsed):', upload.toISOString());
+      console.log('⏰ Current Time:', now.toISOString());
+      console.log('⏰ Time Difference:', diffMinutes.toFixed(2), 'minutes');
+      console.log('⏰ Can Delete:', canDelete);
+      console.log('⏰ Is Designer:', isDesigner);
+      console.log('⏰ ==========================================');
+    }
+    
+    return canDelete;
+  };
   
   // Comprehensive debug logging
   useEffect(() => {
@@ -1333,6 +1465,79 @@ const DesignViewerScreen = ({ route, navigation }) => {
     }
   };
 
+  const handleDeleteVersion = async () => {
+    if (!selectedDesign) {
+      Alert.alert('Error', 'No design version selected');
+      return;
+    }
+    
+    const version = selectedDesign?.Version || selectedDesign?.version || `Version ${currentVersionNumber}`;
+    const enquiryId = enquiry?.id || enquiry?._id;
+    
+    if (!enquiryId) {
+      Alert.alert('Error', 'Enquiry ID not found');
+      return;
+    }
+    
+    // Check if can delete (within 10 minutes)
+    if (!canDeleteVersion(selectedDesign)) {
+      Alert.alert(
+        'Cannot Delete',
+        'This version can only be deleted within 10 minutes of upload. The time limit has expired.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    Alert.alert(
+      'Delete Version',
+      `Are you sure you want to delete ${designType.toUpperCase()} ${version}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (__DEV__) {
+                console.log('🗑️ ========== DELETING VERSION ==========');
+                console.log('🗑️ Enquiry ID:', enquiryId);
+                console.log('🗑️ Design Type:', designType);
+                console.log('🗑️ Version:', version);
+                console.log('🗑️ ======================================');
+              }
+              
+              await deleteDesignVersion({
+                enquiryId,
+                designType,
+                version,
+              }).unwrap();
+              
+              Alert.alert('Success', 'Version deleted successfully');
+              
+              // Refetch enquiry data
+              if (enquiryId) {
+                refetchEnquiry();
+              }
+              
+              // Navigate back if no versions left
+              const remainingVersions = designData.filter(v => v !== selectedDesign);
+              if (remainingVersions.length === 0) {
+                navigation.goBack();
+              }
+            } catch (error) {
+              console.error('Error deleting version:', error);
+              Alert.alert(
+                'Error',
+                error?.data?.error || error?.message || 'Failed to delete version. Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleShowToClient = async () => {
     if (!selectedDesign) {
       Alert.alert('Error', 'No design version found');
@@ -1793,21 +1998,67 @@ const DesignViewerScreen = ({ route, navigation }) => {
             // Client view: No action buttons - view only
             null
           ) : isDesigner ? (
-            // Designer view: Only Download buttons
+            // Designer view: Download buttons + Delete Version (within 10 mins)
             <View style={styles.designerActions}>
-              <TouchableOpacity
-                onPress={handleDownloadImage}
-                disabled={isDownloadingImage}
-                style={[styles.actionBtn, styles.downloadBtn, isDownloadingImage && styles.btnDisabled]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.btnContent}>
-                  <Icon name="file-download" size={20} color={colors.textWhite} />
-                  <Text style={styles.btnText}>
-                    {isDownloadingImage ? "Downloading..." : "Download Image"}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+              <View style={styles.actionButtonsRow}>
+                <TouchableOpacity
+                  onPress={handleDownloadImage}
+                  disabled={isDownloadingImage}
+                  style={[styles.actionBtn, styles.actionBtnHalf, styles.downloadBtn, isDownloadingImage && styles.btnDisabled]}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.btnContent}>
+                    <Icon name="file-download" size={18} color={colors.textWhite} />
+                    <Text style={styles.btnText}>
+                      {isDownloadingImage ? "Downloading..." : "Download Image"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                
+                {/* Delete Version Button - Only if within 10 minutes */}
+                {(() => {
+                  const canDelete = canDeleteVersion(selectedDesign);
+                  
+                  if (__DEV__) {
+                    console.log('🔘 ========== DELETE BUTTON RENDER ==========');
+                    console.log('🔘 Selected Design:', selectedDesign?.Version || selectedDesign?.version);
+                    console.log('🔘 Can Delete:', canDelete);
+                    console.log('🔘 Is Designer:', isDesigner);
+                    console.log('🔘 Button will be:', canDelete ? 'ENABLED (Red)' : 'DISABLED (Gray)');
+                    console.log('🔘 ==========================================');
+                  }
+                  
+                  return canDelete ? (
+                    <TouchableOpacity
+                      onPress={handleDeleteVersion}
+                      disabled={isDeletingVersion}
+                      style={[
+                        styles.actionBtn, 
+                        styles.actionBtnHalf, 
+                        styles.deleteBtn,
+                        isDeletingVersion && styles.btnDisabled
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.btnContent}>
+                        <Icon name="delete-outline" size={18} color={colors.textWhite} />
+                        <Text style={styles.btnText}>
+                          {isDeletingVersion ? "Deleting..." : "Delete Version"}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[styles.actionBtn, styles.actionBtnHalf, styles.deleteBtnDisabled]}>
+                      <View style={styles.btnContent}>
+                        <Icon name="delete-outline" size={18} color={colors.textSecondary} />
+                        <Text style={[styles.btnText, { color: colors.textSecondary }]}>
+                          Delete Expired
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()}
+              </View>
               
               <TouchableOpacity
                 onPress={handleDownloadExcel}
@@ -2264,7 +2515,13 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   deleteBtn: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.error || '#EF4444',
+  },
+  deleteBtnDisabled: {
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    opacity: 0.6,
   },
   excelBtn: {
     backgroundColor: colors.primary,

@@ -1279,11 +1279,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         Actions
         </Text>
       
-      <Button
-        title="Edit Enquiry"
-        onPress={handleEditEnquiry}
-        style={[styles.actionButton, styles.editButton]}
-      />
+      {/* Clients cannot edit enquiries - removed Edit Enquiry button */}
+      {/* Clients can only view their enquiries, not edit them */}
 
       {/* Hide enquiry history for clients (role 4) */}
       {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
@@ -1388,19 +1385,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {/* {hasCAD && (
-          <View style={styles.adminActionsRow}>
-            <TouchableOpacity
-              style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
-              activeOpacity={0.85}
-              onPress={handleViewCAD}
-            >
-              <Icon name="precision-manufacturing" size={18} color={colors.textWhite} />
-              <Text style={styles.adminActionText}>View CAD</Text>
-            </TouchableOpacity>
-          </View> */}
-          <></>
-        {/* )} */}
+        {/* Upload Design Buttons for Admin */}
+        <View style={styles.adminActionsRow}>
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+            activeOpacity={0.85}
+            onPress={handleUploadCoral}
+          >
+            <Icon name="cloud-upload" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>Upload Coral</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+            activeOpacity={0.85}
+            onPress={handleUploadCAD}
+          >
+            <Icon name="cloud-upload" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>Upload CAD</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.adminActionsRow}>
           <TouchableOpacity

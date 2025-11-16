@@ -176,7 +176,7 @@ const PricingScreen = ({ route, navigation }) => {
         extraCharges: (existingPricing?.ExtraCharges || existingPricing?.extraCharges || 0).toString(),
         undercutPrice: (existingPricing?.UndercutPrice || existingPricing?.undercutPrice || 0).toString(),
         clientPricingMessage: existingPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
-      };
+        };
       
       if (__DEV__) {
         console.log('📝 Updated Form Data:', updatedFormData);
@@ -213,7 +213,7 @@ const PricingScreen = ({ route, navigation }) => {
       setUndercutEnabled(prev => {
         if (hasUndercut !== prev && __DEV__) {
           console.log('📝 Undercut enabled changed:', prev, '→', hasUndercut);
-        }
+      }
         return hasUndercut;
       });
       

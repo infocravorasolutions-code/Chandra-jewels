@@ -150,8 +150,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         newErrors.clientId = 'Client information is missing. Please contact support.';
       }
     } else {
-      if (!formData.clientId && !formData.clientName.trim()) {
-        newErrors.clientId = 'Client is required';
+    if (!formData.clientId && !formData.clientName.trim()) {
+      newErrors.clientId = 'Client is required';
       }
     }
 
@@ -353,20 +353,20 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
               </View>
             ) : (
               <>
-                {renderDropdown(
-                  'Client*',
-                  formData.clientId,
-                  clientOptions,
-                  (clientId) => {
-                    const selectedClient = clients.find(c => (c.id || c._id) === clientId);
-                    handleInputChange('clientId', clientId);
-                    handleInputChange('clientName', selectedClient?.name || '');
-                  },
-                  showClientDropdown,
-                  () => setShowClientDropdown(!showClientDropdown)
-                )}
-                {errors.clientId && (
-                  <Text style={styles.errorText}>{errors.clientId}</Text>
+            {renderDropdown(
+              'Client*',
+              formData.clientId,
+              clientOptions,
+              (clientId) => {
+                const selectedClient = clients.find(c => (c.id || c._id) === clientId);
+                handleInputChange('clientId', clientId);
+                handleInputChange('clientName', selectedClient?.name || '');
+              },
+              showClientDropdown,
+              () => setShowClientDropdown(!showClientDropdown)
+            )}
+            {errors.clientId && (
+              <Text style={styles.errorText}>{errors.clientId}</Text>
                 )}
               </>
             )}
