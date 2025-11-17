@@ -173,16 +173,87 @@ export const decodeJWT = (token) => {
   }
 };
 
-// Map role number from API to role string
-export const mapRoleNumberToString = (roleNumber) => {
-  const roleMap = {
+// Role cache for dynamic role mapping from API
+let rolesCache = [];
+let rolesMapCache = {};
+
+// Fallback role map (hardcoded for backward compatibility)
+const FALLBACK_ROLE_MAP = {
     1: 'admin',
     2: 'coral',
     3: 'cad',
     4: 'client',
-    // Add more role mappings as needed
-  };
-  return roleMap[roleNumber] || null;
+};
+
+/**
+ * Set roles cache from API response
+ * @param {Array} roles - Array of role objects from API
+ */
+export const setRolesCache = (roles) => {
+  if (!Array.isArray(roles) || roles.length === 0) {
+    if (__DEV__) {
+      console.warn('⚠️ setRolesCache: Invalid roles array provided');
+    }
+    return;
+  }
+
+  rolesCache = roles;
+  
+  // Build map cache: { roleNumber: roleString }
+  rolesMapCache = {};
+  roles.forEach(role => {
+    const roleNumber = role.id || role.Id;
+    const roleCode = (role.code || role.Code || '').toLowerCase();
+    
+    if (roleNumber) {
+      // Map role code to role string
+      let roleString = null;
+      if (roleCode === 'ad') {
+        roleString = 'admin';
+      } else if (roleCode === 'co') {
+        roleString = 'coral';
+      } else if (roleCode === 'cd') {
+        roleString = 'cad';
+      } else if (roleCode === 'cl') {
+        roleString = 'client';
+      }
+      
+      if (roleString) {
+        rolesMapCache[roleNumber] = roleString;
+      }
+    }
+  });
+
+  if (__DEV__) {
+    console.log('✅ Roles cache updated:', {
+      rolesCount: rolesCache.length,
+      mapCache: rolesMapCache,
+    });
+  }
+};
+
+// Map role number from API to role string
+export const mapRoleNumberToString = (roleNumber) => {
+  // First try dynamic cache from API
+  if (rolesMapCache[roleNumber]) {
+    if (__DEV__) {
+      console.log('✅ Using dynamic role from API cache:', rolesMapCache[roleNumber]);
+    }
+    return rolesMapCache[roleNumber];
+  }
+  
+  // Fallback to hardcoded map
+  if (FALLBACK_ROLE_MAP[roleNumber]) {
+    if (__DEV__) {
+      console.log('⚠️ Using fallback role map:', FALLBACK_ROLE_MAP[roleNumber]);
+    }
+    return FALLBACK_ROLE_MAP[roleNumber];
+  }
+  
+  if (__DEV__) {
+    console.warn('⚠️ Unknown role number:', roleNumber);
+  }
+  return null;
 };
 
 /**

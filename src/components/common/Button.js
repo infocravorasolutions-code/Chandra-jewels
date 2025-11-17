@@ -8,14 +8,35 @@ import {
 } from 'react-native';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
+import Icon from './Icon';
 
+/**
+ * Standardized Button Component
+ * 
+ * Provides consistent button sizes, widths, and styles across the app.
+ * 
+ * @param {string} title - Button text
+ * @param {function} onPress - Press handler
+ * @param {string} variant - Button style: 'primary', 'secondary', 'outline', 'danger', 'success', 'ghost'
+ * @param {string} size - Button size: 'small', 'medium', 'large'
+ * @param {string} width - Button width: 'auto', 'full', 'half'
+ * @param {boolean} disabled - Disabled state
+ * @param {boolean} loading - Loading state
+ * @param {string} icon - Icon name (optional)
+ * @param {string} iconPosition - Icon position: 'left', 'right' (default: 'left')
+ * @param {object} style - Additional button styles
+ * @param {object} textStyle - Additional text styles
+ */
 export const Button = ({
   title,
   onPress,
   variant = 'primary',
   size = 'medium',
+  width = 'auto',
   disabled = false,
   loading = false,
+  icon = null,
+  iconPosition = 'left',
   style,
   textStyle,
   ...props
@@ -24,6 +45,7 @@ export const Button = ({
     styles.button,
     styles[variant],
     styles[size],
+    styles[`width_${width}`],
     disabled && styles.disabled,
     style,
   ];
@@ -36,24 +58,56 @@ export const Button = ({
     textStyle,
   ];
 
+  const iconColor = variant === 'primary' || variant === 'danger' || variant === 'success'
+    ? colors.textWhite
+    : variant === 'outline' || variant === 'ghost'
+    ? colors.primary
+    : colors.textWhite;
+
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <ActivityIndicator
+          color={iconColor}
+          size="small"
+        />
+      );
+    }
+
+    const iconElement = icon ? (
+      <Icon 
+        name={icon} 
+        size={size === 'small' ? 16 : size === 'large' ? 24 : 20} 
+        color={iconColor} 
+      />
+    ) : null;
+
+    return (
+      <View style={styles.buttonContent}>
+        {iconPosition === 'left' && iconElement && (
+          <View style={styles.iconLeft}>{iconElement}</View>
+        )}
+        {title && <Text style={buttonTextStyle}>{title}</Text>}
+        {iconPosition === 'right' && iconElement && (
+          <View style={styles.iconRight}>{iconElement}</View>
+        )}
+      </View>
+    );
+  };
+
   return (
     <TouchableOpacity
       style={buttonStyle}
       onPress={onPress}
       disabled={disabled || loading}
+      activeOpacity={0.7}
       {...props}>
-      {loading ? (
-        <ActivityIndicator
-          color={variant === 'primary' ? colors.textWhite : colors.primary}
-          size="small"
-        />
-      ) : (
-        <Text style={buttonTextStyle}>{title}</Text>
-      )}
+      {renderContent()}
     </TouchableOpacity>
   );
 };
 
+// Convenience components for common button types
 export const SecondaryButton = ({ title, onPress, style, ...props }) => (
   <Button
     title={title}
@@ -69,6 +123,26 @@ export const OutlineButton = ({ title, onPress, style, ...props }) => (
     title={title}
     onPress={onPress}
     variant="outline"
+    style={style}
+    {...props}
+  />
+);
+
+export const DangerButton = ({ title, onPress, style, ...props }) => (
+  <Button
+    title={title}
+    onPress={onPress}
+    variant="danger"
+    style={style}
+    {...props}
+  />
+);
+
+export const SuccessButton = ({ title, onPress, style, ...props }) => (
+  <Button
+    title={title}
+    onPress={onPress}
+    variant="success"
     style={style}
     {...props}
   />

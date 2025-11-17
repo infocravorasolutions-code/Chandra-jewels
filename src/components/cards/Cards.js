@@ -7,6 +7,8 @@ import { spacing, responsivePadding, imageSizes } from '../../utils';
 import { formatCount } from '../../utils/helpers';
 import Icon from '../common/Icon';
 import { FILE_BASE_URL, API_BASE_URL } from '../../config/apiConfig';
+import { getCachedImage, cacheImage } from '../../utils/imageCache';
+import { getUserName } from '../../utils/userUtils';
 
 export const Card = ({ children, style, onPress, ...props }) => {
   const CardComponent = onPress ? TouchableOpacity : View;
@@ -21,7 +23,7 @@ export const Card = ({ children, style, onPress, ...props }) => {
   );
 };
 
-export const StatusCard = ({ title, value, icon, color = colors.primary, onPress }) => (
+export const StatusCard = ({ title, value, icon, color = colors.primary, valueColor, onPress }) => (
   <Card style={styles.statusCard} onPress={onPress}>
     <View style={styles.statusCardContent}>
       <View style={styles.statusHeader}>
@@ -32,7 +34,7 @@ export const StatusCard = ({ title, value, icon, color = colors.primary, onPress
           {title}
         </Text>
       </View>
-      <Text style={styles.statusValue}>
+      <Text style={[styles.statusValue, valueColor && { color: valueColor }]}>
         {formatCount(value)}
       </Text>
     </View>
@@ -77,8 +79,11 @@ export const CompactEnquiryCard = ({
   const metalQuality = enquiry.Metal?.Quality || enquiry.metal?.quality || enquiry.metalQuality || '';
   const metalDisplay = metalQuality ? `${metalColor} ${metalQuality}` : metalColor;
   
-  // Get assigned to
-  const assignedTo = enquiry.AssignedTo || enquiry.assignedTo || enquiry.assignedToName || 'Unassigned';
+  // Get assigned to - resolve ID to name if needed
+  const assignedToId = enquiry.AssignedTo || enquiry.assignedTo;
+  const assignedToName = enquiry.assignedToName;
+  // If we have an ID but no name, resolve it using getUserName utility
+  const assignedTo = assignedToName || (assignedToId ? getUserName(assignedToId) : 'Unassigned');
   
   // Get stone type
   const stoneType = enquiry.StoneType || enquiry.stoneType || 'N/A';
@@ -263,7 +268,7 @@ export const CompactEnquiryCard = ({
     }
   }, [enquiry?.id, referenceImageUri, imageDataUri, imageError, imageLoading]);
 
-  // Fetch image with authentication and convert to data URI
+  // Fetch image with authentication and convert to data URI (with caching)
   useEffect(() => {
     // Cleanup: abort any ongoing fetch when component unmounts or URI changes
     return () => {
@@ -303,9 +308,6 @@ export const CompactEnquiryCard = ({
     const signal = fetchAbortController.current.signal;
 
     // Reset state
-    if (__DEV__) {
-      console.log('🔄 Starting image fetch for:', referenceImageUri);
-    }
     setImageError(false);
     setImageLoading(true);
     setImageDataUri(null);
@@ -317,38 +319,59 @@ export const CompactEnquiryCard = ({
       return;
     }
 
-    // Fetch image with authentication
-    const fetchImageWithAuth = async () => {
+    // Check cache first
+    const checkCacheAndFetch = async () => {
       try {
-        const token = await AsyncStorage.getItem('token');
-        if (!token) {
-          if (__DEV__) console.warn('No token available for image fetch');
-          setImageError(true);
+        // Try to get from cache
+        const cachedImage = await getCachedImage(referenceImageUri);
+        
+        if (cachedImage) {
+          if (__DEV__) {
+            console.log('✅ Using cached image for:', referenceImageUri.substring(0, 50));
+          }
+          setImageDataUri(cachedImage);
           setImageLoading(false);
+          setImageError(false);
           return;
         }
 
+        // Cache miss - proceed with fetch
         if (__DEV__) {
-          console.log('🔄 Fetching card image with auth:', referenceImageUri);
+          console.log('🔄 Cache miss, fetching image:', referenceImageUri);
         }
 
-        const response = await fetch(referenceImageUri, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-          signal: signal, // Add abort signal
-        });
+        // Fetch image with authentication
+        const fetchImageWithAuth = async () => {
+          try {
+            const token = await AsyncStorage.getItem('token');
+            if (!token) {
+              if (__DEV__) console.warn('No token available for image fetch');
+              setImageError(true);
+              setImageLoading(false);
+              return;
+            }
 
-        if (response.ok) {
-          const contentType = response.headers.get('content-type') || '';
-          
-          if (__DEV__) {
-            console.log('✅ Image fetch OK, content-type:', contentType);
-          }
+            if (__DEV__) {
+              console.log('🔄 Fetching card image with auth:', referenceImageUri);
+            }
 
-          // Check if response is JSON (API returns a URL object)
-          if (contentType.includes('application/json')) {
+            const response = await fetch(referenceImageUri, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+              },
+              signal: signal, // Add abort signal
+            });
+
+            if (response.ok) {
+              const contentType = response.headers.get('content-type') || '';
+              
+              if (__DEV__) {
+                console.log('✅ Image fetch OK, content-type:', contentType);
+              }
+
+              // Check if response is JSON (API returns a URL object)
+              if (contentType.includes('application/json')) {
             if (__DEV__) {
               console.log('📄 API returned JSON, parsing response...');
             }
@@ -425,6 +448,9 @@ export const CompactEnquiryCard = ({
                 console.log('✅ Using S3/public URL directly (no base64 conversion needed)');
               }
               
+              // Cache the URL
+              await cacheImage(referenceImageUri, actualImageUrl);
+              
               // Use the URL directly - React Native Image can handle it
               setImageDataUri(actualImageUrl);
               setImageLoading(false);
@@ -497,6 +523,9 @@ export const CompactEnquiryCard = ({
               console.log('   - Data URI length:', dataUri.length);
             }
             
+            // Cache the data URI
+            await cacheImage(referenceImageUri, dataUri);
+            
             // Set the image data URI
             setImageDataUri(dataUri);
             setImageLoading(false);
@@ -537,6 +566,9 @@ export const CompactEnquiryCard = ({
               console.log('   - Data URI length:', dataUri.length);
             }
             
+            // Cache the data URI
+            await cacheImage(referenceImageUri, dataUri);
+            
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
@@ -560,12 +592,22 @@ export const CompactEnquiryCard = ({
         if (__DEV__) {
           console.error('Error fetching image:', error);
         }
+            setImageError(true);
+            setImageLoading(false);
+          }
+        };
+
+        fetchImageWithAuth();
+      } catch (error) {
+        if (__DEV__) {
+          console.error('Error in checkCacheAndFetch:', error);
+        }
         setImageError(true);
         setImageLoading(false);
       }
     };
 
-    fetchImageWithAuth();
+    checkCacheAndFetch();
     
     // Cleanup function
     return () => {

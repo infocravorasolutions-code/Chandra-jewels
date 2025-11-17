@@ -2001,19 +2001,19 @@ const DesignViewerScreen = ({ route, navigation }) => {
             // Designer view: Download buttons + Delete Version (within 10 mins)
             <View style={styles.designerActions}>
               <View style={styles.actionButtonsRow}>
-                <TouchableOpacity
-                  onPress={handleDownloadImage}
-                  disabled={isDownloadingImage}
+              <TouchableOpacity
+                onPress={handleDownloadImage}
+                disabled={isDownloadingImage}
                   style={[styles.actionBtn, styles.actionBtnHalf, styles.downloadBtn, isDownloadingImage && styles.btnDisabled]}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.btnContent}>
+                activeOpacity={0.8}
+              >
+                <View style={styles.btnContent}>
                     <Icon name="file-download" size={18} color={colors.textWhite} />
-                    <Text style={styles.btnText}>
-                      {isDownloadingImage ? "Downloading..." : "Download Image"}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                  <Text style={styles.btnText}>
+                    {isDownloadingImage ? "Downloading..." : "Download Image"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
                 
                 {/* Delete Version Button - Only if within 10 minutes */}
                 {(() => {

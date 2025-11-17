@@ -453,35 +453,32 @@ const DashboardScreen = ({ navigation }) => {
         value={dashboardData?.myEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
         icon={<Icon name="assignment" size={20} color={colors.textWhite} />}
         color={colors.primary}
+        valueColor={colors.primary}
         onPress={() => navigation.navigate('Enquiries')}
       />
       <StatusCard
         title="Pending"
         value={dashboardData?.pendingApprovals || dashboardData?.categorizedCounts?.['Pending'] || '0'}
         icon={<Icon name="schedule" size={20} color={colors.textWhite} />}
-        color={colors.warning}
+        color={colors.primary}
+        valueColor={colors.primary}
         onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
       />
       <StatusCard
         title="Approval Pending"
         value={dashboardData?.approvalPending || dashboardData?.categorizedCounts?.['Approval Pending'] || '0'}
         icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
-        color={colors.info || colors.primary}
+        color={colors.primary}
+        valueColor={colors.primary}
         onPress={() => navigation.navigate('Enquiries', { filter: 'approval_pending' })}
       />
       <StatusCard
         title="Completed Orders"
         value={dashboardData?.completedOrders || dashboardData?.categorizedCounts?.['Completed'] || '0'}
         icon={<Icon name="check-circle" size={20} color={colors.textWhite} />}
-        color={colors.success}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
-      />
-      <StatusCard
-        title="Total Spent"
-        value={formatCurrency(dashboardData?.totalSpent || 0)}
-        icon={<Icon name="shopping-cart" size={20} color={colors.textWhite} />}
         color={colors.primary}
-        onPress={() => navigation.navigate('OrderHistory')}
+        valueColor={colors.primary}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
       />
     </View>
   );

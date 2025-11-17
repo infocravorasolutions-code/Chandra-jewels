@@ -72,6 +72,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     pollingInterval: 10000, // ✅ Poll every 10 seconds to get latest updates (when admin changes status)
   });
   
+
   // Watch for status changes and log them
   useEffect(() => {
     if (enquiryData && enquiryId) {
@@ -85,7 +86,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       }
     }
   }, [enquiryData, enquiryId]);
-
+  
   // Log enquiryData changes - reduced logging to prevent performance issues
   useEffect(() => {
     if (__DEV__ && enquiryData && shouldRefresh) {
@@ -281,19 +282,62 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // Get original data for accessing raw API fields
   const originalData = enquiry?._originalData || enquiry;
   
-  // Log originalData for debugging
+  // Log originalData for debugging - Enhanced to show all fields
   useEffect(() => {
-    if (__DEV__) {
-      console.log('========== SingleEnquiryScreen - Original Data ==========');
-      console.log('originalData exists:', !!originalData);
-      console.log('originalData.StoneType:', originalData?.StoneType || originalData?.stoneType);
-      console.log('originalData.StyleNumber:', originalData?.StyleNumber || originalData?.styleNumber);
-      console.log('originalData.GatiOrderNumber:', originalData?.GatiOrderNumber || originalData?.gatiOrderNumber);
-      console.log('originalData.MetalWeight:', originalData?.MetalWeight || originalData?.metalWeight);
-      console.log('originalData.DiamondWeight:', originalData?.DiamondWeight || originalData?.diamondWeight);
+    if (__DEV__ && enquiry) {
+      console.log('========== SingleEnquiryScreen - Field Extraction Debug ==========');
+      console.log('🔍 Enquiry ID:', enquiry?.id || enquiry?._id);
+      console.log('🔍 originalData exists:', !!originalData);
+      console.log('🔍 enquiry keys:', Object.keys(enquiry).slice(0, 30));
+      console.log('🔍 originalData keys:', originalData ? Object.keys(originalData).slice(0, 30) : 'N/A');
+      
+      // Check all possible field locations
+      console.log('🔍 ========== FIELD VALUES CHECK ==========');
+      console.log('🔍 StyleNumber:', {
+        'originalData.StyleNumber': originalData?.StyleNumber,
+        'enquiry.StyleNumber': enquiry?.StyleNumber,
+        'enquiry.styleNumber': enquiry?.styleNumber,
+      });
+      console.log('🔍 GatiOrderNumber:', {
+        'originalData.GatiOrderNumber': originalData?.GatiOrderNumber,
+        'originalData.gatiOrderNumber': originalData?.gatiOrderNumber,
+        'enquiry.GatiOrderNumber': enquiry?.GatiOrderNumber,
+        'enquiry.gatiOrderNumber': enquiry?.gatiOrderNumber,
+        'enquiry._originalData?.GatiOrderNumber': enquiry?._originalData?.GatiOrderNumber,
+        'Type check': typeof (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber),
+        'Is empty string?': (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber) === '',
+        'Is null?': (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber) === null,
+        'Is undefined?': (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber) === undefined,
+      });
+      console.log('🔍 Stamping:', {
+        'originalData.Stamping': originalData?.Stamping,
+        'enquiry.Stamping': enquiry?.Stamping,
+        'enquiry.stamping': enquiry?.stamping,
+      });
+      console.log('🔍 MetalWeight:', {
+        'originalData.MetalWeight': originalData?.MetalWeight,
+        'enquiry.MetalWeight': enquiry?.MetalWeight,
+        'enquiry.metalWeight': enquiry?.metalWeight,
+      });
+      console.log('🔍 DiamondWeight:', {
+        'originalData.DiamondWeight': originalData?.DiamondWeight,
+        'enquiry.DiamondWeight': enquiry?.DiamondWeight,
+        'enquiry.diamondWeight': enquiry?.diamondWeight,
+      });
+      console.log('🔍 Category:', {
+        'originalData.Category': originalData?.Category,
+        'enquiry.Category': enquiry?.Category,
+        'enquiry.category': enquiry?.category,
+      });
+      console.log('🔍 StoneType:', {
+        'originalData.StoneType': originalData?.StoneType,
+        'enquiry.StoneType': enquiry?.StoneType,
+        'enquiry.stoneType': enquiry?.stoneType,
+      });
+      console.log('🔍 =========================================');
       console.log('========================================================');
     }
-  }, [originalData]);
+  }, [enquiry, originalData]);
   
   // Debug: Log enquiry structure to understand data format
   useEffect(() => {
@@ -363,10 +407,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   useFocusEffect(
     React.useCallback(() => {
       // Always refetch when screen comes into focus to get latest updates
-      // This ensures client sees status changes made by admin
-      if (enquiryId) {
+      // This ensures client sees status changes made by admin AND fields added during editing
+      if (enquiryId && refetch) {
         if (__DEV__) {
-          console.log('🔄 useFocusEffect - Screen focused, refetching enquiry:', enquiryId);
+          console.log('🔄 ========== SCREEN FOCUSED - REFETCHING ENQUIRY ==========');
+          console.log('🔄 Enquiry ID:', enquiryId);
+          console.log('🔄 Reason: Screen focused (likely returned from edit screen)');
+          console.log('🔄 ========================================================');
         }
         
         // Use a small delay to ensure navigation is complete
@@ -374,8 +421,14 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           refetch()
             .then((result) => {
               if (__DEV__) {
-                console.log('✅ Refetch completed:', !!result?.data);
-                console.log('✅ Latest status:', result?.data?.status || result?.data?.Status);
+                const data = result?.data;
+                console.log('✅ Refetch completed:', !!data);
+                console.log('✅ Latest status:', data?.status || data?.Status || data?._originalData?.Status);
+                console.log('✅ Latest StyleNumber:', data?.StyleNumber || data?.styleNumber || data?._originalData?.StyleNumber);
+                console.log('✅ Latest GatiOrderNumber:', data?.GatiOrderNumber || data?.gatiOrderNumber || data?._originalData?.GatiOrderNumber);
+                console.log('✅ Latest Stamping:', data?.Stamping || data?.stamping || data?._originalData?.Stamping);
+                console.log('✅ Latest Category:', data?.Category || data?.category || data?._originalData?.Category);
+                console.log('✅ Latest StoneType:', data?.StoneType || data?.stoneType || data?._originalData?.StoneType);
               }
             })
             .catch((error) => {
@@ -618,7 +671,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   };
 
   const renderDetailItem = (icon, label, value, showIfEmpty = false) => {
-    if (!value && !showIfEmpty) return null;
+    // Check if value exists (not null, undefined, or empty string after trim)
+    const hasValue = value !== null && value !== undefined && String(value).trim() !== '';
+    
+    // Only render if value exists OR showIfEmpty is true
+    if (!hasValue && !showIfEmpty) return null;
+    
     return (
       <View style={styles.detailRow}>
         <Icon name={icon} size={16} color={colors.primary} />
@@ -627,7 +685,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             {label}
           </Text>
           <Text style={[styles.detailText, { color: colors.textPrimary, fontSize: 13 }]}>
-            {value || 'N/A'}
+            {hasValue ? value : 'N/A'}
           </Text>
         </View>
       </View>
@@ -635,15 +693,112 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   };
 
   const renderEnquiryDetails = () => {
-    // Extract metal details - prefer originalData first
+    // Debug: Log ALL keys in enquiry and originalData to find Gati Order Number field
+    if (__DEV__) {
+      console.log('🔍 ========== FULL ENQUIRY DATA INSPECTION ==========');
+      console.log('🔍 All enquiry keys:', Object.keys(enquiry || {}));
+      console.log('🔍 All originalData keys:', Object.keys(originalData || {}));
+      
+      // Search for any field containing "gati" or "Gati" (case-insensitive)
+      const enquiryKeys = Object.keys(enquiry || {});
+      const originalDataKeys = Object.keys(originalData || {});
+      const gatiFields = [
+        ...enquiryKeys.filter(k => k.toLowerCase().includes('gati')),
+        ...originalDataKeys.filter(k => k.toLowerCase().includes('gati'))
+      ];
+      console.log('🔍 Fields containing "gati":', gatiFields);
+      
+      // Log actual values
+      gatiFields.forEach(key => {
+        console.log(`🔍 ${key}:`, enquiry?.[key] || originalData?.[key]);
+      });
+      console.log('🔍 ==================================================');
+    }
+    
+    // Extract metal details - check ALL possible locations (originalData, enquiry normalized, enquiry raw)
     const metal = originalData?.Metal || enquiry?.Metal || enquiry?.metal || {};
     const metalColor = metal.Color || metal.color || null;
     const metalQuality = metal.Quality || metal.quality || null;
-    const metalWeight = originalData?.MetalWeight || enquiry?.MetalWeight || enquiry?.metalWeight || {};
-    const diamondWeight = originalData?.DiamondWeight || enquiry?.DiamondWeight || enquiry?.diamondWeight || {};
     
-    // Removed excessive logging from render - causes performance issues
-    // Logging moved to useEffect to avoid blocking render
+    // Extract weights - check ALL possible locations with comprehensive fallback
+    const metalWeight = originalData?.MetalWeight || 
+                       enquiry?.MetalWeight || 
+                       enquiry?.metalWeight || 
+                       originalData?.metalWeight ||
+                       {};
+    const diamondWeight = originalData?.DiamondWeight || 
+                         enquiry?.DiamondWeight || 
+                         enquiry?.diamondWeight || 
+                         originalData?.diamondWeight ||
+                         {};
+    
+    // Extract other fields - comprehensive fallback chain
+    const styleNumber = originalData?.StyleNumber || 
+                       enquiry?.StyleNumber || 
+                       enquiry?.styleNumber ||
+                       originalData?.styleNumber ||
+                       null;
+    // Extract Gati Order Number - check ALL possible locations and variations
+    const gatiOrderNumber = originalData?.GatiOrderNumber || 
+                            originalData?.gatiOrderNumber ||
+                            originalData?.Gati_Order_Number ||
+                            originalData?.gati_order_number ||
+                            enquiry?._originalData?.GatiOrderNumber ||
+                            enquiry?._originalData?.gatiOrderNumber ||
+                            enquiry?.GatiOrderNumber || 
+                            enquiry?.gatiOrderNumber ||
+                            enquiry?.Gati_Order_Number ||
+                            enquiry?.gati_order_number ||
+                            null;
+    
+    // Debug log for Gati Order Number extraction
+    if (__DEV__ && gatiOrderNumber) {
+      console.log('✅ Gati Order Number extracted:', gatiOrderNumber);
+      console.log('✅ Source:', {
+        'from originalData.GatiOrderNumber': !!originalData?.GatiOrderNumber,
+        'from enquiry.GatiOrderNumber': !!enquiry?.GatiOrderNumber,
+        'from enquiry.gatiOrderNumber': !!enquiry?.gatiOrderNumber,
+      });
+    } else if (__DEV__) {
+      console.warn('⚠️ Gati Order Number NOT FOUND in any location');
+      console.warn('⚠️ Checked locations:', {
+        'originalData?.GatiOrderNumber': originalData?.GatiOrderNumber,
+        'originalData?.gatiOrderNumber': originalData?.gatiOrderNumber,
+        'enquiry?.GatiOrderNumber': enquiry?.GatiOrderNumber,
+        'enquiry?.gatiOrderNumber': enquiry?.gatiOrderNumber,
+        'enquiry?._originalData?.GatiOrderNumber': enquiry?._originalData?.GatiOrderNumber,
+      });
+    }
+    const stamping = originalData?.Stamping || 
+                     enquiry?.Stamping || 
+                     enquiry?.stamping ||
+                     originalData?.stamping ||
+                     null;
+    const category = originalData?.Category || 
+                     enquiry?.Category || 
+                     enquiry?.category ||
+                     originalData?.category ||
+                     null;
+    const stoneType = originalData?.StoneType || 
+                      enquiry?.StoneType || 
+                      enquiry?.stoneType ||
+                      originalData?.stoneType ||
+                      null;
+    const quantity = originalData?.Quantity || 
+                     enquiry?.Quantity || 
+                     enquiry?.quantity ||
+                     originalData?.quantity ||
+                     null;
+    const priority = originalData?.Priority || 
+                     enquiry?.Priority || 
+                     enquiry?.priority ||
+                     originalData?.priority ||
+                     null;
+    const shippingDate = originalData?.ShippingDate || 
+                         enquiry?.ShippingDate || 
+                         enquiry?.deadline ||
+                         originalData?.deadline ||
+                         null;
     
     // Format metal weight - only return value if exists, otherwise null (so field won't display)
     let metalWeightText = null;
@@ -668,8 +823,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         diamondWeightText = `From: ${from}${to ? ` To: ${to}` : ''} ct`;
       }
     }
-    
-    // Removed excessive logging from render - causes performance issues
 
     return (
       <>
@@ -697,7 +850,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             {renderDetailItem('person', 'Client', clientName)}
             {renderDetailItem('schedule', 'Created', formatDate(createdAt))}
             {renderDetailItem('update', 'Last Updated', formatDate(updatedAt))}
-            {renderDetailItem('calendar-today', 'Shipping Date', originalData?.ShippingDate || enquiry?.ShippingDate || enquiry?.deadline ? formatDate(originalData?.ShippingDate || enquiry?.ShippingDate || enquiry?.deadline) : 'Not set')}
+            {renderDetailItem('flag', 'Priority', priority)}
+            {renderDetailItem('calendar-today', 'Shipping Date', shippingDate ? formatDate(shippingDate) : null)}
             {/* Budget field removed - not in API response */}
           </View>
         </Card>
@@ -718,11 +872,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             Product Details
           </Text>
           <View style={styles.detailsGrid}>
-            {renderDetailItem('category', 'Category', originalData?.Category || enquiry?.Category || enquiry?.category)}
-            {renderDetailItem('inventory', 'Quantity', originalData?.Quantity || enquiry?.Quantity ? `${originalData?.Quantity || enquiry?.Quantity}` : null)}
-            {renderDetailItem('grain', 'Stone Type', originalData?.StoneType || enquiry?.StoneType || enquiry?.stoneType)}
-            {renderDetailItem('label', 'Style Number', originalData?.StyleNumber || enquiry?.StyleNumber)}
-            {renderDetailItem('receipt', 'Gati Order Number', originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber)}
+            {renderDetailItem('category', 'Category', category)}
+            {renderDetailItem('inventory', 'Quantity', quantity ? `${quantity}` : null)}
+            {renderDetailItem('grain', 'Stone Type', stoneType)}
+            {renderDetailItem('label', 'Style Number', styleNumber)}
+            {renderDetailItem('receipt', 'Gati Order Number', gatiOrderNumber, true)}
           </View>
         </Card>
 
@@ -736,7 +890,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             {renderDetailItem('verified', 'Metal Quality', metalQuality)}
             {renderDetailItem('scale', 'Metal Weight', metalWeightText)}
             {renderDetailItem('grain', 'Diamond Weight', diamondWeightText)}
-            {renderDetailItem('label', 'Stamping', originalData?.Stamping || enquiry?.Stamping || null, true)}
+            {renderDetailItem('label', 'Stamping', stamping)}
           </View>
         </Card>
 
@@ -1386,15 +1540,15 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </View>
 
         {/* Upload Design Buttons for Admin */}
-        <View style={styles.adminActionsRow}>
-          <TouchableOpacity
-            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
-            activeOpacity={0.85}
+          <View style={styles.adminActionsRow}>
+            <TouchableOpacity
+              style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+              activeOpacity={0.85}
             onPress={handleUploadCoral}
-          >
+            >
             <Icon name="cloud-upload" size={18} color={colors.textWhite} />
             <Text style={styles.adminActionText}>Upload Coral</Text>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.adminActionButton, styles.adminActionButtonSecondary]}

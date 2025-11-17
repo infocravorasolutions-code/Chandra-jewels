@@ -1312,8 +1312,11 @@ export const api = createApi({
             console.log('🔍 [DASHBOARD DEBUG] - Completed Enquiries:', completedEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
             console.log('🔍 [DASHBOARD DEBUG] - Total Clients:', totalClients);
             console.log('🔍 [DASHBOARD DEBUG] - Revenue:', revenue);
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', pendingEnquiries + approvalPendingEnquiries + completedEnquiries);
+            const sumOfStatuses = pendingEnquiries + approvalPendingEnquiries + completedEnquiries;
+            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', sumOfStatuses);
+            console.log('🔍 [DASHBOARD DEBUG] - Does sum match Total?', sumOfStatuses === totalEnquiries, '(Total:', totalEnquiries, '| Sum:', sumOfStatuses, ')');
             console.log('🔍 [DASHBOARD DEBUG] - Note: Status counts are from fetched enquiries array, total uses pagination.total if available');
+            console.log('🔍 [DASHBOARD DEBUG] - ⚠️ WARNING: If sum ≠ total, status counts may be incomplete due to pagination');
             console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
@@ -1365,8 +1368,11 @@ export const api = createApi({
             console.log('🔍 [DASHBOARD DEBUG] - Pending:', pendingApprovals, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], '| statusCounts.pending:', statusCounts.pending, '| counted:', pendingCount, ')');
             console.log('🔍 [DASHBOARD DEBUG] - Approval Pending:', approvalPending, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], '| counted:', approvalPendingCount, ')');
             console.log('🔍 [DASHBOARD DEBUG] - Completed Orders:', completedOrders, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, '| counted:', completedCount, ')');
+            const clientSum = pendingApprovals + approvalPending + completedOrders;
             console.log('🔍 [DASHBOARD DEBUG] - Total Spent:', totalSpent);
             console.log('🔍 [DASHBOARD DEBUG] - Enquiries filtered by clientId:', normalizedEnquiries.length);
+            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', clientSum);
+            console.log('🔍 [DASHBOARD DEBUG] - Does sum match My Enquiries?', clientSum === myEnquiries, '(My Enquiries:', myEnquiries, '| Sum:', clientSum, ')');
             console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {

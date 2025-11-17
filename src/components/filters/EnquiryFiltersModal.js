@@ -138,45 +138,68 @@ const EnquiryFiltersModal = ({
   const renderDropdown = (key, options, label) => {
     const isOpen = showDropdown === key;
     const selectedOption = options.find(opt => opt.value === localFilters[key]) || options[0];
+    const isSelected = localFilters[key] !== 'all' && localFilters[key] !== null && localFilters[key] !== undefined;
 
     return (
       <View style={styles.filterField}>
         <Text style={styles.filterLabel}>{label}</Text>
         <TouchableOpacity
-          style={styles.dropdownButton}
+          style={[
+            styles.dropdownButton,
+            isOpen && styles.dropdownButtonOpen,
+            isSelected && styles.dropdownButtonSelected,
+          ]}
           onPress={() => {
             setShowDatePicker(null); // Close any open date picker
             setShowDropdown(isOpen ? null : key);
-          }}>
-          <Text style={styles.dropdownText}>
-            {selectedOption?.label || 'Select...'}
-          </Text>
+          }}
+          activeOpacity={0.7}>
+          <View style={styles.dropdownButtonContent}>
+            {isSelected && (
+              <View style={styles.selectedIndicator} />
+            )}
+            <Text style={[
+              styles.dropdownText,
+              isSelected && styles.dropdownTextSelected,
+            ]}>
+              {selectedOption?.label || 'Select...'}
+            </Text>
+          </View>
           <Icon
             name={isOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
             size={20}
-            color={colors.textSecondary}
+            color={isSelected ? colors.primary : colors.textSecondary}
           />
         </TouchableOpacity>
         {isOpen && (
           <View style={styles.dropdownList}>
             <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
-              {options.map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.dropdownOption,
-                    localFilters[key] === option.value && styles.dropdownOptionActive,
-                  ]}
-                  onPress={() => handleFilterChange(key, option.value)}>
-                  <Text
+              {options.map(option => {
+                const isOptionSelected = localFilters[key] === option.value;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
                     style={[
-                      styles.dropdownOptionText,
-                      localFilters[key] === option.value && styles.dropdownOptionTextActive,
-                    ]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                      styles.dropdownOption,
+                      isOptionSelected && styles.dropdownOptionActive,
+                    ]}
+                    onPress={() => handleFilterChange(key, option.value)}
+                    activeOpacity={0.7}>
+                    {isOptionSelected && (
+                      <View style={styles.checkmarkContainer}>
+                        <Icon name="check" size={16} color={colors.primary} />
+                      </View>
+                    )}
+                    <Text
+                      style={[
+                        styles.dropdownOptionText,
+                        isOptionSelected && styles.dropdownOptionTextActive,
+                      ]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
         )}
@@ -229,16 +252,33 @@ const EnquiryFiltersModal = ({
   const renderDateInput = (dateKey, placeholder) => {
     const isOpen = showDatePicker === dateKey;
     const dateValue = localFilters[dateKey] || '';
+    const hasValue = !!dateValue;
 
     return (
       <View style={styles.dateInputContainer}>
         <TouchableOpacity
-          style={styles.dateInputButton}
-          onPress={() => openDatePicker(dateKey)}>
-          <Text style={[styles.dateInputText, !dateValue && styles.dateInputPlaceholder]}>
+          style={[
+            styles.dateInputButton,
+            isOpen && styles.dateInputButtonOpen,
+            hasValue && styles.dateInputButtonSelected,
+          ]}
+          onPress={() => openDatePicker(dateKey)}
+          activeOpacity={0.7}>
+          {hasValue && (
+            <View style={styles.selectedIndicator} />
+          )}
+          <Text style={[
+            styles.dateInputText,
+            !dateValue && styles.dateInputPlaceholder,
+            hasValue && styles.dateInputTextSelected,
+          ]}>
             {dateValue || placeholder}
           </Text>
-          <Icon name="calendar-today" size={18} color={colors.textSecondary} />
+          <Icon 
+            name="calendar-today" 
+            size={18} 
+            color={hasValue ? colors.primary : colors.textSecondary} 
+          />
         </TouchableOpacity>
         {isOpen && Platform.OS === 'ios' && (
           <Modal
@@ -331,6 +371,28 @@ const EnquiryFiltersModal = ({
     return renderDropdown('assignedTo', assignedToOptions, 'Assigned To');
   };
 
+  // Count active filters for badge
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (localFilters.status !== 'all') count++;
+    if (localFilters.category !== 'all') count++;
+    if (localFilters.priority !== 'all') count++;
+    if (localFilters.clientId !== 'all') count++;
+    if (localFilters.assignedTo !== 'all') count++;
+    if (localFilters.stoneType !== 'all') count++;
+    if (localFilters.metalColor !== 'all') count++;
+    if (localFilters.metalQuality !== 'all') count++;
+    if (localFilters.shippingDateFrom) count++;
+    if (localFilters.shippingDateTo) count++;
+    if (localFilters.assignedDateFrom) count++;
+    if (localFilters.assignedDateTo) count++;
+    if (localFilters.createdDateFrom) count++;
+    if (localFilters.createdDateTo) count++;
+    return count;
+  };
+
+  const activeFiltersCount = getActiveFiltersCount();
+
   return (
     <Modal
       visible={visible}
@@ -338,17 +400,38 @@ const EnquiryFiltersModal = ({
       presentationStyle="pageSheet"
       onRequestClose={onClose}>
       <SafeAreaView style={styles.container} edges={['top']}>
+        {/* Modern Header with Brand Colors */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Filters</Text>
+          <View style={styles.headerLeft}>
+            <View style={styles.headerIconContainer}>
+              <Icon name="tune" size={24} color={colors.primary} />
+            </View>
+            <View>
+              <Text style={styles.headerTitle}>Filters</Text>
+              {activeFiltersCount > 0 && (
+                <Text style={styles.headerSubtitle}>
+                  {activeFiltersCount} {activeFiltersCount === 1 ? 'filter' : 'filters'} active
+                </Text>
+              )}
+            </View>
+          </View>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Icon name="close" size={24} color={colors.textPrimary} />
+            <View style={styles.closeButtonContainer}>
+              <Icon name="close" size={20} color={colors.textPrimary} />
+            </View>
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Basic Filters */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Basic Filters</Text>
+        <ScrollView 
+          style={styles.content} 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.contentContainer}>
+          {/* Basic Filters Card */}
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Icon name="filter-list" size={20} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Basic Filters</Text>
+            </View>
             
             {renderDropdown('status', statusOptions, 'Status')}
             {renderDropdown('category', categoryOptions, 'Category')}
@@ -360,9 +443,12 @@ const EnquiryFiltersModal = ({
             {renderDropdown('metalQuality', metalQualityOptions, 'Metal Quality')}
           </View>
 
-          {/* Date Range Filters */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Date Ranges</Text>
+          {/* Date Range Filters Card */}
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Icon name="calendar-today" size={20} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Date Ranges</Text>
+            </View>
             
             {renderDateRange('shippingDateFrom', 'shippingDateTo', 'Shipping Date')}
             {renderDateRange('assignedDateFrom', 'assignedDateTo', 'Assigned Date')}
@@ -391,94 +477,190 @@ const EnquiryFiltersModal = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.backgroundSecondary,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 20,
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.borderLight,
+    shadowColor: colors.textPrimary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  headerIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primaryLight + '15', // 15% opacity
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   headerTitle: {
-    fontSize: fonts.lg,
+    fontSize: fonts.xl,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
+    letterSpacing: -0.5,
+  },
+  headerSubtitle: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   closeButton: {
     padding: 4,
   },
+  closeButtonContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   content: {
     flex: 1,
-    paddingHorizontal: 20,
   },
-  section: {
-    marginTop: 24,
-    marginBottom: 8,
+  contentContainer: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  sectionCard: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: colors.textPrimary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.primaryLight + '30', // 30% opacity
   },
   sectionTitle: {
     fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    marginBottom: 16,
+    marginLeft: 8,
+    letterSpacing: -0.3,
   },
   filterField: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   filterLabel: {
     fontSize: fonts.sm,
     fontFamily: fonts.medium,
     color: colors.textSecondary,
-    marginBottom: 8,
+    marginBottom: 10,
+    letterSpacing: 0.2,
   },
   dropdownButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: colors.backgroundSecondary,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 48,
+  },
+  dropdownButtonOpen: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight + '08', // 8% opacity
+  },
+  dropdownButtonSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight + '10', // 10% opacity
+  },
+  dropdownButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  selectedIndicator: {
+    width: 4,
+    height: 20,
+    backgroundColor: colors.primary,
+    borderRadius: 2,
+    marginRight: 12,
   },
   dropdownText: {
-    fontSize: fonts.sm,
+    fontSize: fonts.base,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     flex: 1,
   },
+  dropdownTextSelected: {
+    fontFamily: fonts.medium,
+    color: colors.primary,
+  },
   dropdownList: {
     backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    marginTop: 4,
-    maxHeight: 200,
-    elevation: 4,
-    shadowColor: colors.textPrimary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.primaryLight + '30',
+    borderRadius: 10,
+    marginTop: 6,
+    maxHeight: 220,
+    elevation: 8,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    overflow: 'hidden',
   },
   dropdownScroll: {
-    maxHeight: 200,
+    maxHeight: 220,
   },
   dropdownOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
+    minHeight: 48,
   },
   dropdownOptionActive: {
-    backgroundColor: colors.backgroundSecondary,
+    backgroundColor: colors.primaryLight + '10',
+  },
+  checkmarkContainer: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.primaryLight + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   dropdownOptionText: {
-    fontSize: fonts.sm,
+    fontSize: fonts.base,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
+    flex: 1,
   },
   dropdownOptionTextActive: {
     fontFamily: fonts.medium,
@@ -497,17 +679,30 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: colors.backgroundSecondary,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 48,
+  },
+  dateInputButtonOpen: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight + '08',
+  },
+  dateInputButtonSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight + '10',
   },
   dateInputText: {
-    fontSize: fonts.sm,
+    fontSize: fonts.base,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     flex: 1,
+  },
+  dateInputTextSelected: {
+    fontFamily: fonts.medium,
+    color: colors.primary,
   },
   dateInputPlaceholder: {
     color: colors.textLight,
@@ -515,31 +710,39 @@ const styles = StyleSheet.create({
   dateRangeSeparator: {
     fontSize: fonts.sm,
     fontFamily: fonts.medium,
-    color: colors.textSecondary,
-    marginHorizontal: 4,
+    color: colors.primary,
+    marginHorizontal: 8,
+    paddingVertical: 4,
   },
   datePickerModal: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(16, 53, 52, 0.6)', // Brand color with opacity
   },
   datePickerContainer: {
     backgroundColor: colors.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 0,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 0,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 10,
   },
   datePickerHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingVertical: 20,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.primaryLight + '20',
+    backgroundColor: colors.background,
   },
   datePickerCancel: {
-    padding: 4,
+    padding: 8,
+    borderRadius: 8,
   },
   datePickerCancelText: {
     fontSize: fonts.base,
@@ -547,17 +750,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   datePickerTitle: {
-    fontSize: fonts.base,
+    fontSize: fonts.lg,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
+    letterSpacing: -0.3,
   },
   datePickerDone: {
-    padding: 4,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: colors.primaryLight + '15',
   },
   datePickerDoneText: {
     fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.primary,
+    letterSpacing: 0.3,
   },
   datePicker: {
     width: '100%',
