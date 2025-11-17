@@ -675,6 +675,17 @@ const DashboardScreen = ({ navigation }) => {
           {renderRecentActivity()}
         </View>
       </ScrollView>
+
+      {/* Floating Action Button - Add New Enquiry */}
+      {(user?.role === 'admin' || user?.role === 'client') && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => navigation.navigate('AddEnquiryStep1')}
+          activeOpacity={0.8}
+        >
+          <Icon name="add-circle" size={28} color={colors.textWhite} />
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 };
@@ -992,6 +1003,23 @@ const styles = StyleSheet.create({
     color: colors.textLight,
     lineHeight: 16,
     letterSpacing: 0.1,
+  },
+  // Floating Action Button
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 10, // Position above bottom tab bar
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
 });
 

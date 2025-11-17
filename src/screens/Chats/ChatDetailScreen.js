@@ -597,28 +597,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
           <TouchableOpacity 
             style={styles.headerIconButton}
             onPress={() => {
-              // TODO: Add call functionality
-              alert.info('Info', 'Call functionality coming soon');
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="phone" size={20} color={colors.textWhite} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.headerIconButton}
-            onPress={() => {
-              // TODO: Add video call functionality
-              alert.info('Info', 'Video call functionality coming soon');
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="videocam" size={20} color={colors.textWhite} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.headerIconButton}
-            onPress={() => {
               // TODO: Add chat info/options
               alert.info('Chat Info', `Chat: ${title}\nClient: ${clientName}`);
             }}
@@ -671,81 +649,86 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   return (
-    <ImageBackground 
-      source={require('../../assets/images/doodle.png')} 
+    <KeyboardAvoidingView
       style={styles.container}
-      resizeMode="cover"
-    >
-      <View style={styles.backgroundOverlay}>
-        <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
-        {renderChatHeader()}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      enabled={true}>
+      <ImageBackground 
+        source={require('../../assets/images/doodle.png')} 
+        style={styles.backgroundImage}
+        resizeMode="cover"
+      >
+        <View style={styles.backgroundOverlay}>
+          <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
+          {renderChatHeader()}
 
-        <KeyboardAvoidingView
-          style={styles.keyboardContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.messagesContainer}
-            contentContainerStyle={styles.messagesContent}>
-            
-            {loading && enrichedMessages.length === 0 ? (
-              renderEmptyState()
-            ) : !loading && enrichedMessages.length === 0 && !messagesError ? (
-              renderEmptyState()
-            ) : enrichedMessages.length > 0 ? (
-              <>
-                {enrichedMessages.map((message, index) => renderMessage(message, index))}
-                {isTyping && (
-                  <View style={styles.typingIndicator}>
-                    <Text style={styles.typingText}>Someone is typing...</Text>
-                  </View>
-                )}
-              </>
-            ) : (
-              renderEmptyState()
-            )}
-          </ScrollView>
-
-          <View style={styles.inputContainer}>
-            <View style={styles.inputWrapper}>
-              <TouchableOpacity 
-                style={styles.attachButton}
-                onPress={handleAttachFile}
-                disabled={isUploading}>
-                <Icon 
-                  name={isUploading ? "hourglass-empty" : "attach-file"} 
-                  size={20} 
-                  color={isUploading ? colors.textLight : colors.textSecondary} 
-                />
-              </TouchableOpacity>
+          <View style={styles.keyboardContainer}>
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.messagesContainer}
+              contentContainerStyle={styles.messagesContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              onContentSizeChange={() => scrollToBottom()}>
               
-              <View style={styles.textInputContainer}>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Type a message..."
-                  placeholderTextColor={colors.textLight}
-                  value={newMessage}
-                  onChangeText={handleTyping}
-                  multiline
-                  maxLength={500}
-                />
-              </View>
-              
-              {newMessage.trim() ? (
-                <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
-                  <Icon name="send" size={20} color={colors.textWhite} />
-                </TouchableOpacity>
+              {loading && enrichedMessages.length === 0 ? (
+                renderEmptyState()
+              ) : !loading && enrichedMessages.length === 0 && !messagesError ? (
+                renderEmptyState()
+              ) : enrichedMessages.length > 0 ? (
+                <>
+                  {enrichedMessages.map((message, index) => renderMessage(message, index))}
+                  {isTyping && (
+                    <View style={styles.typingIndicator}>
+                      <Text style={styles.typingText}>Someone is typing...</Text>
+                    </View>
+                  )}
+                </>
               ) : (
-                <TouchableOpacity style={styles.micButton}>
-                  <Icon name="mic" size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
+                renderEmptyState()
               )}
+            </ScrollView>
+
+            <View style={styles.inputContainer}>
+              <View style={styles.inputWrapper}>
+                <TouchableOpacity 
+                  style={styles.attachButton}
+                  onPress={handleAttachFile}
+                  disabled={isUploading}>
+                  <Icon 
+                    name={isUploading ? "hourglass-empty" : "attach-file"} 
+                    size={20} 
+                    color={isUploading ? colors.textLight : colors.textSecondary} 
+                  />
+                </TouchableOpacity>
+                
+                <View style={styles.textInputContainer}>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Type a message..."
+                    placeholderTextColor={colors.textLight}
+                    value={newMessage}
+                    onChangeText={handleTyping}
+                    multiline
+                    maxLength={500}
+                  />
+                </View>
+                
+                {newMessage.trim() ? (
+                  <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
+                    <Icon name="send" size={20} color={colors.textWhite} />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={styles.micButton}>
+                    <Icon name="mic" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </View>
-        </KeyboardAvoidingView>
-      </View>
+        </View>
+      </ImageBackground>
 
       {/* Custom Media Selection Modal */}
       <Modal
@@ -828,7 +811,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
           </View>
         </TouchableOpacity>
       </Modal>
-    </ImageBackground>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -836,6 +819,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundSecondary,
+  },
+  backgroundImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   backgroundOverlay: {
     flex: 1,

@@ -18,7 +18,7 @@ export const USE_CUSTOM_URL = false;
 
 // Use physical device IP instead of emulator localhost
 // Set to true if testing on physical Android device
-export const USE_PHYSICAL_DEVICE = true;
+export const USE_PHYSICAL_DEVICE = false;
 
 // Custom IP address for physical device (only used if USE_PHYSICAL_DEVICE is true)
 export const PHYSICAL_DEVICE_IP = '192.168.0.76'; // Change to your computer's IP

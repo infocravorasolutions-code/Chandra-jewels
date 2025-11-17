@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/cards/Cards';
 import { Input } from '../../components/common';
 import { CustomText, Heading } from '../../components/common/Text';
@@ -17,7 +18,7 @@ import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatCurrency } from '../../utils/helpers';
-import { useGetMetalPricesQuery, useCalculatePricingMutation } from '../../store/api';
+import { useGetMetalPricesQuery, useCalculatePricingMutation, useSavePricingMutation, useGetEnquiryByIdQuery } from '../../store/api';
 import { API_BASE_URL } from '../../config/apiConfig';
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
@@ -25,23 +26,79 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as XLSX from 'xlsx';
 
 const PricingScreen = ({ route, navigation }) => {
-  const { enquiry, designType } = route.params || {}; // designType: 'coral' or 'cad'
+  const { enquiry: routeEnquiry, designType, enquiryId } = route.params || {}; // designType: 'coral' or 'cad'
+  
+  // Get enquiry ID
+  const finalEnquiryId = enquiryId || routeEnquiry?.id || routeEnquiry?._id;
+  
+  // Fetch fresh enquiry data - this will refetch when cache is invalidated
+  const { data: fetchedEnquiry, refetch: refetchEnquiry, isLoading: isLoadingEnquiry } = useGetEnquiryByIdQuery(finalEnquiryId, {
+    skip: !finalEnquiryId,
+    refetchOnFocus: true, // Refetch when screen comes into focus
+    refetchOnMountOrArgChange: true, // Refetch when enquiryId changes
+  });
+  
+  // Use fetched enquiry if available, otherwise fall back to route params
+  const enquiry = fetchedEnquiry || routeEnquiry;
   const originalData = enquiry?._originalData || enquiry;
 
-  // Get design data
-  const designData = designType === 'coral' 
+  // Memoize design data to ensure it updates when enquiry changes
+  const designData = useMemo(() => {
+    return designType === 'coral' 
     ? (originalData?.Coral || enquiry?.Coral || [])
     : (originalData?.Cad || enquiry?.Cad || []);
+  }, [designType, originalData, enquiry]);
   
-  const latestDesign = designData && designData.length > 0 
+  // Memoize latest design to ensure it updates when designData changes
+  const latestDesign = useMemo(() => {
+    return designData && designData.length > 0 
     ? designData[designData.length - 1] 
     : null;
+  }, [designData]);
   
-  // Handle Pricing as both array and object formats
-  const rawPricing = latestDesign?.Pricing || latestDesign?.pricing || {};
-  const existingPricing = Array.isArray(rawPricing) && rawPricing.length > 0 
+  // Memoize pricing extraction to ensure it updates when latestDesign changes
+  const rawPricing = useMemo(() => {
+    return latestDesign?.Pricing || latestDesign?.pricing || {};
+  }, [latestDesign]);
+  
+  const existingPricing = useMemo(() => {
+    return Array.isArray(rawPricing) && rawPricing.length > 0 
     ? rawPricing[rawPricing.length - 1] // Get the latest pricing if it's an array
     : rawPricing; // Use as-is if it's an object
+  }, [rawPricing]);
+  
+  // Debug logging when enquiry data changes
+  useEffect(() => {
+    if (__DEV__ && enquiry) {
+      console.log('🔄 ========== PRICING SCREEN DATA UPDATE ==========');
+      console.log('🔄 Enquiry ID:', enquiry?.id || enquiry?._id);
+      console.log('🔄 Has fetchedEnquiry:', !!fetchedEnquiry);
+      console.log('🔄 Design Type:', designType);
+      console.log('🔄 Enquiry has Coral:', !!enquiry?.Coral, 'Length:', enquiry?.Coral?.length || 0);
+      console.log('🔄 Enquiry has Cad:', !!enquiry?.Cad, 'Length:', enquiry?.Cad?.length || 0);
+      console.log('🔄 OriginalData has Coral:', !!originalData?.Coral, 'Length:', originalData?.Coral?.length || 0);
+      console.log('🔄 OriginalData has Cad:', !!originalData?.Cad, 'Length:', originalData?.Cad?.length || 0);
+      console.log('🔄 Design Data Length:', designData?.length || 0);
+      console.log('🔄 Latest Design:', latestDesign ? 'Found' : 'Not Found');
+      if (latestDesign) {
+        console.log('🔄 Latest Design Version:', latestDesign?.Version || latestDesign?.version);
+        console.log('🔄 Latest Design has Pricing:', !!latestDesign?.Pricing || !!latestDesign?.pricing);
+        console.log('🔄 Latest Design Pricing Type:', Array.isArray(latestDesign?.Pricing || latestDesign?.pricing) ? 'Array' : typeof (latestDesign?.Pricing || latestDesign?.pricing));
+      }
+      console.log('🔄 Raw Pricing Type:', Array.isArray(rawPricing) ? 'Array' : typeof rawPricing);
+      console.log('🔄 Raw Pricing:', rawPricing);
+      console.log('🔄 Existing Pricing:', existingPricing);
+      if (existingPricing && typeof existingPricing === 'object') {
+        console.log('🔄 Pricing Keys:', Object.keys(existingPricing));
+        console.log('🔄 MetalPrice:', existingPricing?.MetalPrice);
+        console.log('🔄 DiamondsPrice:', existingPricing?.DiamondsPrice);
+        console.log('🔄 TotalPrice:', existingPricing?.TotalPrice);
+        console.log('🔄 Metal Weight:', existingPricing?.Metal?.Weight);
+        console.log('🔄 Stones Count:', existingPricing?.Stones?.length || 0);
+      }
+      console.log('🔄 ================================================');
+    }
+  }, [enquiry, fetchedEnquiry, designType, designData, latestDesign, rawPricing, existingPricing, originalData]);
 
   // Form state - initialize with existing pricing data
   const [formData, setFormData] = useState({
@@ -82,58 +139,93 @@ const PricingScreen = ({ route, navigation }) => {
     return normalizeStones(rawStones);
   });
 
-  // Update form data when enquiry or design data changes
+  // Refetch enquiry data when screen comes into focus (after saving)
+  useFocusEffect(
+    React.useCallback(() => {
+      if (finalEnquiryId) {
+        if (__DEV__) {
+          console.log('🔄 PricingScreen focused - refetching enquiry:', finalEnquiryId);
+        }
+        // Refetch enquiry data to get latest pricing
+        refetchEnquiry();
+      }
+    }, [finalEnquiryId, refetchEnquiry])
+  );
+
+  // Update form data when pricing data changes
   useEffect(() => {
-    if (latestDesign) {
-      // Re-extract pricing in case it changed (handle array format)
-      const rawPricing = latestDesign?.Pricing || latestDesign?.pricing || {};
-      const currentPricing = Array.isArray(rawPricing) && rawPricing.length > 0 
-        ? rawPricing[rawPricing.length - 1]
-        : rawPricing;
+    if (existingPricing && typeof existingPricing === 'object' && Object.keys(existingPricing).length > 0) {
+      if (__DEV__) {
+        console.log('📝 ========== UPDATING FORM DATA ==========');
+        console.log('📝 Existing Pricing:', existingPricing);
+        console.log('📝 MetalPrice:', existingPricing?.MetalPrice);
+        console.log('📝 DiamondsPrice:', existingPricing?.DiamondsPrice);
+        console.log('📝 TotalPrice:', existingPricing?.TotalPrice);
+      }
       
-      if (currentPricing && typeof currentPricing === 'object') {
         const updatedFormData = {
-          metalPrice: (currentPricing?.MetalPrice || currentPricing?.metalPrice || 0).toString(),
-          diamondPrice: (currentPricing?.DiamondPrice || currentPricing?.DiamondsPrice || currentPricing?.diamondPrice || 0).toString(),
-          totalPrice: (currentPricing?.TotalPrice || currentPricing?.totalPrice || 0).toString(),
-          metalWeight: (currentPricing?.MetalWeight || currentPricing?.metalWeight || 0).toString(),
-          diamondWeight: (currentPricing?.DiamondWeight || currentPricing?.diamondWeight || 0).toString(),
-          totalPieces: (currentPricing?.TotalPieces || currentPricing?.totalPieces || 0).toString(),
-          lossPercent: (currentPricing?.LossPercent || currentPricing?.lossPercent || currentPricing?.Loss || 0).toString(),
-          labour: (currentPricing?.Labour || currentPricing?.labour || 0).toString(),
-          duties: (currentPricing?.Duties || currentPricing?.duties || 0).toString(),
-          extraCharges: (currentPricing?.ExtraCharges || currentPricing?.extraCharges || 0).toString(),
-          undercutPrice: (currentPricing?.UndercutPrice || currentPricing?.undercutPrice || 0).toString(),
-          clientPricingMessage: currentPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
+        metalPrice: (existingPricing?.MetalPrice || existingPricing?.metalPrice || 0).toString(),
+        diamondPrice: (existingPricing?.DiamondPrice || existingPricing?.DiamondsPrice || existingPricing?.diamondPrice || 0).toString(),
+        totalPrice: (existingPricing?.TotalPrice || existingPricing?.totalPrice || 0).toString(),
+        metalWeight: (existingPricing?.Metal?.Weight || existingPricing?.MetalWeight || existingPricing?.metalWeight || 0).toString(),
+        diamondWeight: (existingPricing?.DiamondWeight || existingPricing?.diamondWeight || 0).toString(),
+        totalPieces: (existingPricing?.TotalPieces || existingPricing?.totalPieces || 0).toString(),
+        lossPercent: (existingPricing?.LossPercent || existingPricing?.lossPercent || existingPricing?.Loss || 0).toString(),
+        labour: (existingPricing?.Labour || existingPricing?.labour || 0).toString(),
+        duties: (existingPricing?.Duties || existingPricing?.duties || 0).toString(),
+        extraCharges: (existingPricing?.ExtraCharges || existingPricing?.extraCharges || 0).toString(),
+        undercutPrice: (existingPricing?.UndercutPrice || existingPricing?.undercutPrice || 0).toString(),
+        clientPricingMessage: existingPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
         };
+      
+      if (__DEV__) {
+        console.log('📝 Updated Form Data:', updatedFormData);
+      }
         
         setFormData(prevFormData => {
-          // Only update if values have changed to avoid unnecessary re-renders
+        // Always update to ensure latest data is shown
           const hasChanges = Object.keys(updatedFormData).some(
             key => updatedFormData[key] !== prevFormData[key]
           );
+        
+        if (__DEV__ && hasChanges) {
+          console.log('📝 Form data has changes, updating...');
+        }
           
           return hasChanges ? updatedFormData : prevFormData;
         });
         
         // Update stones if they exist - normalize field names
-        const rawStones = currentPricing?.Stones || currentPricing?.stones || latestDesign?.Stones || latestDesign?.stones || [];
+      const rawStones = existingPricing?.Stones || existingPricing?.stones || latestDesign?.Stones || latestDesign?.stones || [];
         const updatedStones = normalizeStones(rawStones);
         if (updatedStones.length > 0) {
           setStones(prevStones => {
-            if (JSON.stringify(updatedStones) !== JSON.stringify(prevStones)) {
-              return updatedStones;
+          const stonesChanged = JSON.stringify(updatedStones) !== JSON.stringify(prevStones);
+          if (__DEV__ && stonesChanged) {
+            console.log('📝 Stones updated:', updatedStones.length, 'stones');
             }
-            return prevStones;
+          return stonesChanged ? updatedStones : prevStones;
           });
         }
         
         // Update undercut enabled
-        const hasUndercut = !!(currentPricing?.UndercutPrice || currentPricing?.undercutPrice);
-        setUndercutEnabled(prev => hasUndercut !== prev ? hasUndercut : prev);
+      const hasUndercut = !!(existingPricing?.UndercutPrice || existingPricing?.undercutPrice);
+      setUndercutEnabled(prev => {
+        if (hasUndercut !== prev && __DEV__) {
+          console.log('📝 Undercut enabled changed:', prev, '→', hasUndercut);
       }
+        return hasUndercut;
+      });
+      
+      if (__DEV__) {
+        console.log('📝 ==========================================');
+      }
+    } else if (__DEV__) {
+      console.log('⚠️ No pricing data found to update form');
+      console.log('⚠️ existingPricing:', existingPricing);
+      console.log('⚠️ latestDesign:', latestDesign);
     }
-  }, [latestDesign]);
+  }, [existingPricing, latestDesign]);
 
   // Fetch latest metal prices - API is called automatically when component mounts
   const { data: metalPricesData, isLoading: loadingMetalPrices, refetch: refetchMetalPrices } = useGetMetalPricesQuery(false);
@@ -141,6 +233,9 @@ const PricingScreen = ({ route, navigation }) => {
   
   // Pricing calculation mutation
   const [calculatePricing, { isLoading: isCalculating }] = useCalculatePricingMutation();
+  
+  // Save pricing mutation
+  const [savePricing, { isLoading: isSaving }] = useSavePricingMutation();
   
   // Determine metal type from enquiry (default to gold)
   const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
@@ -153,8 +248,9 @@ const PricingScreen = ({ route, navigation }) => {
   const apiMetalRate = metalPrices[metalType]?.price || 0;
   
   // Metal Rate considered for quotation - use existing pricing data if available, otherwise use API rate
+  // Priority: Metal.Rate from existing pricing > MetalRateConsidered > API rate
   const [metalRateConsidered, setMetalRateConsidered] = useState(
-    existingPricing?.MetalRateConsidered || 0
+    existingPricing?.Metal?.Rate || existingPricing?.MetalRate || existingPricing?.MetalRateConsidered || 0
   );
   
   // Latest Metal Rate - always from current API call
@@ -165,12 +261,17 @@ const PricingScreen = ({ route, navigation }) => {
     refetchMetalPrices();
   }, [refetchMetalPrices]);
   
-  // Update metalRateConsidered from API if it's not set from existing pricing
+  // Update metalRateConsidered from existing pricing or API if not set
   useEffect(() => {
-    if (apiMetalRate > 0 && !existingPricing?.MetalRateConsidered) {
+    // First, try to get from existing pricing
+    const rateFromPricing = existingPricing?.Metal?.Rate || existingPricing?.MetalRate || existingPricing?.MetalRateConsidered;
+    if (rateFromPricing && rateFromPricing > 0) {
+      setMetalRateConsidered(rateFromPricing);
+    } else if (apiMetalRate > 0) {
+      // Fallback to API rate if no existing pricing rate
       setMetalRateConsidered(apiMetalRate);
     }
-  }, [apiMetalRate, existingPricing?.MetalRateConsidered]);
+  }, [apiMetalRate, existingPricing?.Metal?.Rate, existingPricing?.MetalRate, existingPricing?.MetalRateConsidered]);
 
   // Debug: Log pricing data structure (after all useState hooks)
   useEffect(() => {
@@ -800,9 +901,158 @@ const PricingScreen = ({ route, navigation }) => {
     );
   };
 
-  const handleSave = () => {
-    // TODO: Implement save functionality
-    Alert.alert('Info', 'Save functionality will be implemented');
+  const handleSave = async () => {
+    try {
+      // Get enquiry ID
+      const enquiryId = enquiry?.id || enquiry?._id;
+      if (!enquiryId) {
+        Alert.alert('Error', 'Enquiry ID is missing');
+        return;
+      }
+
+      // Get version from latest design - ensure it's in "Version X" format
+      let version = latestDesign?.Version || latestDesign?.version || 'Version 1';
+      // If version is just a number, convert it to "Version X" format
+      if (typeof version === 'number' || (typeof version === 'string' && /^\d+$/.test(version.trim()))) {
+        version = `Version ${version}`;
+      } else if (typeof version === 'string' && !version.toLowerCase().startsWith('version')) {
+        // If it's a string but doesn't start with "Version", add it
+        version = `Version ${version}`;
+      }
+      
+      // Get metal details from enquiry
+      const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
+      const metalQuality = originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '14K';
+      
+      // Get metal rate - prioritize existing pricing rate, then metalRateConsidered, then calculate
+      const metalWeight = parseFloat(formData.metalWeight) || 0;
+      const metalPrice = parseFloat(formData.metalPrice) || 0;
+      
+      // Try to get rate from existing pricing first
+      let metalRate = existingPricing?.Metal?.Rate || existingPricing?.MetalRate || 0;
+      
+      // If not found, use metalRateConsidered (from form state)
+      if (!metalRate || metalRate === 0) {
+        metalRate = parseFloat(metalRateConsidered) || 0;
+      }
+      
+      // If still not found, calculate from price/weight (fallback)
+      if (!metalRate || metalRate === 0) {
+        metalRate = metalWeight > 0 ? metalPrice / metalWeight : 0;
+      }
+      
+      if (__DEV__) {
+        console.log('💰 Metal Rate Calculation:', {
+          fromExistingPricing: existingPricing?.Metal?.Rate || existingPricing?.MetalRate,
+          fromMetalRateConsidered: metalRateConsidered,
+          calculated: metalWeight > 0 ? metalPrice / metalWeight : 0,
+          finalRate: metalRate,
+        });
+      }
+      
+      // Format stones data according to API structure
+      const formattedStones = stones.map(stone => ({
+        Type: stone.Type || '',
+        Color: stone.Color || '',
+        Shape: stone.Shape || '',
+        MmSize: stone.MM || '',
+        SieveSize: stone.Sieve || '',
+        CtWeight: parseFloat(stone.CaratWeight) || 0,
+        Weight: parseFloat(stone.Weight) || 0,
+        Pcs: parseInt(stone.Pieces) || 0,
+        Price: parseFloat(stone.Price) || 0,
+      }));
+
+      // Build pricing object according to API structure
+      const pricingObject = {
+        MetalPrice: parseFloat(formData.metalPrice) || 0,
+        DiamondsPrice: parseFloat(formData.diamondPrice) || 0,
+        TotalPrice: parseFloat(formData.totalPrice) || 0,
+        DiamondWeight: parseFloat(formData.diamondWeight) || 0,
+        TotalPieces: parseInt(formData.totalPieces) || 0,
+        Metal: {
+          Weight: parseFloat(formData.metalWeight) || 0,
+          Quality: metalQuality,
+          Rate: metalRate,
+        },
+        ExtraCharges: parseFloat(formData.extraCharges) || 0,
+        Duties: parseFloat(formData.duties) || 0,
+        Loss: parseFloat(formData.lossPercent) || 0,
+        Labour: parseFloat(formData.labour) || 0,
+        UndercutPrice: undercutEnabled ? (parseFloat(formData.undercutPrice) || 0) : 0,
+        Stones: formattedStones,
+        ClientPricingMessage: formData.clientPricingMessage || '',
+      };
+
+      // API expects an array of pricing objects
+      // For now, we'll send a single pricing object in an array
+      // If there are multiple pricing sets (regular + client), they can be added later
+      const pricingArray = [pricingObject];
+
+      if (__DEV__) {
+        console.log('💾 ========== SAVE PRICING ==========');
+        console.log('Enquiry ID:', enquiryId);
+        console.log('Design Type:', designType);
+        console.log('Version (formatted):', version);
+        console.log('Version (raw from design):', latestDesign?.Version || latestDesign?.version);
+        console.log('Metal Details:', {
+          Color: metalColor,
+          Quality: metalQuality,
+          Weight: formData.metalWeight,
+          Rate: metalRate,
+          Price: formData.metalPrice,
+        });
+        console.log('Pricing Object Structure:', {
+          MetalPrice: pricingObject.MetalPrice,
+          DiamondsPrice: pricingObject.DiamondsPrice,
+          TotalPrice: pricingObject.TotalPrice,
+          Metal: pricingObject.Metal,
+          StonesCount: pricingObject.Stones?.length || 0,
+        });
+        console.log('Full Pricing Data:', JSON.stringify(pricingArray, null, 2));
+        console.log('===================================');
+      }
+
+      // Call API to save pricing
+      await savePricing({
+        enquiryId,
+        designType,
+        version,
+        pricingData: pricingArray,
+      }).unwrap();
+
+      // Refetch enquiry data to get updated pricing before navigating back
+      if (finalEnquiryId) {
+        await refetchEnquiry();
+      }
+      
+      Alert.alert(
+        'Success',
+        'Pricing saved successfully',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back - data will be fresh when user returns
+              navigation.goBack();
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('❌ Error saving pricing:', error);
+      
+      let errorMessage = 'Failed to save pricing. Please try again.';
+      if (error?.data?.message) {
+        errorMessage = error.data.message;
+      } else if (error?.data?.error) {
+        errorMessage = error.data.error;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      Alert.alert('Save Failed', errorMessage);
+    }
   };
 
   const handleDownloadExcel = () => {
@@ -1422,12 +1672,13 @@ const PricingScreen = ({ route, navigation }) => {
             <View style={styles.actionButtonsRow}>
               <TouchableOpacity
             onPress={handleSave}
-                style={[styles.actionBtn, styles.actionBtnHalf, styles.saveBtn]}
+                disabled={isSaving}
+                style={[styles.actionBtn, styles.actionBtnHalf, styles.saveBtn, isSaving && styles.btnDisabled]}
                 activeOpacity={0.8}
               >
                 <View style={styles.btnContent}>
                   <Icon name="save" size={18} color={colors.textWhite} />
-                  <Text style={styles.btnText}>Save</Text>
+                  <Text style={styles.btnText}>{isSaving ? 'Saving...' : 'Save'}</Text>
                 </View>
               </TouchableOpacity>
               
