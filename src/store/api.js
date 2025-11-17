@@ -1,7 +1,7 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodeJWT, mapRoleNumberToString, setRolesCache } from '../utils/helpers';
+import { decodeJWT, mapRoleNumberToString } from '../utils/helpers';
 import { API_BASE_URL } from '../config/apiConfig';
 
 // Base query with auth token injection
@@ -39,50 +39,10 @@ export const api = createApi({
     'Chat',
     'Message',
     'StatusStatistics',
-    'Roles',
   ],
   // Prevent memory buildup by removing unused data after 60 seconds
   keepUnusedDataFor: 60,
   endpoints: (builder) => ({
-    // ==================== CODE LISTS ====================
-    getRoles: builder.query({
-      query: () => '/api/codelists/Roles',
-      providesTags: ['Roles'],
-      transformResponse: (data) => {
-        let roles = [];
-        
-        // Handle array response
-        if (Array.isArray(data)) {
-          roles = data.map(role => ({
-            id: role.Id || role.id,
-            code: role.Code || role.code,
-            name: role.Name || role.name,
-          }));
-        }
-        // Handle object response with data property
-        else if (data?.data && Array.isArray(data.data)) {
-          roles = data.data.map(role => ({
-            id: role.Id || role.id,
-            code: role.Code || role.code,
-            name: role.Name || role.name,
-          }));
-        }
-        
-        // Update cache for role mapping
-        if (roles.length > 0) {
-          console.log('📥 ========== ROLES API RESPONSE RECEIVED ==========');
-          console.log('📥 Roles count:', roles.length);
-          console.log('📥 Raw roles data:', roles);
-          setRolesCache(roles);
-          console.log('📥 ================================================');
-        } else {
-          console.warn('⚠️ Roles API returned empty array');
-        }
-        
-        return roles;
-      },
-    }),
-
     // ==================== AUTH ====================
     login: builder.mutation({
       query: ({ email, password }) => {
@@ -150,30 +110,22 @@ export const api = createApi({
           
           // Try different case variations for role
           const roleNumber = decodedToken.Role || decodedToken.role || decodedToken.RoleNumber || decodedToken.roleNumber;
-          console.log('🔐 ========== LOGIN - ROLE EXTRACTION ==========');
-          console.log('🔐 Extracted role number from token:', roleNumber);
-          console.log('🔐 Token fields:', Object.keys(decodedToken));
+          if (__DEV__) {
+            console.log('Extracted role number:', roleNumber);
+          }
           
           if (roleNumber === undefined || roleNumber === null) {
-            console.error('❌ Role not found in token');
             throw new Error(`Role not found in token. Available fields: ${Object.keys(decodedToken).join(', ')}`);
           }
           
-          console.log('🔐 Calling mapRoleNumberToString with role number:', roleNumber);
           const roleString = mapRoleNumberToString(roleNumber);
-          
           if (!roleString) {
-            console.error('❌ ========== ROLE MAPPING FAILED ==========');
-            console.error('❌ Unknown role number:', roleNumber);
-            console.error('❌ Available role mappings: 1=admin, 2=coral, 3=cad, 4=client');
-            console.error('❌ ===========================================');
+            if (__DEV__) {
+              console.error('Unknown role number:', roleNumber);
+              console.error('Available role mappings: 1=admin, 2=coral, 3=cad, 4=client');
+            }
             throw new Error(`Unknown role: ${roleNumber}. Expected 1-4.`);
           }
-          
-          console.log('✅ ========== LOGIN - ROLE MAPPING SUCCESS ==========');
-          console.log('✅ Role Number:', roleNumber);
-          console.log('✅ Mapped Role String:', roleString);
-          console.log('✅ ===================================================');
           
           // Try different case variations for ID
           const userId = decodedToken.Id || decodedToken.id || decodedToken.userId || decodedToken.UserId;
@@ -318,7 +270,6 @@ export const api = createApi({
         const search = typeof arg === 'object' ? arg?.search : undefined;
         const limit = typeof arg === 'object' ? arg?.limit : undefined;
         const assignedTo = typeof arg === 'object' ? arg?.assignedTo : undefined;
-        const filters = typeof arg === 'object' ? arg?.filters : undefined;
         
         // Build query string
         let queryString = `page=${page}`;
@@ -333,109 +284,10 @@ export const api = createApi({
           queryString += `&assignedTo=${encodeURIComponent(assignedTo)}`;
         }
         
-        // For client users, backend should filter enquiries automatically
-        // If no clientId filter is provided, backend should filter by user role
-        const isClientRole = role === 'client' || role === 'CL';
-        const argUserId = typeof arg === 'object' ? arg?.userId : undefined;
-        
-        // For client users without a clientId, backend should filter by:
-        // 1. Enquiries where clientId matches any client record
-        // 2. OR enquiries created by this user (if createdBy field exists)
-        // 3. OR backend should handle client filtering based on user role
-        
-        // Add filter parameters
-        if (filters) {
-          if (filters.status && filters.status !== 'all') {
-            queryString += `&status=${encodeURIComponent(filters.status)}`;
-          }
-          if (filters.category && filters.category !== 'all') {
-            queryString += `&category=${encodeURIComponent(filters.category)}`;
-          }
-          if (filters.priority && filters.priority !== 'all') {
-            queryString += `&priority=${encodeURIComponent(filters.priority)}`;
-          }
-          if (filters.clientId && filters.clientId !== 'all') {
-            console.log('🔐 ========== API CLIENT FILTER ==========');
-            console.log('🔐 Adding clientId filter to API:', filters.clientId);
-            console.log('🔐 Role:', role);
-            console.log('🔐 User ID from token:', argUserId);
-            console.log('🔐 Full filters:', filters);
-            queryString += `&clientId=${encodeURIComponent(filters.clientId)}`;
-            console.log('🔐 Final query string includes clientId filter');
-            console.log('🔐 Expected: Backend should return enquiries where ClientId =', filters.clientId);
-            console.log('🔐 =========================================');
-          } else if (isClientRole && argUserId && (!filters.clientId || filters.clientId === 'all')) {
-            // Fallback: For client users without a clientId filter, use userId as clientId
-            console.log('🔐 ========== API CLIENT FILTER (FALLBACK) ==========');
-            console.log('🔐 No clientId filter found, using userId as fallback:', argUserId);
-            console.log('🔐 Role:', role);
-            queryString += `&clientId=${encodeURIComponent(argUserId)}`;
-            console.log('🔐 Final query string includes userId as clientId filter');
-            console.log('🔐 Expected: Backend should return enquiries where ClientId =', argUserId);
-            console.log('🔐 ===================================================');
-          }
-          if (filters.assignedTo && filters.assignedTo !== 'all') {
-            queryString += `&assignedTo=${encodeURIComponent(filters.assignedTo)}`;
-          }
-          if (filters.stoneType && filters.stoneType !== 'all') {
-            queryString += `&stoneType=${encodeURIComponent(filters.stoneType)}`;
-          }
-          if (filters.metalColor && filters.metalColor !== 'all') {
-            queryString += `&metalColor=${encodeURIComponent(filters.metalColor)}`;
-          }
-          if (filters.metalQuality && filters.metalQuality !== 'all') {
-            queryString += `&metalQuality=${encodeURIComponent(filters.metalQuality)}`;
-          }
-          if (filters.shippingDateFrom) {
-            queryString += `&shippingDateFrom=${encodeURIComponent(filters.shippingDateFrom)}`;
-          }
-          if (filters.shippingDateTo) {
-            queryString += `&shippingDateTo=${encodeURIComponent(filters.shippingDateTo)}`;
-          }
-          if (filters.assignedDateFrom) {
-            queryString += `&assignedDateFrom=${encodeURIComponent(filters.assignedDateFrom)}`;
-          }
-          if (filters.assignedDateTo) {
-            queryString += `&assignedDateTo=${encodeURIComponent(filters.assignedDateTo)}`;
-          }
-          if (filters.createdDateFrom) {
-            queryString += `&createdDateFrom=${encodeURIComponent(filters.createdDateFrom)}`;
-          }
-          if (filters.createdDateTo) {
-            queryString += `&createdDateTo=${encodeURIComponent(filters.createdDateTo)}`;
-          }
-          if (filters.sortBy) {
-            queryString += `&sortBy=${encodeURIComponent(filters.sortBy)}`;
-          }
-          if (filters.sortOrder) {
-            queryString += `&sortOrder=${encodeURIComponent(filters.sortOrder)}`;
-          }
-        }
-        
-        const finalUrl = `/api/enquiries/search?${queryString}`;
-        console.log('🌐 ========== ENQUIRIES API REQUEST ==========');
-        console.log('🌐 URL:', finalUrl);
-        console.log('🌐 Role:', role);
-        console.log('🌐 AssignedTo:', assignedTo);
-        console.log('🌐 Filters:', filters);
-        console.log('🌐 ===========================================');
-        return finalUrl;
+        return `/api/enquiries/search?${queryString}`;
       },
       providesTags: ['Enquiry'],
       transformResponse: (data, meta, arg) => {
-        console.log('📥 ========== ENQUIRIES API RESPONSE ==========');
-        console.log('📥 Raw response:', data);
-        console.log('📥 Request args:', arg);
-        const role = typeof arg === 'object' ? arg?.role : arg;
-        const argUserId = typeof arg === 'object' ? arg?.userId : undefined;
-        const isClientRole = role === 'client' || role === 'CL';
-        if (isClientRole) {
-          console.log('📥 Client user - backend should have filtered enquiries');
-          console.log('📥 User ID:', argUserId);
-          console.log('📥 If backend filtered correctly, these are the user\'s enquiries');
-        }
-        console.log('📥 ===========================================');
-        
         // Handle paginated response format from new aggregated endpoint
         // Response structure: { data: [...], total: number, page: number, limit: number }
         let enquiriesArray = [];
@@ -455,31 +307,6 @@ export const api = createApi({
               limit: data.limit || data.Limit || 25,
               totalPages: Math.ceil((data.total || data.Total || 0) / (data.limit || data.Limit || 25)),
             };
-            // Log for client users
-            if (isClientRole && argUserId) {
-              console.log('📥 Enquiries received:', enquiriesArray.length);
-              console.log('📥 Expected ClientId:', argUserId);
-              if (enquiriesArray.length > 0) {
-                console.log('📥 Sample enquiry ClientIds:', enquiriesArray.slice(0, 5).map(e => ({
-                  id: e.id || e._id,
-                  clientId: e.clientId || e.ClientId,
-                  name: e.Name || e.name
-                })));
-                // Check if any enquiries match the expected ClientId
-                const matchingCount = enquiriesArray.filter(e => {
-                  const enquiryClientId = e.clientId || e.ClientId || '';
-                  return String(enquiryClientId).trim() === String(argUserId).trim();
-                }).length;
-                console.log('📥 Matching enquiries (ClientId = user.id):', matchingCount, 'out of', enquiriesArray.length);
-                if (matchingCount === 0 && enquiriesArray.length > 0) {
-                  console.warn('📥 ⚠️ WARNING: No enquiries match user ID!');
-                  console.warn('📥 ⚠️ This means enquiries were created with different ClientIds');
-                  console.warn('📥 ⚠️ All enquiry ClientIds:', enquiriesArray.map(e => e.clientId || e.ClientId).filter(Boolean).slice(0, 10));
-                }
-              } else {
-                console.log('📥 ⚠️ No enquiries returned - check backend filtering');
-              }
-            }
           } else if (Array.isArray(data)) {
             enquiriesArray = data;
           } else if (data.enquiries && Array.isArray(data.enquiries)) {
@@ -597,12 +424,7 @@ export const api = createApi({
       providesTags: (result, error, id) => {
         // Only provide tags if result is not null/error
         if (result && result.id && !result.error) {
-          // Provide both specific tag (for this enquiry) and general tag (for all enquiries)
-          // This ensures cache invalidation works when updateEnquiry invalidates 'Enquiry' tag
-          return [
-            { type: 'Enquiry', id },
-            'Enquiry', // General tag so that any Enquiry invalidation triggers refetch
-          ];
+          return [{ type: 'Enquiry', id }];
         }
         return [];
       },
@@ -763,9 +585,6 @@ export const api = createApi({
           AssignedTo: enquiry?.AssignedTo,
           CoralCode: enquiry?.CoralCode,
           CadCode: enquiry?.CadCode,
-          // CRITICAL: Preserve Coral and Cad arrays with Pricing data
-          Coral: enquiry?.Coral || [],
-          Cad: enquiry?.Cad || [],
           _originalData: enquiry,
         };
         } catch (transformError) {
@@ -781,9 +600,6 @@ export const api = createApi({
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             error: true,
-            // CRITICAL: Preserve Coral and Cad arrays with Pricing data even in error case
-            Coral: enquiry?.Coral || [],
-            Cad: enquiry?.Cad || [],
             _originalData: enquiry,
           };
         }
@@ -1052,40 +868,22 @@ export const api = createApi({
           
           // Determine if we should use aggregate endpoint
           // Admin: Use regular enquiries data (no aggregate)
-          // Coral/CAD: Use aggregate endpoint with assignedTo filter
-          // Client: Use aggregate endpoint with clientId filter (clientId = userId)
+          // Coral/CAD/Client: Use aggregate endpoint with assignedTo filter
           const isAdmin = role === 'admin' || role === 'AD';
-          const isClient = role === 'client' || role === 'CL';
           const shouldUseAggregate = !isAdmin && userId; // Only for non-admin users
           
-          // Build aggregate URL - only for non-admin users
-          // Client users: Filter by clientId (which equals userId)
-          // Coral/CAD users: Filter by assignedTo (which equals userId)
+          // Build aggregate URL - only for non-admin users (coral, cad, client)
           let aggregateUrl = null;
           if (shouldUseAggregate) {
-            if (isClient) {
-              // For client users, filter by clientId (not assignedTo)
-              aggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${encodeURIComponent(userId)}`;
-            } else {
-              // For coral/cad users, filter by assignedTo
             aggregateUrl = `/api/enquiries/aggregate?groupBy=status&assignedTo=${encodeURIComponent(userId)}`;
-            }
           }
           
           // Fetch data in parallel
           // Admin: Fetch ALL enquiries (use large limit to get all data for accurate counts)
-          // Client: Fetch enquiries filtered by clientId (clientId = userId)
-          // Coral/CAD: Fetch enquiries filtered by assignedTo (assignedTo = userId)
-          let enquiriesSearchUrl;
-          if (isAdmin) {
-            enquiriesSearchUrl = '/api/enquiries/search?page=1&limit=10000'; // Fetch all enquiries for admin
-          } else if (isClient) {
-            // For client users, filter by clientId
-            enquiriesSearchUrl = `/api/enquiries/search?page=1&clientId=${encodeURIComponent(userId)}`;
-          } else {
-            // For coral/cad users, filter by assignedTo
-            enquiriesSearchUrl = `/api/enquiries/search?page=1&assignedTo=${encodeURIComponent(userId)}`;
-          }
+          // Non-admin: Fetch aggregate + enquiries
+          const enquiriesSearchUrl = isAdmin 
+            ? '/api/enquiries/search?page=1&limit=10000' // Fetch all enquiries for admin
+            : '/api/enquiries/search?page=1'; // Non-admin only need first page
           
           const fetchPromises = [
             baseQuery(enquiriesSearchUrl),
@@ -1127,10 +925,8 @@ export const api = createApi({
             console.log('🔍 [DASHBOARD DEBUG] Role:', role);
             console.log('🔍 [DASHBOARD DEBUG] UserId:', userId);
             console.log('🔍 [DASHBOARD DEBUG] Is Admin:', isAdmin);
-            console.log('🔍 [DASHBOARD DEBUG] Is Client:', isClient);
             console.log('🔍 [DASHBOARD DEBUG] Should Use Aggregate:', shouldUseAggregate, '(boolean)');
             console.log('🔍 [DASHBOARD DEBUG] Aggregate URL:', aggregateUrl);
-            console.log('🔍 [DASHBOARD DEBUG] Enquiries Search URL:', enquiriesSearchUrl);
             console.log('🔍 [DASHBOARD DEBUG] Status Aggregate API Response:', JSON.stringify(aggregateData, null, 2));
             
             // Handle different response formats
@@ -1312,11 +1108,8 @@ export const api = createApi({
             console.log('🔍 [DASHBOARD DEBUG] - Completed Enquiries:', completedEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
             console.log('🔍 [DASHBOARD DEBUG] - Total Clients:', totalClients);
             console.log('🔍 [DASHBOARD DEBUG] - Revenue:', revenue);
-            const sumOfStatuses = pendingEnquiries + approvalPendingEnquiries + completedEnquiries;
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', sumOfStatuses);
-            console.log('🔍 [DASHBOARD DEBUG] - Does sum match Total?', sumOfStatuses === totalEnquiries, '(Total:', totalEnquiries, '| Sum:', sumOfStatuses, ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', pendingEnquiries + approvalPendingEnquiries + completedEnquiries);
             console.log('🔍 [DASHBOARD DEBUG] - Note: Status counts are from fetched enquiries array, total uses pagination.total if available');
-            console.log('🔍 [DASHBOARD DEBUG] - ⚠️ WARNING: If sum ≠ total, status counts may be incomplete due to pagination');
             console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
@@ -1332,48 +1125,13 @@ export const api = createApi({
               },
             };
           } else if (role === 'client') {
-            // For client users, prioritize aggregate API counts, but fallback to counting from filtered enquiries
-            // The enquiries array is already filtered by clientId, so we can count from it
             const myEnquiries = categorizedCounts['All'] || statusCounts.total || normalizedEnquiries.length;
-            
-            // Count from normalizedEnquiries (already filtered by clientId) if aggregate is empty
-            const pendingCount = normalizedEnquiries.filter(e => {
-              const status = (e.status || '').toLowerCase();
-              return status === 'pending' || status === 'enquiry created' || (status.includes('pending') && !status.includes('approval'));
-            }).length;
-            const approvalPendingCount = normalizedEnquiries.filter(e => {
-              const status = (e.status || '').toLowerCase();
-              return status.includes('approval') && !status.includes('approved');
-            }).length;
-            const completedCount = normalizedEnquiries.filter(e => {
-              const status = (e.status || '').toLowerCase();
-              return status.includes('completed') || status.includes('approved');
-            }).length;
-            
-            // Use aggregate counts if available, otherwise use counted values
-            const pendingApprovals = categorizedCounts['Pending'] || statusCounts.pending || pendingCount;
-            const approvalPending = categorizedCounts['Approval Pending'] || approvalPendingCount;
-            const completedOrders = categorizedCounts['Completed'] || statusCounts.completed || completedCount;
-            
+            const pendingApprovals = categorizedCounts['Pending'] || statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
+            const approvalPending = categorizedCounts['Approval Pending'] || 0;
+            const completedOrders = categorizedCounts['Completed'] || statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
             const totalSpent = normalizedEnquiries
-              .filter(e => {
-                const status = (e.status || '').toLowerCase();
-                return status.includes('completed') || status.includes('approved');
-              })
+              .filter(e => e.status === 'completed')
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
-            
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
-            console.log('🔍 [DASHBOARD DEBUG] CLIENT DASHBOARD CALCULATIONS:');
-            console.log('🔍 [DASHBOARD DEBUG] - My Enquiries:', myEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending:', pendingApprovals, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], '| statusCounts.pending:', statusCounts.pending, '| counted:', pendingCount, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending:', approvalPending, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], '| counted:', approvalPendingCount, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Completed Orders:', completedOrders, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, '| counted:', completedCount, ')');
-            const clientSum = pendingApprovals + approvalPending + completedOrders;
-            console.log('🔍 [DASHBOARD DEBUG] - Total Spent:', totalSpent);
-            console.log('🔍 [DASHBOARD DEBUG] - Enquiries filtered by clientId:', normalizedEnquiries.length);
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', clientSum);
-            console.log('🔍 [DASHBOARD DEBUG] - Does sum match My Enquiries?', clientSum === myEnquiries, '(My Enquiries:', myEnquiries, '| Sum:', clientSum, ')');
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
               data: {
@@ -1520,45 +1278,15 @@ export const api = createApi({
             }
             return { data };
           } else {
-            let errorData;
-            try {
-              const errorText = await response.text();
-              errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
-            } catch (parseError) {
-              errorData = { message: `Upload failed with status ${response.status}` };
-            }
-            
+            const errorText = await response.text().catch(() => '');
+            const errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
             if (__DEV__) {
-              console.error(`❌ Design upload failed: Status ${response.status}`, errorData);
-              console.error(`❌ Error details:`, {
-                enquiryId,
-                designType,
-                version,
-                hasImages: !!(images && images.length > 0),
-                imagesCount: images?.length || 0,
-                hasExcel: !!excel,
-                excelFileName: excel?.name || 'N/A',
-                errorMessage: errorData?.message || errorData?.error || 'Unknown error',
-              });
+              console.error(`Design upload failed: Status ${response.status}`, errorData);
             }
-            
-            // Provide more helpful error message for common backend errors
-            let userFriendlyMessage = errorData?.message || errorData?.error || 'Upload failed';
-            if (errorData?.error && typeof errorData.error === 'string') {
-              if (errorData.error.includes('Pricing')) {
-                userFriendlyMessage = 'Excel file processing error: Pricing data is missing or invalid. Please ensure your Excel file contains the required pricing columns and try again.';
-              } else if (errorData.error.includes('null')) {
-                userFriendlyMessage = 'Server error: Missing data. Please check that all required fields are provided and try again.';
-              }
-            }
-            
             return {
               error: {
                 status: response.status,
-                data: {
-                  ...errorData,
-                  message: userFriendlyMessage,
-                },
+                data: errorData,
               },
             };
           }
@@ -1659,48 +1387,6 @@ export const api = createApi({
       },
     }),
 
-    // Save pricing for coral/CAD design
-    savePricing: builder.mutation({
-      query: ({ enquiryId, designType, version, pricingData }) => {
-        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
-        
-        if (__DEV__) {
-          console.log('========== SAVE PRICING API REQUEST ==========');
-          console.log('URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
-          console.log('Method: PUT');
-          console.log('Body (pricing array):', JSON.stringify(pricingData, null, 2));
-          console.log('=============================================');
-        }
-        
-        return {
-          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
-          method: 'PUT',
-          body: pricingData, // Array of pricing objects
-        };
-      },
-      invalidatesTags: (result, error, { enquiryId }) => [
-        { type: 'Enquiry', id: enquiryId },
-        'Enquiry',
-        'Dashboard',
-      ],
-      transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('✅ Pricing saved successfully:', response);
-        }
-        return response;
-      },
-      transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('❌ Failed to save pricing:', response);
-        }
-        return {
-          status: response.status,
-          data: response.data,
-          error: response.data?.message || response.data?.error || 'Failed to save pricing',
-        };
-      },
-    }),
-
     // Reject design version
     rejectDesignVersion: builder.mutation({
       query: ({ enquiryId, designType, version, reason }) => {
@@ -1732,88 +1418,6 @@ export const api = createApi({
           status: response.status,
           data: response.data,
           error: response.data?.message || response.data?.error || 'Failed to reject design version',
-        };
-      },
-    }),
-
-    // Show to Client - Toggle visibility for clients
-    updateShowToClient: builder.mutation({
-      query: ({ enquiryId, designType, version, showToClient }) => {
-        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
-        
-        if (__DEV__) {
-          console.log('========== UPDATE SHOW TO CLIENT API REQUEST ==========');
-          console.log('URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
-          console.log('Method: PUT');
-          console.log('Body:', { ShowToClient: showToClient });
-          console.log('========================================================');
-        }
-        
-        return {
-          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
-          method: 'PUT',
-          body: {
-            ShowToClient: showToClient,
-          },
-        };
-      },
-      invalidatesTags: (result, error, { enquiryId }) => [
-        { type: 'Enquiry', id: enquiryId },
-        'Enquiry',
-      ],
-      transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('ShowToClient updated:', response);
-        }
-        return response;
-      },
-      transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('Failed to update ShowToClient:', response);
-        }
-        return {
-          status: response.status,
-          data: response.data,
-          error: response.data?.message || response.data?.error || 'Failed to update ShowToClient',
-        };
-      },
-    }),
-
-    // Delete design version (within 10 minutes of upload)
-    deleteDesignVersion: builder.mutation({
-      query: ({ enquiryId, designType, version }) => {
-        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
-        
-        if (__DEV__) {
-          console.log('🗑️ ========== DELETE VERSION API ==========');
-          console.log('🗑️ URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
-          console.log('🗑️ Method: DELETE');
-          console.log('🗑️ =========================================');
-        }
-        
-        return {
-          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
-          method: 'DELETE',
-        };
-      },
-      invalidatesTags: (result, error, { enquiryId }) => [
-        { type: 'Enquiry', id: enquiryId },
-        'Enquiry',
-      ],
-      transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('✅ Version deleted successfully:', response);
-        }
-        return response;
-      },
-      transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('❌ Failed to delete version:', response);
-        }
-        return {
-          status: response.status,
-          data: response.data,
-          error: response.data?.message || response.data?.error || 'Failed to delete version',
         };
       },
     }),
@@ -2098,6 +1702,114 @@ export const api = createApi({
       providesTags: (result, error, { enquiryId }) => [{ type: 'Chat', id: enquiryId }],
     }),
 
+    // Get all chats for an enquiry (both admin-client and admin-designer)
+    getChatsByEnquiry: builder.query({
+      query: ({ enquiryId }) => {
+        if (!enquiryId) {
+          throw new Error('enquiryId is required');
+        }
+        return `/api/chats/enquiry/${enquiryId}`;
+      },
+      providesTags: (result, error, { enquiryId }) => [{ type: 'Chat', id: enquiryId }],
+      transformResponse: (data, meta, arg) => {
+        if (__DEV__) {
+          console.log('getChatsByEnquiry API Response:', data);
+        }
+
+        // Handle different response formats
+        let chatsArray = [];
+        if (Array.isArray(data)) {
+          chatsArray = data;
+        } else if (data && typeof data === 'object') {
+          if (data.Data && Array.isArray(data.Data)) {
+            chatsArray = data.Data;
+          } else if (data.chats && Array.isArray(data.chats)) {
+            chatsArray = data.chats;
+          } else if (data.data && Array.isArray(data.data)) {
+            chatsArray = data.data;
+          }
+        }
+
+        // Normalize chats similar to getChats
+        const normalizedChats = chatsArray.map(chat => {
+          let enquiryId = chat.EnquiryId || chat.enquiryId;
+          if (enquiryId?.$oid) {
+            enquiryId = enquiryId.$oid;
+          } else if (enquiryId?._id) {
+            enquiryId = enquiryId._id;
+          }
+          
+          let chatId = chat._id;
+          if (chatId?.$oid) {
+            chatId = chatId.$oid;
+          } else if (chatId?._id) {
+            chatId = chatId._id;
+          } else {
+            chatId = chatId || chat.id;
+          }
+          
+          let lastMessageTime = chat.LastMessageTime || chat.lastMessageTime || chat.updatedAt || chat.UpdatedAt;
+          if (lastMessageTime?.$date) {
+            lastMessageTime = lastMessageTime.$date;
+          } else if (lastMessageTime?.Timestamp) {
+            lastMessageTime = lastMessageTime.Timestamp;
+          }
+          
+          let lastMessageText = '';
+          const lastMessageObj = chat.LastMessage || chat.lastMessage;
+          if (lastMessageObj) {
+            if (typeof lastMessageObj === 'string') {
+              lastMessageText = lastMessageObj;
+            } else if (typeof lastMessageObj === 'object') {
+              lastMessageText = lastMessageObj.Message || 
+                               lastMessageObj.message || 
+                               lastMessageObj.text || 
+                               lastMessageObj.Text || 
+                               '';
+            }
+          } else {
+            lastMessageText = chat.message || '';
+          }
+          
+          let lastSenderName = '';
+          const lastSenderObj = chat.LastSender || chat.lastSender;
+          if (lastSenderObj) {
+            if (typeof lastSenderObj === 'string') {
+              lastSenderName = lastSenderObj;
+            } else if (typeof lastSenderObj === 'object') {
+              lastSenderName = lastSenderObj.Name || 
+                              lastSenderObj.name || 
+                              lastSenderObj.SenderName || 
+                              lastSenderObj.senderName || 
+                              '';
+            }
+          } else {
+            lastSenderName = chat.sender || '';
+          }
+          
+          return {
+            id: chatId,
+            enquiryId: enquiryId || chat.Enquiry?.id || chat.enquiry?.id,
+            enquiryTitle: chat.EnquiryTitle || chat.enquiryTitle || chat.Enquiry?.Name || chat.Enquiry?.title || 'Untitled Chat',
+            clientName: chat.ClientName || chat.clientName || chat.Client?.Name || chat.client?.name || 'Unknown Client',
+            lastMessage: lastMessageText,
+            lastMessageTime: lastMessageTime || new Date().toISOString(),
+            unreadCount: chat.UnreadCount || chat.unreadCount || chat.unread || 0,
+            isGroup: chat.IsGroup || chat.isGroup || false,
+            participants: chat.Participants || chat.participants || [],
+            lastSender: lastSenderName,
+            status: chat.Status || chat.status || 'active',
+            isClient: chat.IsClient || chat.isClient || false,
+            type: chat.Type || chat.type || null,
+            Type: chat.Type || chat.type || null,
+            _originalData: chat,
+          };
+        });
+
+        return normalizedChats;
+      },
+    }),
+
     // Get all chats (for chat list)
     getChats: builder.query({
       query: ({ page = 1, limit = 10, search = '', type } = {}) => {
@@ -2333,6 +2045,7 @@ export const api = createApi({
             if (__DEV__) {
               console.error('❌ Backend returned HTML instead of JSON. This usually means the endpoint does not exist.');
               console.error('Expected endpoint: /api/message/:chatId/messages');
+              console.error('Actual endpoint used: /api/message/' + chatId + '/messages');
               console.error('ChatId:', chatId);
               console.error('Response preview:', responseText.substring(0, 200));
             }
@@ -2599,7 +2312,6 @@ export const {
   
   // Pricing
   useCalculatePricingMutation,
-  useSavePricingMutation,
   
   // File Upload
   useUploadImageMutation,
@@ -2607,16 +2319,12 @@ export const {
   useUpdateAssetDescriptionMutation,
   useApproveDesignVersionMutation,
   useRejectDesignVersionMutation,
-  useUpdateShowToClientMutation,
-  useDeleteDesignVersionMutation,
   
   // Chats
   useGetChatsQuery,
   useGetChatByEnquiryQuery,
+  useGetChatsByEnquiryQuery,
   useGetChatMessagesQuery,
   useUploadChatMediaMutation,
-  
-  // Code Lists
-  useGetRolesQuery,
 } = api;
 

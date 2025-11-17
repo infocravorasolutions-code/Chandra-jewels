@@ -549,10 +549,15 @@ const ChatsScreen = ({ navigation }) => {
           style={styles.chatItem}
           onPress={() => {
             if (__DEV__) {
-              console.log('Navigating to ChatDetail with chat:', chat.enquiryId);
+              console.log('Navigating to ChatDetail with chat:', chat);
             }
             if (navigation && navigation.navigate) {
-              navigation.navigate('ChatDetail', { chat });
+              navigation.navigate('ChatDetail', {
+                chatId: chat._id || chat.id, // Pass the specific chat ID
+                chat: chat, // Pass the full chat object
+                enquiryId: chat.enquiryId || chat.EnquiryId,
+                chatType: chat.type || chat.Type
+              });
             }
           }}>
           

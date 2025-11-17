@@ -36,25 +36,20 @@ const { width } = Dimensions.get('window');
 
 const ChatDetailScreen = ({ route, navigation }) => {
   const { user } = useAuth();
-  const { chat: routeChat, enquiry } = route.params || {};
+  const { chatId, chat: routeChat, enquiry, enquiryId: routeEnquiryId, chatType } = route.params || {};
   const alert = useAlert();
+  console.log('routeChat params:', { chatId, routeChat, enquiry, routeEnquiryId, chatType });
   
-  // Get enquiryId from route params
-  const enquiryId = routeChat?.enquiryId || routeChat?.id || enquiry?.id || enquiry?._id;
+  // Get enquiryId from route params (fallback to chat or enquiry object)
+  const enquiryId = routeEnquiryId || routeChat?.EnquiryId || routeChat?.enquiryId || enquiry?.id || enquiry?._id;
   
-  // Determine chat type based on user role
-  const getChatType = () => {
-    if (!user) return 'admin-client';
-    const role = user.role?.toLowerCase();
-    if (role === 'client') return 'admin-client';
-    if (role === 'coral' || role === 'cad' || role === 'worker' || role === 'designer') return 'admin-designer';
-    // Admin can use either, default to admin-client
-    return 'admin-client';
-  };
-
+  // Get the specific chatId to use (prioritize direct chatId, then routeChat._id)
+  const specificChatId = chatId || routeChat?._id || routeChat?.id;
+  
   // Use the custom chat hook - this handles everything!
+  // If we have a chatId, we should use it directly, otherwise fall back to enquiryId search
   const {
-    chat,
+    chat: hookChat,
     messages,
     isLoadingChat,
     messagesLoading,
@@ -66,7 +61,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
     sendTyping,
     refetchMessages,
     refetchChat,
-  } = useChat(enquiryId, getChatType());
+  } = useChat(enquiryId, chatType, specificChatId);
+  
+  // Use routeChat if it has an _id and hook hasn't loaded yet, otherwise use hookChat
+  const chat = (hookChat?._id || hookChat?.id) ? hookChat : (routeChat?._id || routeChat?.id ? routeChat : hookChat);
 
   // Force refetch when screen is focused (user revisits)
   useFocusEffect(

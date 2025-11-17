@@ -3,22 +3,11 @@ import { createSlice } from '@reduxjs/toolkit';
 const initialState = {
   filters: {
     status: 'all',
-    category: 'all',
     priority: 'all',
-    clientId: 'all',
-    assignedTo: 'all',
-    stoneType: 'all',
-    metalColor: 'all',
-    metalQuality: 'all',
-    shippingDateFrom: null,
-    shippingDateTo: null,
-    assignedDateFrom: null,
-    assignedDateTo: null,
-    createdDateFrom: null,
-    createdDateTo: null,
+    client: 'all',
   },
   searchQuery: '',
-  sortBy: 'assignedDate', // Default: AssignedDate
+  sortBy: 'createdAt',
   sortOrder: 'desc',
   selectedEnquiryId: null,
   selectedStatus: 'All',
@@ -62,15 +51,13 @@ const enquiriesSlice = createSlice({
     },
     setSelectedClient: (state, action) => {
       state.selectedClient = action.payload;
-      state.filters.clientId = action.payload === 'All' ? 'all' : action.payload;
+      state.filters.client = action.payload === 'All' ? 'all' : action.payload;
     },
     clearFilters: (state) => {
-      state.filters = { ...initialState.filters };
+      state.filters = initialState.filters;
       state.searchQuery = '';
       state.selectedStatus = 'All';
       state.selectedClient = 'All';
-      state.sortBy = 'assignedDate';
-      state.sortOrder = 'desc';
       state.pagination.currentPage = 1;
     },
     setPage: (state, action) => {

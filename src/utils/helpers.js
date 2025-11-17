@@ -37,6 +37,42 @@ export const formatDateTime = (dateString) => {
   });
 };
 
+export const formatChatDate = (dateString) => {
+  if (!dateString) return "";
+
+  const date = new Date(dateString);
+  const now = new Date();
+console.log('date', date);
+  // Create simple date values without time
+  const d = date.toDateString();
+  const n = now.toDateString();
+
+  // ---- TODAY ----
+  if (d === n) {
+    return date.toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  // ---- YESTERDAY ----
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+
+  if (d === yesterday.toDateString()) {
+    return "Yesterday";
+  }
+
+  // ---- OTHER DATES ----
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+
+  return `${day}/${month}/${year}`;
+};
+
+
 export const getStatusColor = (status) => {
   const statusColors = {
     pending: colors.warning,
