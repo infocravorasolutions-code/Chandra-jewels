@@ -19,7 +19,6 @@ import { AnimatedLogoLoader } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
-import { Heading, CustomText } from '../../components/common/Text';
 import { Input } from '../../components/common';
 import { spacing } from '../../utils/responsive';
 
@@ -413,18 +412,18 @@ const CreateClientScreen = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
       >
         <Card style={styles.formCard}>
-          <Heading variant="h2" style={styles.title}>
+          <Text style={styles.title}>
             Create New Client
-          </Heading>
-          <CustomText variant="body" style={styles.subtitle}>
+          </Text>
+          <Text style={styles.subtitle}>
             Fill in the details to create a new client
-          </CustomText>
+          </Text>
 
           <View style={styles.form}>
             <View style={styles.inputContainer}>
-              <CustomText variant="label" style={styles.label}>
+              <Text style={styles.label}>
                 Name *
-              </CustomText>
+              </Text>
               <Input
                 placeholder="Enter client name"
                 value={formData.Name}
@@ -435,9 +434,9 @@ const CreateClientScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.inputContainer}>
-              <CustomText variant="label" style={styles.label}>
+              <Text style={styles.label}>
                 Client Image (Optional)
-              </CustomText>
+              </Text>
               
               {selectedImage ? (
                 <View style={styles.imagePreviewContainer}>
@@ -464,9 +463,9 @@ const CreateClientScreen = ({ navigation }) => {
               )}
               
               {selectedImage && (
-                <CustomText variant="caption" style={styles.helpText}>
+                <Text style={styles.helpText}>
                   Image will be uploaded when you create the client
-                </CustomText>
+                </Text>
               )}
             </View>
           </View>
@@ -476,31 +475,30 @@ const CreateClientScreen = ({ navigation }) => {
           <TouchableOpacity
             onPress={handleSubmit}
             disabled={isLoading}
-            style={[styles.submitButton, isLoading && styles.buttonDisabled]}
-            activeOpacity={0.8}
+            style={[styles.adminActionButton, styles.adminActionButtonPrimary, isLoading && styles.btnDisabled]}
+            activeOpacity={0.85}
           >
-            <View style={styles.buttonContent}>
-              {isLoading ? (
-                <AnimatedLogoLoader size={20} />
-              ) : (
-                <Icon name="save" size={20} color={colors.textWhite} />
-              )}
-              <Text style={styles.buttonText}>
-                {isLoading ? 'Creating...' : 'Create Client'}
-              </Text>
-            </View>
+            {isLoading ? (
+              <>
+                <AnimatedLogoLoader size={18} />
+                <Text style={styles.adminActionText}>Creating...</Text>
+              </>
+            ) : (
+              <>
+                <Icon name="save" size={18} color={colors.textWhite} />
+                <Text style={styles.adminActionText}>Create Client</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            style={styles.cancelButton}
-            activeOpacity={0.8}
+            style={[styles.adminActionButton, styles.adminActionButtonOutline]}
+            activeOpacity={0.85}
             disabled={isLoading}
           >
-            <View style={styles.buttonContent}>
-              <Icon name="close" size={20} color={colors.textWhite} />
-              <Text style={styles.buttonText}>Cancel</Text>
-            </View>
+            <Icon name="close" size={18} color={colors.primary} />
+            <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -577,19 +575,24 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: spacing.md,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   formCard: {
-    padding: spacing.lg,
+    padding: 16,
     marginBottom: spacing.md,
   },
   title: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
     color: colors.textPrimary,
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
   subtitle: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
     color: colors.textSecondary,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   form: {
     gap: spacing.md,
@@ -598,13 +601,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   label: {
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginBottom: 6,
   },
   helpText: {
-    color: colors.textLight,
-    marginTop: spacing.xs,
     fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
   },
   imagePickerButton: {
     borderWidth: 2,
@@ -622,8 +628,8 @@ const styles = StyleSheet.create({
   },
   imagePickerText: {
     color: colors.primary,
-    fontSize: fonts.base,
-    fontFamily: fonts.semiBold,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
   },
   imagePreviewContainer: {
     position: 'relative',
@@ -657,52 +663,36 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   actionButtons: {
-    gap: spacing.md,
+    gap: 12,
     marginTop: spacing.sm,
   },
-  submitButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.textPrimary,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cancelButton: {
-    backgroundColor: colors.textSecondary,
-    borderRadius: 12,
-    padding: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.textPrimary,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  buttonContent: {
+  adminActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
   },
-  buttonText: {
+  adminActionButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  adminActionButtonOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  adminActionText: {
     color: colors.textWhite,
-    fontSize: fonts.base,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
+    fontSize: 14,
   },
-  buttonDisabled: {
-    opacity: 0.6,
+  adminActionOutlineText: {
+    color: colors.primary,
+  },
+  btnDisabled: {
+    opacity: 0.5,
   },
   modalOverlay: {
     flex: 1,
@@ -744,7 +734,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: {
-    fontSize: fonts.lg || 18,
+    fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
   },
@@ -760,7 +750,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   modalOptionText: {
-    fontSize: fonts.base || 16,
+    fontSize: fonts.sm,
     fontFamily: fonts.medium,
     color: colors.textPrimary,
     marginLeft: 12,

@@ -10,11 +10,11 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Input, Button } from '../../components/common';
-import { Heading, CustomText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
-import { useGetClientsQuery, useGetUsersQuery } from '../../store/api';
+import { useGetUsersQuery } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // This screen is only for creating new enquiries
@@ -29,7 +29,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       clientName: '',
       priority: 'Normal',
       category: 'Ring',
-      metalColor: 'Gold',
+      metalColor: 'White Gold',
       metalQuality: '10K',
       stoneType: 'NaturalRegular',
       quantity: '1',
@@ -47,7 +47,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     clientName: '',
     priority: 'Normal',
     category: 'Ring',
-    metalColor: 'Gold',
+    metalColor: 'White Gold',
     metalQuality: '10K',
     stoneType: 'NaturalRegular',
     quantity: '1',
@@ -64,8 +64,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
   
-  // Fetch clients for dropdown
-  const { data: clientsData = [] } = useGetClientsQuery(undefined, {
+  // Fetch clients for dropdown (using cached hook)
+  const { clients: clientsData = [] } = useClients({
     skip: false,
   });
   
@@ -242,26 +242,34 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Design Approval Pending', value: 'Design Approval Pending' },
     { label: 'CAD', value: 'CAD' },
     { label: 'Coral', value: 'Coral' },
-    { label: 'In Progress', value: 'In Progress' },
+    { label: 'Approved Cad', value: 'Approved Cad' },
+    { label: 'Order Placement', value: 'Order Placement' },
+    { label: 'CAM Pending', value: 'CAM Pending' },
+    { label: 'Production', value: 'Production' },
     { label: 'Completed', value: 'Completed' },
     { label: 'Rejected', value: 'Rejected' },
   ];
 
   const categoryOptions = [
-    { label: 'Ring', value: 'Ring' },
     { label: 'Necklace', value: 'Necklace' },
-    { label: 'Earrings', value: 'Earrings' },
+    { label: 'Ring', value: 'Ring' },
+    { label: 'Earring', value: 'Earring' },
     { label: 'Bracelet', value: 'Bracelet' },
     { label: 'Pendant', value: 'Pendant' },
-    { label: 'Other', value: 'Other' },
+    { label: 'Hoops', value: 'Hoops' },
+    { label: 'Chain', value: 'Chain' },
+    { label: 'Bangle', value: 'Bangle' },
+    { label: 'Belt Buckle', value: 'Belt Buckle' },
+    { label: 'Custom', value: 'Custom' },
   ];
 
   const metalColorOptions = [
-    { label: 'Gold', value: 'Gold' },
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
-    { label: 'Platinum', value: 'Platinum' },
-    { label: 'Silver', value: 'Silver' },
+    { label: 'Yellow Gold', value: 'Yellow Gold' },
+    { label: 'Two Tone Rose White Gold', value: 'Two Tone Rose White Gold' },
+    { label: 'Two Tone Yellow White Gold', value: 'Two Tone Yellow White Gold' },
+    { label: 'Three Tone Rose Yellow White Gold', value: 'Three Tone Rose Yellow White Gold' },
   ];
 
   const metalQualityOptions = [
@@ -269,24 +277,27 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     { label: '14K', value: '14K' },
     { label: '18K', value: '18K' },
     { label: '22K', value: '22K' },
-    { label: '24K', value: '24K' },
+    { label: 'Silver 925', value: 'Silver 925' },
+    { label: 'Platinum', value: 'Platinum' },
   ];
 
   const stoneTypeOptions = [
-    { label: 'Natural Regular', value: 'NaturalRegular' },
-    { label: 'CVD Lab Grown', value: 'CVDLabGrown' },
-    { label: 'HPHT Lab Grown', value: 'HPHTLabGrown' },
-    { label: 'Moissanite', value: 'Moissanite' },
-    { label: 'Other', value: 'Other' },
+    { label: 'LabGrown', value: 'LabGrown' },
+    { label: 'CVDLabGrown', value: 'CVDLabGrown' },
+    { label: 'NaturalRegular', value: 'NaturalRegular' },
+    { label: 'NaturalLower', value: 'NaturalLower' },
+    { label: 'Synthetic', value: 'Synthetic' },
+    { label: 'LabTreatedDiamond', value: 'LabTreatedDiamond' },
+    { label: 'ColoredLabTreatedNat', value: 'ColoredLabTreatedNat' },
   ];
 
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Heading level={3}>{isEditMode ? 'Edit Enquiry' : 'Enquiry Details'}</Heading>
-        <CustomText variant="caption" color="secondary">
+        <Text style={styles.headerTitle}>{isEditMode ? 'Edit Enquiry' : 'Enquiry Details'}</Text>
+        <Text style={styles.headerSubtitle}>
           {isEditMode ? 'Update enquiry information' : 'Step 1 of 2 - Basic Information'}
-        </CustomText>
+        </Text>
       </View>
 
       <View style={styles.form}>
@@ -469,11 +480,14 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
 
-        <Button
-          title="Save"
+        <TouchableOpacity
           onPress={handleNext}
-          style={styles.nextButton}
-        />
+          style={[styles.adminActionButton, styles.adminActionButtonPrimary]}
+          activeOpacity={0.85}
+        >
+          <IconComponent name="save" size={18} color={colors.textWhite} />
+          <Text style={styles.adminActionText}>Save</Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
@@ -485,27 +499,41 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    padding: 20,
+    padding: 16,
     backgroundColor: colors.backgroundSecondary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  headerTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+  },
   form: {
-    padding: 20,
+    padding: 16,
   },
   section: {
-    marginTop: 24,
+    marginTop: 20,
   },
   sectionTitle: {
-    marginBottom: 16,
-    fontSize: fonts.lg,
-    fontWeight: fonts.medium,
+    marginBottom: 12,
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
   },
   priorityContainer: {
-    marginTop: 16,
+    marginTop: 12,
   },
   priorityLabel: {
-    marginBottom: 12,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginBottom: 8,
   },
   priorityOptions: {
     flexDirection: 'row',
@@ -542,7 +570,7 @@ const styles = StyleSheet.create({
   formRow: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   formField: {
     flex: 1,
@@ -551,8 +579,23 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
   },
-  nextButton: {
-    marginTop: 32,
+  adminActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginTop: 24,
+  },
+  adminActionButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  adminActionText: {
+    color: colors.textWhite,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    marginLeft: 8,
   },
   errorText: {
     color: colors.error,
@@ -561,13 +604,13 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   dropdownContainer: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   dropdownLabel: {
     fontSize: fonts.sm,
     fontFamily: fonts.medium,
     color: colors.textSecondary,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   dropdown: {
     flexDirection: 'row',
@@ -577,11 +620,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 8,
-    padding: 12,
-    minHeight: 48,
+    padding: 10,
+    minHeight: 44,
   },
   dropdownText: {
-    fontSize: fonts.base,
+    fontSize: fonts.sm,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     flex: 1,
@@ -607,7 +650,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight || colors.border,
   },
@@ -615,7 +658,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundSecondary,
   },
   dropdownOptionText: {
-    fontSize: fonts.base,
+    fontSize: fonts.sm,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
   },

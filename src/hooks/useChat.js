@@ -33,17 +33,14 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     
     const role = user.role?.toLowerCase();
     
-    // Client always uses admin-client
     if (role === 'client') {
       return 'admin-client';
     }
     
-    // Worker/Designer (coral/cad) uses admin-designer
     if (role === 'coral' || role === 'cad' || role === 'worker' || role === 'designer') {
       return 'admin-designer';
     }
     
-    // Admin can use either, default to admin-client
     if (role === 'admin') {
       return chatType || 'admin-client';
     }
@@ -51,12 +48,9 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     return chatType || 'admin-client';
   }, [user, chatType]);
 
-  // Step 1: Get chat by enquiry ID and type from chats list
-  // Backend creates chat automatically when first message is sent
-  // So we search the chats list for this enquiry, or create a virtual chat
+  // Fetch chat by enquiry ID
   const fetchChat = useCallback(async () => {
     if (!enquiryId || !user) return;
-
     const type = getChatType();
     if (!type) return;
 
@@ -68,12 +62,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
 
       // If we have a direct chatId, fetch that specific chat first
       if (chatId) {
-        if (__DEV__) {
-          console.log('🔍 Fetching chat directly by chatId:', chatId);
-        }
-        
         try {
-          // Try to get the specific chat by ID
           const chatResponse = await fetch(`${API_BASE_URL}/api/chats/${chatId}`, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -96,18 +85,16 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
           }
         } catch (chatIdError) {
           if (__DEV__) {
-            console.warn('⚠️ Error fetching chat by ID, falling back to search:', chatIdError.message);
+            console.warn('⚠️ Error fetching chat by ID:', chatIdError.message);
           }
-          // Fall through to search by enquiryId
         }
       }
 
-      // Search for chat in the chats list by enquiryId and type
-      // Backend filters chats by type and user participation
+      // Search for chat by enquiry ID
       const searchParams = new URLSearchParams({
         type: type,
-        search: enquiryId, // Search by enquiryId
-        limit: '50', // Get enough to find our chat
+        search: enquiryId,
+        limit: '50',
       });
 
       const response = await fetch(`${API_BASE_URL}/api/chats?${searchParams.toString()}`, {
@@ -121,8 +108,9 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
         const result = await response.json();
         const chats = result.Data || result.data || result;
         
-        // If we have a chatId, find that specific chat, otherwise find by enquiryId
         let foundChat = null;
+        
+        // Try to find by chatId first
         if (chatId && Array.isArray(chats)) {
           foundChat = chats.find(chat => {
             const cId = chat._id || chat.id;
@@ -130,7 +118,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
           });
         }
         
-        // If not found by chatId, fall back to finding by enquiryId
+        // Fallback to finding by enquiryId
         if (!foundChat && Array.isArray(chats)) {
           foundChat = chats.find(chat => {
             const chatEnquiryId = chat.EnquiryId || chat.enquiryId;
@@ -141,7 +129,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
 
         if (foundChat) {
           if (__DEV__) {
-            console.log('✅ Chat found in list:', foundChat);
+            console.log('✅ Chat found by enquiry ID:', foundChat);
           }
           setChat(foundChat);
           setIsLoadingChat(false);
@@ -149,18 +137,11 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
         }
       }
 
-      // Chat doesn't exist yet - backend will create it when first message is sent
-      // Create a virtual chat object for now
-      if (__DEV__) {
-        console.log('ℹ️ Chat not found, will be created when first message is sent');
-      }
-      
-      // We need to get the enquiry name if possible, but for now use a placeholder
-      // The chat will be created with proper name when first message is sent
+      // Create virtual chat if not found
       const virtualChat = {
-        _id: chatId || null, // Use provided chatId if available
+        _id: chatId || null,
         EnquiryId: enquiryId,
-        EnquiryName: 'New Chat', // Will be updated when chat is created
+        EnquiryName: 'New Chat',
         Type: type,
         CreatedAt: new Date().toISOString(),
       };
@@ -169,9 +150,8 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       
     } catch (error) {
       if (__DEV__) {
-        console.warn('⚠️ Error fetching chat, using virtual chat:', error.message);
+        console.error('❌ Error fetching chat:', error);
       }
-      // Fallback: use virtual chat (backend will create real chat on first message)
       const fallbackChat = {
         _id: chatId || null,
         EnquiryId: enquiryId,
@@ -186,62 +166,193 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     }
   }, [enquiryId, user, getChatType, chatId]);
 
-  // Step 2 & 3: Connect to socket and join chat
-  // Note: If chat._id is null (virtual chat), we'll join after chat is created
+  // Load messages from API - RTK Query handles caching automatically
+  const { data: apiMessages, isLoading: messagesLoading, refetch: refetchMessages, error: messagesError } = useGetChatMessagesQuery(
+    { chatId: chat?._id, limit: 20 },
+    {
+      skip: !chat?._id,
+      refetchOnFocus: true, // Refetch when screen is focused
+      refetchOnMountOrArgChange: true, // Refetch when chatId changes
+    }
+  );
+
+  const refetchMessagesRef = useRef(refetchMessages);
   useEffect(() => {
-    if (!chat || !user) return;
-    
-    // If chat doesn't have an _id yet (virtual chat), wait for it to be created
-    // The chat will be created when first message is sent
-    if (!chat._id) {
+    refetchMessagesRef.current = refetchMessages;
+  }, [refetchMessages]);
+
+  // Track last processed API messages to prevent unnecessary updates
+  const lastApiMessagesRef = useRef(null);
+  const lastChatIdRef = useRef(null);
+  
+  // SIMPLIFIED: Always show messages when API provides them
+  useEffect(() => {
+    // Debug logging
       if (__DEV__) {
-        console.log('ℹ️ Virtual chat - will join room after first message creates chat');
+      console.log('🔍 Message Effect Trigger:', {
+        chatId: chat?._id,
+        apiMessagesType: typeof apiMessages,
+        apiMessagesIsArray: Array.isArray(apiMessages),
+        apiMessagesLength: apiMessages?.length || 0,
+        currentMessagesLength: messages.length,
+        messagesLoading,
+        lastChatId: lastChatIdRef.current,
+        lastApiIds: lastApiMessagesRef.current?.substring(0, 50),
+      });
+    }
+
+    if (!chat?._id) {
+      if (messages.length > 0) {
+        setMessages([]);
       }
+      lastChatIdRef.current = null;
+      lastApiMessagesRef.current = null;
       return;
     }
 
-    // Try to connect to socket (but don't fail if it doesn't work)
+    // Track chat changes
+    const chatChanged = lastChatIdRef.current !== chat._id;
+    if (chatChanged) {
+      lastChatIdRef.current = chat._id;
+      lastApiMessagesRef.current = null; // Always reset on chat change
+      if (__DEV__) {
+        console.log('🔄 Chat changed:', chat._id);
+      }
+    }
+
+    // Process API messages - SIMPLIFIED LOGIC
+    if (apiMessages && Array.isArray(apiMessages)) {
+      const apiMessagesIds = apiMessages.length > 0
+        ? apiMessages.map(msg => msg._id || msg.id).filter(Boolean).join(',')
+        : 'empty';
+      
+      // ALWAYS update if:
+      // - Chat changed
+      // - Messages are empty  
+      // - API messages IDs changed
+      const shouldUpdate = chatChanged || messages.length === 0 || apiMessagesIds !== lastApiMessagesRef.current;
+      
+      if (shouldUpdate) {
+        if (__DEV__) {
+          console.log('✅ UPDATING MESSAGES:', {
+            apiCount: apiMessages.length,
+            currentCount: messages.length,
+            reason: chatChanged ? 'chat changed' : messages.length === 0 ? 'empty state' : 'api changed',
+            firstMessage: apiMessages[0] || null,
+          });
+        }
+
+        setMessages(prevMessages => {
+          const messageMap = new Map();
+          
+          // Add API messages first (source of truth)
+          apiMessages.forEach(msg => {
+            const id = msg._id || msg.id;
+            if (id && !String(id).startsWith('temp-')) {
+              messageMap.set(id, msg);
+            }
+          });
+
+          // Add WebSocket messages that aren't in API
+          prevMessages.forEach(msg => {
+            const id = msg._id || msg.id;
+            if (id && String(id).startsWith('temp-')) {
+              messageMap.set(id, msg); // Keep optimistic
+            } else if (id && !messageMap.has(id)) {
+              messageMap.set(id, msg); // Keep WebSocket-only
+            }
+          });
+          
+          const merged = Array.from(messageMap.values()).sort((a, b) => {
+            const timeA = new Date(a.Timestamp || a.timestamp || 0);
+            const timeB = new Date(b.Timestamp || b.timestamp || 0);
+            return timeA - timeB;
+          });
+          
+          if (__DEV__) {
+            console.log('✅ Messages set:', merged.length, 'messages');
+          }
+          
+          return merged;
+        });
+        
+        lastApiMessagesRef.current = apiMessagesIds;
+        
+        // Set cursor
+        if (apiMessages[0]?._nextCursor !== undefined) {
+          setNextCursor(apiMessages[0]._nextCursor || null);
+        } else if (apiMessages.length > 0) {
+          const timestamp = apiMessages[0].Timestamp || apiMessages[0].timestamp;
+          if (timestamp) setNextCursor(timestamp);
+          else setNextCursor(null);
+        } else {
+          setNextCursor(null);
+        }
+      } else {
+        if (__DEV__) {
+          console.log('⏭️ Skipping - no change needed');
+        }
+      }
+    } else if (Array.isArray(apiMessages) && apiMessages.length === 0) {
+      // Empty response - only clear temp messages
+      if (lastApiMessagesRef.current !== 'empty') {
+        setMessages(prev => prev.filter(msg => {
+          const id = msg._id || msg.id;
+          return !id || !String(id).startsWith('temp-');
+        }));
+        lastApiMessagesRef.current = 'empty';
+        setNextCursor(null);
+      }
+    }
+  }, [apiMessages, chat?._id]);
+
+  // Socket connection and event handlers
+  useEffect(() => {
+    if (!chat?._id || !user) return;
+
+    const setupSocket = async () => {
     if (!socketService.isConnected()) {
       try {
-        socketService.connect(user.id).catch(err => {
           if (__DEV__) {
-            console.warn('⚠️ Socket connection failed, continuing without real-time updates:', err.message);
+            console.log('🔌 Connecting to socket for chat:', chat._id);
           }
-        });
+          await socketService.connect(user.id);
+          if (__DEV__) {
+            console.log('✅ Socket connected');
+          }
       } catch (err) {
         if (__DEV__) {
-          console.warn('⚠️ Socket connection error, continuing without real-time updates:', err.message);
+            console.warn('⚠️ Socket connection failed:', err.message);
         }
       }
     }
 
-    // Join chat room (only if chat._id exists)
+      if (socketService.isConnected() && chat._id) {
+        if (__DEV__) {
+          console.log('🚪 Joining chat room:', chat._id);
+        }
     socketService.joinChat(chat._id, user.id);
+      }
+    };
 
-    // Set up event listeners
+    setupSocket();
+
     const handleNewMessage = (message) => {
       if (__DEV__) {
-        console.log('📨 New message received:', message);
-        console.log('📨 Current chat._id:', chat._id);
+        console.log('📨 WebSocket message received:', message);
       }
       
-      // Check if message belongs to current chat
-      const messageChatId = message.ChatId || message.chatId || message.EnquiryId || message.enquiryId;
+      const messageChatId = String(message.ChatId || message.chatId || message.EnquiryId || message.enquiryId || '').trim();
+      const currentChatId = String(chat._id || '').trim();
       
-      // Normalize both IDs to strings for comparison (handle ObjectId vs string)
-      const normalizedMessageChatId = String(messageChatId || '').trim();
-      const normalizedChatId = String(chat._id || '').trim();
-      
+      if (messageChatId !== currentChatId) {
       if (__DEV__) {
-        console.log('📨 Comparing chatIds:', {
-          messageChatId: normalizedMessageChatId,
-          currentChatId: normalizedChatId,
-          match: normalizedMessageChatId === normalizedChatId
-        });
+          console.log('⚠️ Message ignored - chatId mismatch:', messageChatId, 'vs', currentChatId);
+        }
+        return;
       }
-      
-      if (normalizedMessageChatId === normalizedChatId) {
-        // Normalize message format to match what the UI expects
+
+      // Normalize message format
         const normalizedMessage = {
           _id: message._id || message.id,
           id: message._id || message.id,
@@ -264,73 +375,71 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
           media: message.Media || message.media,
           ChatId: messageChatId,
           chatId: messageChatId,
-          ...message, // Preserve any other fields
+        status: 'sent',
         };
 
         setMessages(prev => {
           const newMsgId = normalizedMessage._id || normalizedMessage.id;
           
-          // Check if message already exists by ID
+        if (!newMsgId) {
+          return prev; // Invalid message, skip
+        }
+
+        // Check if message already exists (by ID)
           const existingIndex = prev.findIndex(msg => {
             const msgId = msg._id || msg.id;
-            return msgId === newMsgId;
+          return String(msgId) === String(newMsgId);
           });
           
           if (existingIndex !== -1) {
-            // Update existing message
-            return prev.map((msg, index) => {
-              if (index === existingIndex) {
-                return { ...normalizedMessage, status: 'sent' };
-              }
-              return msg;
-            });
-          }
-          
-          // Check if there's an optimistic message with same content to replace
+          // Update existing message (WebSocket might have newer data)
+          return prev.map((msg, index) => 
+            index === existingIndex ? normalizedMessage : msg
+          );
+        }
+        
+        // Check for optimistic message to replace
           const optimisticIndex = prev.findIndex(msg => {
             const msgId = msg._id || msg.id;
-            return msgId?.toString().startsWith('temp-') && 
+          return String(msgId).startsWith('temp-') && 
                    msg.Message === normalizedMessage.Message &&
-                   msg.SenderId === normalizedMessage.SenderId &&
-                   msg.status === 'sending';
+                 String(msg.SenderId) === String(normalizedMessage.SenderId);
           });
           
           if (optimisticIndex !== -1) {
-            // Clear the refetch timeout since we got the WebSocket event
-            const optimisticMsg = prev[optimisticIndex];
-            if (optimisticMsg._refetchTimeout) {
-              clearTimeout(optimisticMsg._refetchTimeout);
-            }
-            
             // Replace optimistic message with real one
-            return prev.map((msg, index) => {
-              if (index === optimisticIndex) {
-                return { ...normalizedMessage, status: 'sent' };
-              }
-              return msg;
-            }).sort((a, b) => {
+          return prev.map((msg, index) => 
+            index === optimisticIndex ? normalizedMessage : msg
+          ).sort((a, b) => {
               const timeA = new Date(a.Timestamp || a.timestamp || 0);
               const timeB = new Date(b.Timestamp || b.timestamp || 0);
               return timeA - timeB;
             });
           }
           
-          // Add new message and sort by timestamp
-          const updated = [...prev, { ...normalizedMessage, status: 'sent' }];
+        // Add new message (from WebSocket)
+        const updated = [...prev, normalizedMessage];
           return updated.sort((a, b) => {
             const timeA = new Date(a.Timestamp || a.timestamp || 0);
             const timeB = new Date(b.Timestamp || b.timestamp || 0);
             return timeA - timeB;
           });
         });
-      } else {
+
+      // Trigger refetch to sync with API (but don't wait for it)
+      // This ensures API and WebSocket stay in sync
+      setTimeout(() => {
+        try {
+          const refetchFn = refetchMessagesRef.current;
+          if (refetchFn && typeof refetchFn === 'function') {
+            refetchFn();
+          }
+        } catch (error) {
         if (__DEV__) {
-          console.log('⚠️ Message ignored - chatId mismatch:', {
-            messageChatId: normalizedMessageChatId,
-            currentChatId: normalizedChatId
-          });
+            console.warn('⚠️ Could not refetch after WebSocket message:', error.message);
         }
       }
+      }, 500);
     };
 
     const handleMessagesRead = (data) => {
@@ -358,15 +467,13 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       }
     };
 
-    // Subscribe to events
-    // Register listeners
+    // Register event listeners
     socketService.on('newMessage', handleNewMessage);
     socketService.on('messagesRead', handleMessagesRead);
     socketService.on('userTyping', handleUserTyping);
     
     if (__DEV__) {
       console.log('✅ Registered WebSocket listeners for chat:', chat._id);
-      console.log('✅ Socket connected:', socketService.isConnected());
     }
 
     // Cleanup
@@ -375,168 +482,22 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       socketService.off('messagesRead', handleMessagesRead);
       socketService.off('userTyping', handleUserTyping);
       
-      // Leave chat room (only if chat._id exists)
       if (chat?._id) {
         socketService.leaveChat(chat._id, user.id);
       }
     };
-  }, [chat?._id, chat, user]);
+  }, [chat?._id, user]);
 
-  // Step 4: Load old messages
-  const { data: initialMessages = [], isLoading: messagesLoading, refetch: refetchMessages, error: messagesError } = useGetChatMessagesQuery(
-    { chatId: chat?._id, limit: 20 },
-    {
-      skip: !chat?._id,
-      refetchOnFocus: true, // Refetch when screen is focused (when user revisits)
-      refetchOnMountOrArgChange: true, // Refetch when chatId changes
-    }
-  );
-
-  // Log API response for debugging
-  useEffect(() => {
-    if (__DEV__ && chat?._id) {
-      if (messagesError) {
-        console.error('❌ Error fetching messages:', messagesError);
-      } else if (initialMessages) {
-        console.log('📥 API Messages received:', {
-          count: Array.isArray(initialMessages) ? initialMessages.length : 0,
-          chatId: chat._id,
-          isArray: Array.isArray(initialMessages),
-          sample: Array.isArray(initialMessages) && initialMessages.length > 0 ? initialMessages[0] : null
-        });
-      }
-    }
-  }, [initialMessages, messagesError, chat?._id]);
-
-  // Track last processed messages to prevent infinite loops
-  const lastProcessedMessagesRef = useRef(null);
-  
-  // Create a stable reference for initialMessages to prevent unnecessary re-renders
-  const initialMessagesIds = useMemo(() => {
-    if (!initialMessages || !Array.isArray(initialMessages)) return null;
-    return initialMessages.map(msg => msg._id || msg.id).filter(Boolean).join(',');
-  }, [initialMessages]);
-
-  // Initialize messages from API (merge with existing WebSocket messages)
-  useEffect(() => {
-    // Skip if we've already processed these messages
-    if (initialMessagesIds === lastProcessedMessagesRef.current) {
-      if (__DEV__) {
-        console.log('⏭️ Skipping message merge - already processed');
-      }
-      return;
-    }
-
-    if (initialMessages && Array.isArray(initialMessages) && initialMessages.length > 0) {
-      if (__DEV__) {
-        console.log('🔄 Merging API messages with existing messages:', {
-          apiCount: initialMessages.length,
-          existingCount: messages.length
-        });
-      }
-      setMessages(prev => {
-        // Merge API messages with WebSocket messages
-        // Create a map of existing messages by ID
-        const existingMap = new Map();
-        
-        // First, add all existing messages (WebSocket messages)
-        prev.forEach(msg => {
-          const id = msg._id || msg.id;
-          if (id && !id.toString().startsWith('temp-')) {
-            // Don't keep temporary optimistic messages if we have real data
-            existingMap.set(id, msg);
-          }
-        });
-
-        // Then, add/update with API messages (these are the source of truth)
-        initialMessages.forEach(apiMsg => {
-          const id = apiMsg._id || apiMsg.id;
-          if (id) {
-            // API messages take precedence (they're persisted)
-            existingMap.set(id, apiMsg);
-          }
-        });
-
-        // Convert back to array and sort by timestamp
-        const merged = Array.from(existingMap.values());
-        const sorted = merged.sort((a, b) => {
-          const timeA = new Date(a.Timestamp || a.timestamp || 0);
-          const timeB = new Date(b.Timestamp || b.timestamp || 0);
-          return timeA - timeB;
-        });
-        
-        // Only update if messages actually changed
-        const prevIds = prev.map(msg => msg._id || msg.id).filter(Boolean).join(',');
-        const newIds = sorted.map(msg => msg._id || msg.id).filter(Boolean).join(',');
-        
-        if (prevIds === newIds && prev.length === sorted.length) {
-          return prev; // No change, return previous state
-        }
-        
-        return sorted;
-      });
-      
-      // Extract nextCursor from first message (for pagination)
-      const firstMessage = initialMessages[0];
-      if (firstMessage && firstMessage._nextCursor !== undefined) {
-        setNextCursor(firstMessage._nextCursor || null);
-        if (__DEV__) {
-          console.log('📄 NextCursor extracted:', firstMessage._nextCursor);
-        }
-      }
-      
-      // Mark as processed
-      lastProcessedMessagesRef.current = initialMessagesIds;
-    } else if (initialMessages && Array.isArray(initialMessages) && initialMessages.length === 0) {
-      // If API returns empty array, only clear temporary messages if we haven't already
-      if (lastProcessedMessagesRef.current !== 'empty') {
-        if (__DEV__) {
-          console.log('📭 API returned empty array, keeping non-temporary messages');
-        }
-        setMessages(prev => {
-          // Keep non-temporary messages
-          const realMessages = prev.filter(msg => {
-            const id = msg._id || msg.id;
-            return id && !id.toString().startsWith('temp-');
-          });
-          
-          // Only update if we actually removed messages
-          if (realMessages.length === prev.length) {
-            return prev;
-          }
-          
-          return realMessages;
-        });
-        
-        lastProcessedMessagesRef.current = 'empty';
-      }
-    } else if (!initialMessages || !Array.isArray(initialMessages)) {
-      if (__DEV__) {
-        console.warn('⚠️ initialMessages is not a valid array:', initialMessages);
-      }
-    }
-  }, [initialMessages, initialMessagesIds]);
-
-  // Step 6: Send message
-  // Backend requires chatId - if chat doesn't exist, we need to create it first
-  // For now, if chat._id is null, we'll try to create/find the chat before sending
+  // Send message
   const sendMessage = useCallback(async (messageText, replyTo = null) => {
     if (!messageText?.trim() || !chat || !user) {
       return false;
     }
 
-    // If chat doesn't have an _id yet, we need to create it first
-    // Backend creates chat automatically, but we need to find it or create it
     let actualChatId = chat._id;
     
+    // If chat doesn't exist yet, try to find/create it
     if (!actualChatId) {
-      if (__DEV__) {
-        console.log('⚠️ Chat not created yet, need to create it first');
-      }
-      
-      // Try to create the chat by fetching it from the list again
-      // Or we can try to send with enquiryId and let backend handle it
-      // For now, we'll refetch the chat list to see if it was created
       try {
         const token = await AsyncStorage.getItem('token');
         const type = getChatType();
@@ -562,7 +523,6 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
           
           if (foundChat?._id) {
             actualChatId = foundChat._id;
-            // Update chat state
             setChat(prev => ({
               ...prev,
               _id: foundChat._id,
@@ -572,20 +532,19 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
         }
       } catch (error) {
         if (__DEV__) {
-          console.error('❌ Error fetching chat before sending message:', error);
+          console.error('❌ Error fetching chat:', error);
         }
       }
 
-      // If still no chatId, we can't send the message
       if (!actualChatId) {
         if (__DEV__) {
-          console.error('❌ Cannot send message: chat not found and cannot be created');
+          console.error('❌ Cannot send message: chat not found');
         }
         return false;
       }
     }
 
-    // Optimistically add message to local state (will be replaced by server response)
+    // Create optimistic message
     const tempMessageId = `temp-${Date.now()}-${Math.random()}`;
     const optimisticMessage = {
       _id: tempMessageId,
@@ -611,7 +570,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     // Add optimistic message immediately
     setMessages(prev => [...prev, optimisticMessage]);
 
-    // Send via WebSocket (backend only accepts WebSocket messages)
+    // Send via WebSocket
     const sent = socketService.sendMessage({
       chatId: actualChatId,
       userId: user.id,
@@ -621,9 +580,6 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     });
 
     if (!sent) {
-      if (__DEV__) {
-        console.error('❌ Cannot send message: WebSocket not connected');
-      }
       // Mark message as failed
       setMessages(prev => prev.map(msg => 
         msg._id === tempMessageId 
@@ -633,142 +589,85 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       return false;
     }
 
-    // Always refetch from API after sending to ensure UI updates
-    // This is a fallback in case WebSocket event is not received
-    const refetchDelay = 2000; // Wait for WebSocket event first
-    
-    const refetchTimeout = setTimeout(() => {
-      if (__DEV__) {
-        console.log('🔄 Refetching messages after send (ensuring UI updates)');
+    // Refetch as backup after delay
+    setTimeout(() => {
+      try {
+        const refetchFn = refetchMessagesRef.current;
+        if (refetchFn && typeof refetchFn === 'function') {
+          refetchFn();
+        }
+      } catch (error) {
+        if (__DEV__) {
+          console.warn('⚠️ Could not refetch after sending:', error.message);
+        }
       }
-      refetchMessages().then(() => {
-        if (__DEV__) {
-          console.log('✅ Messages refetched successfully');
-        }
-      }).catch(err => {
-        if (__DEV__) {
-          console.warn('⚠️ Failed to refetch messages after sending:', err);
-        }
-      });
-    }, refetchDelay);
-    
-    // Store timeout ID so we can clear it if WebSocket event is received
-    optimisticMessage._refetchTimeout = refetchTimeout;
-
-    if (__DEV__) {
-      console.log('✅ Message sent via WebSocket, will refetch from API as fallback');
-    }
+    }, 2000);
 
     return true;
-  }, [chat, user, refetchMessages, enquiryId, getChatType]);
+  }, [chat, user, enquiryId, getChatType]);
 
-  // Step 7: Send media
+  // Send media
   const sendMedia = useCallback(async (file) => {
     if (!file || !chat?._id || !user) {
-      if (__DEV__) {
-        console.warn('⚠️ Cannot send media: missing file, chat, or user', {
-          hasFile: !!file,
-          hasChat: !!chat?._id,
-          hasUser: !!user,
-        });
-      }
       return false;
     }
 
     try {
-      if (__DEV__) {
-        console.log('📤 Starting media upload:', {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          messageType: file.messageType,
-        });
-      }
-
-      // Upload media first
       const uploadResult = await uploadChatMedia({
         uri: file.uri,
         type: file.type || 'image/jpeg',
         name: file.name || `file_${Date.now()}.jpg`,
       }).unwrap();
 
-      if (__DEV__) {
-        console.log('✅ Media upload result:', uploadResult);
-      }
-
-      // Determine message type from file or upload result
       let messageType = file.messageType || 'file';
       if (!messageType) {
-        // Fallback: determine from file type
         if (file.type?.startsWith('image/')) {
           messageType = 'image';
         } else if (file.type?.startsWith('video/')) {
           messageType = 'video';
-        } else {
-          messageType = 'file';
         }
       }
 
-      // Extract media metadata from upload result
       const mediaUrl = uploadResult.Url || uploadResult.url || uploadResult.key;
       const mediaName = uploadResult.name || file.name || 'Media file';
       const mediaKey = uploadResult.key || uploadResult.Key || mediaUrl;
-      const mediaSize = uploadResult.size || file.size || 0;
 
-      if (__DEV__) {
-        console.log('📨 Sending message with media:', {
-          chatId: chat._id,
-          messageType,
-          mediaName,
-          mediaUrl,
-          mediaKey,
-          mediaSize,
-        });
-      }
-
-      // Send message with media via WebSocket
       const sent = socketService.sendMessage({
         chatId: chat._id,
         userId: user.id,
-        message: mediaName, // Use file name as message text
+        message: mediaName,
         messageType: messageType,
         parentMessageId: null,
         mediaUrl: mediaUrl,
         mediaName: mediaName,
         mediaKey: mediaKey,
-        mediaSize: mediaSize,
+        mediaSize: uploadResult.size || file.size || 0,
       });
 
-      if (!sent) {
+      if (sent) {
+        // Refetch after delay to ensure message appears
+        setTimeout(() => {
+          try {
+            const refetchFn = refetchMessagesRef.current;
+            if (refetchFn && typeof refetchFn === 'function') {
+              refetchFn();
+            }
+          } catch (error) {
         if (__DEV__) {
-          console.warn('⚠️ WebSocket not connected, media sent but may not appear in real-time');
-        }
-        // Still return true - media was uploaded successfully
-        // The message will appear when messages are refetched from API
-      } else {
-        if (__DEV__) {
-          console.log('✅ Media message sent via WebSocket');
+              console.warn('⚠️ Could not refetch after sending media:', error.message);
         }
       }
-
-      // Refetch messages after a delay to ensure the new message appears
-      setTimeout(() => {
-        refetchMessages();
       }, 1500);
+      }
 
-      return true;
+      return sent;
     } catch (error) {
-      console.error('❌ Error sending media:', error);
       if (__DEV__) {
-        console.error('Error details:', {
-          message: error.message,
-          status: error.status,
-          data: error.data,
-        });
+        console.error('❌ Error sending media:', error);
       }
       return false;
     }
-  }, [chat?._id, user, uploadChatMedia, refetchMessages]);
+  }, [chat?._id, user, uploadChatMedia]);
 
   // Send typing indicator
   const sendTyping = useCallback((isTyping) => {
@@ -776,45 +675,9 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     socketService.sendTyping(chat._id, user.id, isTyping);
   }, [chat?._id, user]);
 
-  // Load chat on mount or when enquiryId or chatId changes
-  useEffect(() => {
-    if (enquiryId && user) {
-      fetchChat();
-    }
-  }, [enquiryId, chatId, user, fetchChat]);
-
-  // Refetch messages when chat is loaded or screen is revisited
-  const chatIdRef = useRef(null);
-  useEffect(() => {
-    // Only refetch if chatId actually changed (not on every render)
-    if (chat?._id && chat._id !== chatIdRef.current && !messagesLoading) {
-      chatIdRef.current = chat._id;
-      // Reset processed messages ref and cursor when chat changes
-      lastProcessedMessagesRef.current = null;
-      setNextCursor(null);
-      // Refetch messages when chat is first loaded or when user revisits
-      // This ensures we have the latest persisted messages from the database
-      const timer = setTimeout(() => {
-        if (__DEV__) {
-          console.log('🔄 Refetching messages for chat:', chat._id);
-        }
-        refetchMessages();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [chat?._id, messagesLoading]); // Removed refetchMessages from deps to prevent loops
-
-  // Load more messages (older messages) using pagination
+  // Load more messages (pagination)
   const loadMoreMessages = useCallback(async () => {
     if (!chat?._id || !nextCursor || isLoadingMore || messagesLoading) {
-      if (__DEV__) {
-        console.log('⏭️ Skipping loadMoreMessages:', {
-          hasChat: !!chat?._id,
-          hasCursor: !!nextCursor,
-          isLoadingMore,
-          messagesLoading
-        });
-      }
       return false;
     }
 
@@ -822,7 +685,6 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     
     try {
       const token = await AsyncStorage.getItem('token');
-
       const response = await fetch(
         `${API_BASE_URL}/api/message/${chat._id}/messages?before=${nextCursor}&limit=20`,
         {
@@ -833,138 +695,46 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
         }
       );
 
-      const responseText = await response.text();
-      
-      // Check if response is HTML (404 page or error page)
-      if (responseText.includes('<!DOCTYPE') || responseText.includes('<html') || responseText.includes('Cannot GET')) {
-        if (__DEV__) {
-          console.warn('⚠️ Backend returned HTML when loading more messages');
-        }
-        setIsLoadingMore(false);
-        return false;
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      // Parse JSON
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        if (__DEV__) {
-          console.error('❌ Failed to parse response as JSON:', parseError);
-        }
-        setIsLoadingMore(false);
-        return false;
-      }
+      const data = await response.json();
+      const messagesArray = data.Data || data.data || data;
 
-      // Extract messages array
-      let messagesArray = [];
-      let newNextCursor = null;
-      
-      if (data && data.Data && Array.isArray(data.Data)) {
-        messagesArray = data.Data;
-        newNextCursor = data.NextCursor || null;
-      } else if (Array.isArray(data)) {
-        messagesArray = data;
-      }
-
-      if (messagesArray.length > 0) {
-        // Transform messages to match our format
-        const transformedMessages = messagesArray.map((message) => {
-          const messageId = message._id?.$oid || message._id || message.id;
-          const senderId = message.senderId?.$oid || message.senderId || message.SenderId;
-          
-          let timestamp = message.timestamp;
-          if (timestamp?.$date) {
-            timestamp = timestamp.$date;
-          } else if (timestamp?.Timestamp) {
-            timestamp = timestamp.Timestamp;
-          } else if (typeof timestamp === 'string') {
-            timestamp = timestamp;
-          } else {
-            timestamp = new Date().toISOString();
-          }
-
-          const messageType = message.messageType || message.MessageType || message.type || 'text';
-          let text = message.message || message.Message || message.text || '';
-
-          return {
-            _id: messageId,
-            id: messageId,
-            Message: text,
-            message: text,
-            text: text,
-            SenderId: senderId,
-            senderId: senderId,
-            SenderName: message.senderName || message.SenderName || message.sender?.name || 'Unknown',
-            senderName: message.senderName || message.SenderName || message.sender?.name || 'Unknown',
-            SenderRole: message.senderRole || message.SenderRole || message.sender?.role || 'user',
-            senderRole: message.senderRole || message.SenderRole || message.sender?.role || 'user',
-            Timestamp: timestamp,
-            timestamp: timestamp,
-            MessageType: messageType,
-            messageType: messageType,
-            Media: message.Media || null,
-            media: message.Media || null,
-            mediaUrl: message.Media?.Url || message.media?.url || message.mediaUrl,
-            mediaSize: message.Media?.Size || message.media?.size || message.mediaSize,
-            IsRead: message.IsRead || message.isRead || false,
-            isRead: message.IsRead || message.isRead || false,
-            ReplyTo: message.ReplyTo || message.replyTo || null,
-            replyTo: message.ReplyTo || message.replyTo || null,
-            ChatId: message.ChatId || message.chatId || chat._id,
-            chatId: message.ChatId || message.chatId || chat._id,
-            status: message.status || message.Status || 'sent',
-            isGroup: message.isGroup || message.IsGroup || false,
-            _originalData: message,
-          };
-        });
-
-        // Prepend older messages to the beginning of the array
+      if (Array.isArray(messagesArray) && messagesArray.length > 0) {
         setMessages(prev => {
-          const existingMap = new Map();
+          // Merge old messages with new ones (deduplicate)
+          const messageMap = new Map();
+          
           // Add existing messages
           prev.forEach(msg => {
             const id = msg._id || msg.id;
-            if (id) existingMap.set(id, msg);
-          });
-          // Add new older messages (they should be older, so prepend)
-          transformedMessages.forEach(msg => {
-            const id = msg._id || msg.id;
-            if (id) existingMap.set(id, msg);
+            if (id) messageMap.set(id, msg);
           });
           
-          const merged = Array.from(existingMap.values());
-          const sorted = merged.sort((a, b) => {
+          // Add new messages (older messages)
+          messagesArray.forEach(msg => {
+            const id = msg._id || msg.id;
+            if (id) messageMap.set(id, msg);
+          });
+          
+          return Array.from(messageMap.values()).sort((a, b) => {
             const timeA = new Date(a.Timestamp || a.timestamp || 0);
             const timeB = new Date(b.Timestamp || b.timestamp || 0);
             return timeA - timeB;
           });
-          
-          return sorted;
         });
 
-        // Update cursor
-        setNextCursor(newNextCursor);
-        
-        if (__DEV__) {
-          console.log('✅ Loaded more messages:', {
-            count: messagesArray.length,
-            newNextCursor,
-            hasMore: newNextCursor !== null
-          });
-        }
-        
+        setNextCursor(data.NextCursor || null);
         setIsLoadingMore(false);
         return true;
-      } else {
+      }
+      
         // No more messages
         setNextCursor(null);
         setIsLoadingMore(false);
-        if (__DEV__) {
-          console.log('📭 No more messages to load');
-        }
         return false;
-      }
     } catch (error) {
       if (__DEV__) {
         console.error('❌ Error loading more messages:', error);
@@ -974,26 +744,96 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     }
   }, [chat?._id, nextCursor, isLoadingMore, messagesLoading]);
 
+  // Load chat on mount
+  useEffect(() => {
+    if (enquiryId && user) {
+      fetchChat();
+    }
+  }, [enquiryId, chatId, user, fetchChat]);
+
+  // Force refetch when chat is loaded and messages are empty (remount scenario)
+  const forceRefetchDoneRef = useRef(null);
+  useEffect(() => {
+    if (!chat?._id) return;
+    
+    // Reset ref when chat changes
+    if (forceRefetchDoneRef.current !== chat._id && forceRefetchDoneRef.current !== null) {
+      forceRefetchDoneRef.current = null;
+    }
+    
+    // Force refetch if messages are empty and query is not loading
+    // This handles the remount scenario where component remounts with empty state
+    if (messages.length === 0 && !messagesLoading && forceRefetchDoneRef.current !== chat._id) {
+      if (__DEV__) {
+        console.log('🔄 Force refetch triggered - empty messages detected:', {
+          chatId: chat._id,
+          messagesLoading,
+          apiMessages: apiMessages?.length || 0,
+        });
+      }
+      
+      // Small delay to ensure query is ready
+      const timer = setTimeout(() => {
+        try {
+          const refetchFn = refetchMessagesRef.current;
+          if (refetchFn && typeof refetchFn === 'function') {
+            if (__DEV__) {
+              console.log('🔄 Executing force refetch for chat:', chat._id);
+            }
+            refetchFn().then(() => {
+              if (__DEV__) {
+                console.log('✅ Force refetch completed');
+              }
+            }).catch(err => {
+              if (__DEV__) {
+                console.warn('⚠️ Force refetch failed:', err.message);
+              }
+            });
+            forceRefetchDoneRef.current = chat._id; // Mark as done for this chat
+          } else {
+            if (__DEV__) {
+              console.warn('⚠️ Refetch function not available');
+            }
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('⚠️ Could not force refetch:', error.message);
+          }
+        }
+      }, 500); // Increased delay to ensure query is initialized
+      return () => clearTimeout(timer);
+    }
+  }, [chat?._id, messages.length, messagesLoading, apiMessages]);
+
+  // Debug: Log messages state changes
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('📊 MESSAGES STATE:', {
+        count: messages.length,
+        chatId: chat?._id,
+        apiMessagesCount: apiMessages?.length || 0,
+        messagesLoading,
+        sample: messages.length > 0 ? messages[0] : null,
+      });
+    }
+  }, [messages.length, chat?._id, apiMessages?.length, messagesLoading]);
+
   return {
-    // State
     chat,
     messages,
     isLoadingChat,
     messagesLoading,
-    chatError,
+    chatError: chatError || messagesError,
     isTyping,
     isUploading,
-    nextCursor, // Cursor for pagination (null when no more messages)
-    isLoadingMore, // Loading state for pagination
-    hasMore: nextCursor !== null && nextCursor !== undefined, // Whether more messages are available
-    
-    // Methods
+    nextCursor,
+    isLoadingMore,
+    hasMore: nextCursor !== null && nextCursor !== undefined,
     sendMessage,
     sendMedia,
     sendTyping,
     refetchChat: fetchChat,
     refetchMessages,
-    loadMoreMessages, // Load older messages using pagination
+    loadMoreMessages,
   };
 };
-

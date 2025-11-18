@@ -399,12 +399,24 @@ const UploadDesignScreen = ({ route, navigation }) => {
 
       {/* Upload All Button */}
       <View style={styles.buttonContainer}>
-        <Button
-          title="Upload All"
+        <TouchableOpacity
           onPress={handleUploadAll}
-          loading={isUploading}
-          style={styles.uploadAllButton}
-        />
+          disabled={isUploading}
+          style={[styles.adminActionButton, styles.adminActionButtonPrimary, isUploading && styles.btnDisabled]}
+          activeOpacity={0.85}
+        >
+          {isUploading ? (
+            <>
+              <Icon name="hourglass-empty" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>Uploading...</Text>
+            </>
+          ) : (
+            <>
+              <Icon name="cloud-upload" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>Upload All</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -589,8 +601,25 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  uploadAllButton: {
+  adminActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  adminActionButtonPrimary: {
     backgroundColor: colors.primary,
+  },
+  adminActionText: {
+    color: colors.textWhite,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  btnDisabled: {
+    opacity: 0.5,
   },
 });
 

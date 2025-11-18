@@ -14,7 +14,8 @@ import { Heading, CustomText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
-import { useGetEnquiryByIdQuery, useGetClientsQuery, useGetUsersQuery, useUpdateEnquiryMutation } from '../../store/api';
+import { useGetEnquiryByIdQuery, useGetUsersQuery, useUpdateEnquiryMutation } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 import { useAuth } from '../../context/AuthContext';
 
 const EditEnquiryStep1Screen = ({ route, navigation }) => {
@@ -36,8 +37,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     ? fetchedEnquiry 
     : enquiryToEdit;
   
-  // Fetch clients for dropdown
-  const { data: clientsData = [] } = useGetClientsQuery(undefined, {
+  // Fetch clients for dropdown (using cached hook)
+  const { clients: clientsData = [] } = useClients({
     skip: false,
   });
   const clients = useMemo(() => Array.isArray(clientsData) ? clientsData : [], [clientsData]);
@@ -170,15 +171,21 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       enquiryStatus = 'Completed';
     } else if (statusLower.includes('approval') && statusLower.includes('pending')) {
       enquiryStatus = 'Design Approval Pending';
-    } else if (statusLower === 'cad' || statusLower.includes('cad')) {
+    } else if (statusLower.includes('approved cad') || statusLower === 'approved cad') {
+      enquiryStatus = 'Approved Cad';
+    } else if (statusLower.includes('order placement') || statusLower === 'order placement') {
+      enquiryStatus = 'Order Placement';
+    } else if (statusLower.includes('cam pending') || statusLower === 'cam pending') {
+      enquiryStatus = 'CAM Pending';
+    } else if (statusLower.includes('production') || statusLower === 'production') {
+      enquiryStatus = 'Production';
+    } else if (statusLower === 'cad' || (statusLower.includes('cad') && !statusLower.includes('approved'))) {
       enquiryStatus = 'CAD';
     } else if (statusLower === 'coral' || statusLower.includes('coral')) {
       enquiryStatus = 'Coral';
-    } else if (statusLower.includes('progress') || statusLower === 'in progress') {
-      enquiryStatus = 'In Progress';
     } else if (statusLower.includes('rejected') || statusLower === 'rejected') {
       enquiryStatus = 'Rejected';
-    } else if (statusLower.includes('created') || statusLower.includes('pending')) {
+    } else if (statusLower.includes('created') || (statusLower.includes('pending') && !statusLower.includes('approval') && !statusLower.includes('cam'))) {
       enquiryStatus = 'Enquiry Created';
     } else {
       // Try to match exactly if it's already in the correct format
@@ -538,7 +545,10 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Design Approval Pending', value: 'Design Approval Pending' },
     { label: 'CAD', value: 'CAD' },
     { label: 'Coral', value: 'Coral' },
-    { label: 'In Progress', value: 'In Progress' },
+    { label: 'Approved Cad', value: 'Approved Cad' },
+    { label: 'Order Placement', value: 'Order Placement' },
+    { label: 'CAM Pending', value: 'CAM Pending' },
+    { label: 'Production', value: 'Production' },
     { label: 'Completed', value: 'Completed' },
     { label: 'Rejected', value: 'Rejected' },
   ];
@@ -564,21 +574,25 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   }, [users]);
 
   const categoryOptions = [
-    { label: 'Ring', value: 'Ring' },
     { label: 'Necklace', value: 'Necklace' },
-    { label: 'Earrings', value: 'Earrings' },
+    { label: 'Ring', value: 'Ring' },
+    { label: 'Earring', value: 'Earring' },
     { label: 'Bracelet', value: 'Bracelet' },
     { label: 'Pendant', value: 'Pendant' },
-    { label: 'Other', value: 'Other' },
+    { label: 'Hoops', value: 'Hoops' },
+    { label: 'Chain', value: 'Chain' },
+    { label: 'Bangle', value: 'Bangle' },
+    { label: 'Belt Buckle', value: 'Belt Buckle' },
+    { label: 'Custom', value: 'Custom' },
   ];
 
   const metalColorOptions = [
-    { label: 'Gold', value: 'Gold' },
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
     { label: 'Yellow Gold', value: 'Yellow Gold' },
-    { label: 'Platinum', value: 'Platinum' },
-    { label: 'Silver', value: 'Silver' },
+    { label: 'Two Tone Rose White Gold', value: 'Two Tone Rose White Gold' },
+    { label: 'Two Tone Yellow White Gold', value: 'Two Tone Yellow White Gold' },
+    { label: 'Three Tone Rose Yellow White Gold', value: 'Three Tone Rose Yellow White Gold' },
   ];
 
   const metalQualityOptions = [
@@ -586,16 +600,18 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     { label: '14K', value: '14K' },
     { label: '18K', value: '18K' },
     { label: '22K', value: '22K' },
-    { label: '24K', value: '24K' },
+    { label: 'Silver 925', value: 'Silver 925' },
+    { label: 'Platinum', value: 'Platinum' },
   ];
 
   const stoneTypeOptions = [
-    { label: 'Natural Regular', value: 'NaturalRegular' },
-    { label: 'Natural Lower', value: 'NaturalLower' },
-    { label: 'CVD Lab Grown', value: 'CVDLabGrown' },
-    { label: 'HPHT Lab Grown', value: 'HPHTLabGrown' },
-    { label: 'Moissanite', value: 'Moissanite' },
-    { label: 'Other', value: 'Other' },
+    { label: 'LabGrown', value: 'LabGrown' },
+    { label: 'CVDLabGrown', value: 'CVDLabGrown' },
+    { label: 'NaturalRegular', value: 'NaturalRegular' },
+    { label: 'NaturalLower', value: 'NaturalLower' },
+    { label: 'Synthetic', value: 'Synthetic' },
+    { label: 'LabTreatedDiamond', value: 'LabTreatedDiamond' },
+    { label: 'ColoredLabTreatedNat', value: 'ColoredLabTreatedNat' },
   ];
 
   if (fetchingEnquiry) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
-import { useGetChatsByEnquiryQuery } from '../../store/api';
+import { useGetChatsByEnquiryV2Query } from '../../store/api';
 import { AnimatedLogoLoader } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -21,23 +21,103 @@ const ChatGroupsScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { enquiry, enquiryId } = route.params || {};
   const [refreshing, setRefreshing] = useState(false);
-  const [focusedChat, setFocusedChat] = useState(null); 
-  // Get enquiry ID from route params
-  const currentEnquiryId = enquiryId || enquiry?.id || enquiry?._id;
-  console.log('currentEnquiryId', enquiry, enquiryId);
+  const [focusedChat, setFocusedChat] = useState(null);
+  const [renderError, setRenderError] = useState(null);
+  
+  // Memoize enquiry ID to prevent infinite loops
+  const currentEnquiryId = useMemo(() => {
+    const id = enquiryId || enquiry?.id || enquiry?._id;
+    // Normalize to string and trim to ensure consistency
+    return id ? String(id).trim() : null;
+  }, [enquiryId, enquiry?.id, enquiry?._id]);
+  
+  if (__DEV__) {
+    console.log('ChatGroupsScreen - Route params:', { enquiry, enquiryId, currentEnquiryId });
+  }
+  
   // Fetch all chats for this enquiry (both admin-client and admin-designer)
+  // Use stable query parameters to prevent unnecessary refetches
+  const queryParams = useMemo(() => {
+    if (!currentEnquiryId) return null;
+    return { enquiryId: currentEnquiryId };
+  }, [currentEnquiryId]);
+  
   const { 
-    data: chats = [], 
+    data: chatsData, 
     isLoading, 
     error, 
     refetch 
-  } = useGetChatsByEnquiryQuery(
-    { enquiryId: currentEnquiryId },
+  } = useGetChatsByEnquiryV2Query(
+    queryParams,
     {
-      skip: !currentEnquiryId,
-      refetchOnFocus: true,
+      skip: !queryParams || !currentEnquiryId,
+      refetchOnFocus: false, // Disable to prevent infinite loops
     }
   );
+  
+  // Ensure chats is always an array
+  const chats = Array.isArray(chatsData) ? chatsData : [];
+  
+  if (__DEV__) {
+    console.log('ChatGroupsScreen - Chats data:', {
+      chatsData,
+      chatsArray: chats,
+      chatsLength: chats.length,
+      isLoading,
+      error: error ? { message: error.message, data: error.data } : null,
+    });
+  }
+  
+  // Show error if enquiryId is missing (after hooks)
+  if (!currentEnquiryId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <Icon name="error-outline" size={48} color={colors.error} />
+          <Text style={styles.errorText}>Invalid Enquiry</Text>
+          <Text style={styles.errorSubtext}>
+            Enquiry ID is missing. Please go back and try again.
+          </Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              if (navigation?.goBack) {
+                navigation.goBack();
+              }
+            }}
+          >
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
+  // Show render error if any
+  if (renderError) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <Icon name="error-outline" size={48} color={colors.error} />
+          <Text style={styles.errorText}>Something went wrong</Text>
+          <Text style={styles.errorSubtext}>
+            {renderError?.message || 'Please try again'}
+          </Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setRenderError(null);
+              if (navigation?.goBack) {
+                navigation.goBack();
+              }
+            }}
+          >
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -49,28 +129,46 @@ const ChatGroupsScreen = ({ route, navigation }) => {
   }, [refetch]);
 
   const handleChatPress = (chat) => {
-    // Get the actual chat ID from multiple possible sources and normalize to string
-    const chatId = String(chat._id || chat.id || chat._originalData?._id || '').trim();
-    const chatType = chat?.Type || chat?.type || chat?._originalData?.Type;
-    
-    console.log('Navigating to chat:', { chatId, chatType, chat });
-    
-    navigation.navigate('ChatDetail', {
-      chatId: chatId, // Pass the specific chat ID
-      chat: chat, // Pass the full chat object
-      enquiry: enquiry,
-      enquiryId: currentEnquiryId,
-      chatType: chatType
-    });
+    try {
+      // Get the actual chat ID from multiple possible sources and normalize to string
+      const chatId = String(chat?._id || chat?.id || chat?._originalData?._id || '').trim();
+      const chatType = chat?.Type || chat?.type || chat?._originalData?.Type;
+      
+      if (!chatId) {
+        if (__DEV__) {
+          console.error('Cannot navigate: chatId is missing', chat);
+        }
+        return;
+      }
+      
+      if (__DEV__) {
+        console.log('Navigating to chat:', { chatId, chatType, chat });
+      }
+      
+      if (navigation?.navigate) {
+        navigation.navigate('ChatDetail', {
+          chatId: chatId, // Pass the specific chat ID
+          chat: chat, // Pass the full chat object
+          enquiry: enquiry,
+          enquiryId: currentEnquiryId,
+          chatType: chatType
+        });
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error navigating to chat:', error, chat);
+      }
+      setRenderError(error);
+    }
   };
   
 
   const renderChatGroup = (chat) => {
     if (!chat) return null;
     
-    // Get unique chat ID (handle both normalized and original data structures)
-
-    const  chatDataOriginal = chat?._originalData || chat;
+    try {
+      // Get unique chat ID (handle both normalized and original data structures)
+      const chatDataOriginal = chat?._originalData || chat || {};
     // Normalize to string for consistent comparison
     const chatId = String(chatDataOriginal.id || chatDataOriginal._id || chatDataOriginal._id || '').trim();
     
@@ -155,6 +253,12 @@ const ChatGroupsScreen = ({ route, navigation }) => {
         </View>
       </TouchableOpacity>
     );
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error rendering chat group:', error, chat);
+      }
+      return null;
+    }
   };
 
   if (isLoading && chats.length === 0) {
@@ -185,19 +289,17 @@ const ChatGroupsScreen = ({ route, navigation }) => {
     );
   }
 
+  // Safety check - ensure we always return valid JSX
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <AnimatedLogoLoader size={80} />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-back" size={24} color={colors.textWhite} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Chat Groups</Text>
-        <View style={styles.headerRight} />
-      </View> */}
-
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -220,15 +322,29 @@ const ChatGroupsScreen = ({ route, navigation }) => {
           </View>
         ) : (
           <>
-            {chats.map((chat, index) => {
-              // Ensure each chat has a unique key - normalize to string
-              const chatId = String(chat.id || chat._id || chat._originalData?._id || `chat-${index}`).trim();
-              return (
-                <View key={chatId}>
-                  {renderChatGroup(chat)}
-                </View>
-              );
-            })}
+            {chats
+              .filter(chat => chat && (chat.id || chat._id)) // Filter out invalid chats
+              .map((chat, index) => {
+                try {
+                  // Ensure each chat has a unique key - normalize to string
+                  const chatId = String(chat.id || chat._id || chat._originalData?._id || `chat-${index}`).trim();
+                  const renderedChat = renderChatGroup(chat);
+                  // Only render if renderChatGroup returned something valid
+                  if (!renderedChat) return null;
+                  return (
+                    <View key={chatId}>
+                      {renderedChat}
+                    </View>
+                  );
+                } catch (error) {
+                  if (__DEV__) {
+                    console.error('Error rendering chat item:', error, chat);
+                  }
+                  return null;
+                }
+              })
+              .filter(item => item !== null) // Remove null items
+            }
           </>
         )}
       </ScrollView>

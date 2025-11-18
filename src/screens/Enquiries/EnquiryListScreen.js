@@ -3,19 +3,21 @@ import {
   View,
   StyleSheet,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   RefreshControl,
   Modal,
   Text,
   Dimensions,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../../context/AuthContext';
 import { useFilteredEnquiries } from '../../features/enquiries/enquiriesHooks';
-import { useGetClientsQuery } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 import {
   setFilters,
   setSearchQuery,
@@ -25,11 +27,12 @@ import {
   clearFilters,
   setPage,
 } from '../../features/enquiries/enquiriesSlice';
-import { EnquiryCard, CompactEnquiryCard, Card } from '../../components/cards/Cards';
+import { EnquiryCard, CompactEnquiryCard, CompactEnquiryCardMemo, Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
 import Icon from '../../components/common/Icon';
+import EnquiryFiltersModal from '../../components/filters/EnquiryFiltersModal';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 // Import PDF generator module
@@ -47,7 +50,7 @@ if (__DEV__) {
 
 const { width } = Dimensions.get('window');
 
-const statusList = ['All', 'Pending', 'In Progress', 'Completed'];
+const statusList = ['All', 'Enquiry Created', 'Design Approval Pending', 'CAD', 'Coral', 'Approved Cad', 'Order Placement', 'CAM Pending', 'Production', 'Completed', 'Rejected'];
 
 const EnquiryListScreen = ({ navigation }) => {
   const dispatch = useDispatch();
@@ -71,16 +74,24 @@ const EnquiryListScreen = ({ navigation }) => {
   // - Admin users: See ALL enquiries (no assignedTo filter)
   // - Non-admin users (designers, clients, etc.): See ONLY enquiries assigned to them (assignedTo={userId})
   // The hook automatically determines whether to apply assignedTo filter based on role
-  const { enquiries: filteredEnquiries, allEnquiries: enquiries, isLoading: loading, refetch, pagination } = 
-    useFilteredEnquiries(user?.role, currentUserId);
+  const { 
+    enquiries: filteredEnquiries, 
+    allEnquiries: enquiries, 
+    isLoading: loading, 
+    isLoadingMore,
+    refetch, 
+    pagination,
+    loadMore,
+    hasMore
+  } = useFilteredEnquiries(user?.role, currentUserId);
   
   // Get pagination state from Redux
   const currentPage = useSelector(state => state.enquiries.pagination.currentPage);
   const totalPages = useSelector(state => state.enquiries.pagination.totalPages);
   const total = useSelector(state => state.enquiries.pagination.total);
   
-  // Fetch clients to enrich client names
-  const { data: clientsData = [], isLoading: clientsLoading, error: clientsError } = useGetClientsQuery(undefined, {
+  // Fetch clients to enrich client names (using cached hook)
+  const { clients: clientsData = [], isLoading: clientsLoading, error: clientsError } = useClients({
     skip: !user,
   });
   
@@ -101,7 +112,6 @@ const EnquiryListScreen = ({ navigation }) => {
   const [showFilters, setShowFilters] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [isPageChanging, setIsPageChanging] = useState(false);
 
   // Create a client ID to name lookup map
   // Handle both string and object ID comparisons
@@ -140,64 +150,247 @@ const EnquiryListScreen = ({ navigation }) => {
   // Enrich enquiries with client names from the clients API
   // Use useMemo to prevent unnecessary recomputation
   const enrichedEnquiries = useMemo(() => {
-    if (!enquiries || enquiries.length === 0) {
+    try {
+      if (!enquiries || !Array.isArray(enquiries) || enquiries.length === 0) {
+        return [];
+      }
+      
+      return enquiries
+        .filter(enquiry => enquiry && typeof enquiry === 'object') // Filter out invalid entries
+        .map(enquiry => {
+          try {
+            // If clientName is 'Unknown Client' or missing, try to fetch from clientNameMap
+            let finalClientName = enquiry.clientName || 'Unknown Client';
+            if ((!enquiry.clientName || enquiry.clientName === 'Unknown Client') && enquiry.clientId) {
+              // Try multiple ID formats for matching
+              const clientIdStr = String(enquiry.clientId).trim();
+              let clientName = clientNameMap.get(clientIdStr);
+              
+              // If not found, try without trimming
+              if (!clientName) {
+                clientName = clientNameMap.get(String(enquiry.clientId));
+              }
+              
+              // Try cleaning MongoDB ObjectId format
+              if (!clientName) {
+                const cleanId = clientIdStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').trim();
+                clientName = clientNameMap.get(cleanId);
+              }
+              
+              if (clientName) {
+                finalClientName = clientName;
+                if (__DEV__ && enquiries.indexOf(enquiry) === 0) {
+                  console.log('Enriched enquiry with client name:', {
+                    clientId: enquiry.clientId,
+                    clientName: finalClientName
+                  });
+                }
+              }
+            }
+            return { ...enquiry, clientName: finalClientName };
+          } catch (error) {
+            if (__DEV__) {
+              console.warn('Error enriching enquiry:', error, enquiry);
+            }
+            // Return enquiry with default client name on error
+            return { ...enquiry, clientName: enquiry.clientName || 'Unknown Client' };
+          }
+        });
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error in enrichedEnquiries useMemo:', error);
+      }
+      // Return empty array on critical error to prevent crash
       return [];
     }
-    
-    return enquiries.map(enquiry => {
-      // If clientName is 'Unknown Client' or missing, try to fetch from clientNameMap
-      let finalClientName = enquiry.clientName;
-      if ((!enquiry.clientName || enquiry.clientName === 'Unknown Client') && enquiry.clientId) {
-        // Try multiple ID formats for matching
-        const clientIdStr = String(enquiry.clientId).trim();
-        let clientName = clientNameMap.get(clientIdStr);
-        
-        // If not found, try without trimming
-        if (!clientName) {
-          clientName = clientNameMap.get(String(enquiry.clientId));
-        }
-        
-        // Try cleaning MongoDB ObjectId format
-        if (!clientName) {
-          const cleanId = clientIdStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').trim();
-          clientName = clientNameMap.get(cleanId);
-        }
-        
-        if (clientName) {
-          finalClientName = clientName;
-          if (__DEV__ && enquiries.indexOf(enquiry) === 0) {
-            console.log('Enriched enquiry with client name:', {
-              clientId: enquiry.clientId,
-              clientName: finalClientName
-            });
-          }
-        }
-      }
-      return { ...enquiry, clientName: finalClientName };
-    });
   }, [enquiries, clientNameMap]);
 
   // Re-apply filtering on enriched enquiries
   const enrichedFilteredEnquiries = useMemo(() => {
-    if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
-      return filteredEnquiries; // Fallback to original filtered if no enriched data
-    }
+    try {
+      if (!enrichedEnquiries || !Array.isArray(enrichedEnquiries) || enrichedEnquiries.length === 0) {
+        // Fallback to original filtered if no enriched data
+        return Array.isArray(filteredEnquiries) ? filteredEnquiries : [];
+      }
 
-    let filtered = [...enrichedEnquiries];
+      let filtered = [...enrichedEnquiries];
     
     // Apply status filter
     if (filters.status && filters.status !== 'all') {
-      filtered = filtered.filter(e => e.status === filters.status);
+      filtered = filtered.filter(e => {
+        // Get status from multiple possible sources (prioritize StatusHistory/CurrentStatus)
+        let enquiryStatus = '';
+        
+        // First, try to get from StatusHistory (most accurate)
+        if (e.StatusHistory && Array.isArray(e.StatusHistory) && e.StatusHistory.length > 0) {
+          const sortedHistory = [...e.StatusHistory].sort((a, b) => {
+            const dateA = new Date(a.Timestamp || a.timestamp || 0);
+            const dateB = new Date(b.Timestamp || b.timestamp || 0);
+            return dateB - dateA;
+          });
+          enquiryStatus = (sortedHistory[0]?.Status || sortedHistory[0]?.status || '').toString();
+        }
+        
+        // Fallback to other status fields
+        if (!enquiryStatus) {
+          enquiryStatus = (e.CurrentStatus || e.Status || e.status || '').toString();
+        }
+        
+        const filterStatus = filters.status.toString();
+        
+        if (__DEV__ && filtered.indexOf(e) === 0) {
+          console.log('🔍 ========== STATUS FILTER DEBUG ==========');
+          console.log('🔍 Filter Status:', filterStatus);
+          console.log('🔍 Enquiry Status:', enquiryStatus);
+          console.log('🔍 Enquiry ID:', e.id || e._id);
+          console.log('🔍 StatusHistory:', e.StatusHistory ? e.StatusHistory.length : 'none');
+          console.log('🔍 CurrentStatus:', e.CurrentStatus);
+          console.log('🔍 Status:', e.Status);
+          console.log('🔍 status:', e.status);
+        }
+        
+        // Normalize both statuses for comparison (remove spaces, lowercase)
+        const normalizedEnquiryStatus = enquiryStatus.toLowerCase().replace(/\s+/g, '');
+        const normalizedFilterStatus = filterStatus.toLowerCase().replace(/\s+/g, '');
+        
+        // Exact match (case insensitive, space insensitive)
+        if (normalizedEnquiryStatus === normalizedFilterStatus) {
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('✅ Matched: Exact match');
+          }
+          return true;
+        }
+        
+        // Handle "Design Approval Pending" variations
+        if (normalizedFilterStatus.includes('designapprovalpending') || 
+            normalizedFilterStatus.includes('approvalpending')) {
+          const matches = normalizedEnquiryStatus.includes('approval') && 
+                 !normalizedEnquiryStatus.includes('approved');
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Design Approval Pending:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "Approved Cad" variations
+        if (normalizedFilterStatus.includes('approvedcad') || normalizedFilterStatus === 'approvedcad') {
+          const matches = normalizedEnquiryStatus.includes('approvedcad') || 
+                 (normalizedEnquiryStatus.includes('approved') && normalizedEnquiryStatus.includes('cad'));
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Approved Cad:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "Order Placement" variations
+        if (normalizedFilterStatus.includes('orderplacement')) {
+          const matches = normalizedEnquiryStatus.includes('orderplacement') ||
+                 (normalizedEnquiryStatus.includes('order') && normalizedEnquiryStatus.includes('placement'));
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Order Placement:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "CAM Pending" variations
+        if (normalizedFilterStatus.includes('campending')) {
+          const matches = normalizedEnquiryStatus.includes('campending') ||
+                 (normalizedEnquiryStatus.includes('cam') && normalizedEnquiryStatus.includes('pending'));
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking CAM Pending:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "Production" status
+        if (normalizedFilterStatus === 'production') {
+          const matches = normalizedEnquiryStatus === 'production' || 
+                 normalizedEnquiryStatus.includes('production');
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Production:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "Coral" status
+        if (normalizedFilterStatus === 'coral') {
+          const matches = normalizedEnquiryStatus.includes('coral');
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Coral:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "CAD" status (must be exact, not part of "Approved Cad")
+        if (normalizedFilterStatus === 'cad' && normalizedEnquiryStatus === 'cad') {
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('✅ Matched: CAD exact');
+          }
+          return true;
+        }
+        
+        // Handle "Completed" status
+        if (normalizedFilterStatus === 'completed') {
+          const matches = normalizedEnquiryStatus.includes('completed') || 
+                 normalizedEnquiryStatus.includes('approved');
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Completed:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "Rejected" status
+        if (normalizedFilterStatus === 'rejected') {
+          const matches = normalizedEnquiryStatus.includes('rejected');
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Rejected:', matches);
+          }
+          return matches;
+        }
+        
+        // Handle "Enquiry Created" status
+        if (normalizedFilterStatus.includes('enquirycreated') || normalizedFilterStatus === 'enquirycreated') {
+          const matches = normalizedEnquiryStatus.includes('enquirycreated') ||
+                 normalizedEnquiryStatus.includes('pending') ||
+                 normalizedEnquiryStatus === 'pending';
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('🔍 Checking Enquiry Created:', matches);
+          }
+          return matches;
+        }
+        
+        // Fallback: partial match for other statuses
+        if (normalizedEnquiryStatus.includes(normalizedFilterStatus) || 
+            normalizedFilterStatus.includes(normalizedEnquiryStatus)) {
+          if (__DEV__ && filtered.indexOf(e) === 0) {
+            console.log('✅ Matched: Partial match');
+          }
+          return true;
+        }
+        
+        if (__DEV__ && filtered.indexOf(e) === 0) {
+          console.log('❌ No match found');
+          console.log('🔍 =========================================');
+        }
+        return false;
+      });
     }
     
     // Apply priority filter
     if (filters.priority && filters.priority !== 'all') {
-      filtered = filtered.filter(e => e.priority === filters.priority);
+      filtered = filtered.filter(e => {
+        const enquiryPriority = e.priority || e.Priority || '';
+        return enquiryPriority === filters.priority || 
+               enquiryPriority.toLowerCase() === filters.priority.toLowerCase();
+      });
     }
     
-    // Apply client filter - use enriched client names
-    if (filters.client && filters.client !== 'all') {
-      filtered = filtered.filter(e => e.clientName === filters.client);
+    // Apply client filter
+    if (filters.clientId && filters.clientId !== 'all') {
+      filtered = filtered.filter(e => {
+        const enquiryClientId = e.clientId || e.ClientId || '';
+        return String(enquiryClientId).trim() === String(filters.clientId).trim();
+      });
     }
     
     // Apply search query
@@ -210,25 +403,63 @@ const EnquiryListScreen = ({ navigation }) => {
       );
     }
     
-    // Apply sorting (same logic as hook)
+    // Apply sorting - handle field name variations
     filtered.sort((a, b) => {
-      let aValue = a[sortBy];
-      let bValue = b[sortBy];
+      let aValue, bValue;
       
+      // Get values based on sortBy field, handling multiple possible field names
+      switch (sortBy) {
+        case 'title':
+          aValue = a.title || a.Name || a.name || '';
+          bValue = b.title || b.Name || b.name || '';
+          break;
+        case 'clientName':
+          aValue = a.clientName || a.ClientName || a.client || '';
+          bValue = b.clientName || b.ClientName || b.client || '';
+          break;
+        case 'budget':
+          aValue = a.budget || a.Budget || a.estimatedPrice || 0;
+          bValue = b.budget || b.Budget || b.estimatedPrice || 0;
+          break;
+        case 'status':
+          aValue = a.status || a.Status || a.CurrentStatus || '';
+          bValue = b.status || b.Status || b.CurrentStatus || '';
+          break;
+        case 'createdAt':
+          aValue = a.createdAt || a.CreatedDate || a.createdDate || a.CreatedAt || '';
+          bValue = b.createdAt || b.CreatedDate || b.createdDate || b.CreatedAt || '';
+          break;
+        case 'updatedAt':
+          aValue = a.updatedAt || a.UpdatedDate || a.updatedDate || a.UpdatedAt || '';
+          bValue = b.updatedAt || b.UpdatedDate || b.updatedDate || b.UpdatedAt || '';
+          break;
+        default:
+          // Fallback to direct property access
+          aValue = a[sortBy] || '';
+          bValue = b[sortBy] || '';
+      }
+      
+      // Handle null/undefined values
       if (aValue == null) aValue = '';
       if (bValue == null) bValue = '';
       
+      // Handle date sorting
       if (sortBy === 'createdAt' || sortBy === 'updatedAt') {
         aValue = aValue ? new Date(aValue).getTime() : 0;
         bValue = bValue ? new Date(bValue).getTime() : 0;
-      } else if (sortBy === 'budget') {
+      } 
+      // Handle number sorting
+      else if (sortBy === 'budget') {
         aValue = parseFloat(aValue) || 0;
         bValue = parseFloat(bValue) || 0;
-      } else if (typeof aValue === 'string') {
+      } 
+      // Handle string sorting
+      else if (typeof aValue === 'string') {
         aValue = aValue.toLowerCase();
         bValue = bValue.toLowerCase();
       }
       
+      // Apply sort order
       if (sortOrder === 'asc') {
         if (aValue < bValue) return -1;
         if (aValue > bValue) return 1;
@@ -240,7 +471,14 @@ const EnquiryListScreen = ({ navigation }) => {
       }
     });
     
-    return filtered;
+      return filtered;
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error in enrichedFilteredEnquiries useMemo:', error);
+      }
+      // Return empty array on error to prevent crash
+      return [];
+    }
   }, [enrichedEnquiries, filters, searchQuery, sortBy, sortOrder, filteredEnquiries]);
 
   // Get unique client list from enriched enquiries
@@ -275,16 +513,109 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Update filter when route params change
   useEffect(() => {
-    const newStatus = route.params?.filter || 'all';
-    if (newStatus !== filters.status) {
-      dispatch(setFilters({ status: newStatus }));
-      dispatch(setPage(1)); // Reset to first page when filter changes
+    if (route.params?.filter && !route.params?.filterType) {
+      // Map status filter values from Dashboard to filter format
+      // Handle various status name formats from aggregate API
+      const statusFilter = route.params.filter.toLowerCase();
+      let mappedStatus = 'all';
+      
+      if (__DEV__) {
+        console.log('🔍 ========== ROUTE PARAMS FILTER ==========');
+        console.log('🔍 Route params filter:', route.params.filter);
+        console.log('🔍 Status filter (lowercase):', statusFilter);
+      }
+      
+      // Map common status filter values
+      if (statusFilter === 'pending' || statusFilter === 'enquiry created' || 
+          (statusFilter.includes('pending') && !statusFilter.includes('approval') && !statusFilter.includes('cam'))) {
+        mappedStatus = 'Enquiry Created';
+      } else if (statusFilter === 'approval_pending' || statusFilter === 'design approval pending' || 
+                 (statusFilter.includes('approval') && statusFilter.includes('pending'))) {
+        mappedStatus = 'Design Approval Pending';
+      } else if (statusFilter === 'approved cad' || statusFilter === 'approvedcad') {
+        mappedStatus = 'Approved Cad';
+      } else if (statusFilter === 'order placement' || statusFilter === 'orderplacement') {
+        mappedStatus = 'Order Placement';
+      } else if (statusFilter === 'cam pending' || statusFilter === 'campending') {
+        mappedStatus = 'CAM Pending';
+      } else if (statusFilter === 'production') {
+        mappedStatus = 'Production';
+      } else if (statusFilter === 'completed' || statusFilter.includes('approved') || statusFilter.includes('completed')) {
+        mappedStatus = 'Completed';
+      } else if (statusFilter === 'rejected') {
+        mappedStatus = 'Rejected';
+      } else if (statusFilter === 'coral') {
+        mappedStatus = 'Coral';
+      } else if (statusFilter === 'cad') {
+        mappedStatus = 'CAD';
+      } else if (statusFilter === 'all') {
+        mappedStatus = 'all';
+      } else {
+        // For other statuses, try to match exactly or use title case
+        // Try to match against known status options
+        const knownStatuses = [
+          'Enquiry Created', 'Design Approval Pending', 'CAD', 'Coral',
+          'Approved Cad', 'Order Placement', 'CAM Pending', 'Production', 'Completed', 'Rejected'
+        ];
+        const matchedStatus = knownStatuses.find(s => 
+          s.toLowerCase() === statusFilter || 
+          s.toLowerCase().replace(/\s+/g, '') === statusFilter.replace(/\s+/g, '')
+        );
+        mappedStatus = matchedStatus || (route.params.filter.charAt(0).toUpperCase() + route.params.filter.slice(1).toLowerCase());
+      }
+      
+      if (__DEV__) {
+        console.log('🔍 Mapped status:', mappedStatus);
+        console.log('🔍 Current filters.status:', filters.status);
+        console.log('🔍 =========================================');
+      }
+      
+      if (mappedStatus !== filters.status) {
+        if (__DEV__) {
+          console.log('✅ Setting filter status to:', mappedStatus);
+        }
+        dispatch(setFilters({ 
+          status: mappedStatus === 'all' ? 'all' : mappedStatus,
+        }));
+        dispatch(setSelectedStatus(mappedStatus === 'all' ? 'All' : mappedStatus));
+        dispatch(setPage(1)); // Reset to first page when filter changes
+      }
     }
+    
+    // Handle client filter from route params
     if (route.params?.filterType === 'client' && route.params?.filter) {
-      dispatch(setSelectedClient(route.params.filter));
+      const clientName = route.params.filter;
+      const clientId = route.params?.clientId;
+      
+      // Clear status filter when applying client filter
+      // Set both client filter and clientId
+      if (clientId) {
+        dispatch(setFilters({ 
+          client: clientName,
+          clientId: clientId,
+          status: 'all' // Clear status filter
+        }));
+      } else {
+        // Try to find client by name if clientId not provided
+        const client = clients.find(c => c.name === clientName);
+        if (client) {
+          dispatch(setFilters({ 
+            client: clientName,
+            clientId: client.id || client._id,
+            status: 'all' // Clear status filter
+          }));
+        } else {
+          dispatch(setFilters({ 
+            client: clientName,
+            status: 'all' // Clear status filter
+          }));
+        }
+      }
+      dispatch(setSelectedClient(clientName));
+      dispatch(setSelectedStatus('All'));
       dispatch(setPage(1)); // Reset to first page when filter changes
     }
-  }, [route.params?.filterType, route.params?.filter]);
+  }, [route.params?.filterType, route.params?.filter, clients]);
   
   // Reset to page 1 when filters or search change
   useEffect(() => {
@@ -292,69 +623,207 @@ const EnquiryListScreen = ({ navigation }) => {
       dispatch(setPage(1));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.status, filters.priority, filters.client, searchQuery]);
+  }, [filters.category, filters.priority, filters.clientId, filters.stoneType, searchQuery]);
   
-  // Pagination handlers
-  const handlePageChange = (newPage) => {
-    if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
-      setIsPageChanging(true);
-      dispatch(setPage(newPage));
-      // Scroll to top when page changes
-      // You might want to add a ref to ScrollView and scroll to top here
+  // State to track loading more
+  const [isLoadingMoreLocal, setIsLoadingMoreLocal] = useState(false);
+  
+  // Handle loading more data for infinite scroll
+  const handleLoadMore = () => {
+    try {
+      if (!hasMore || isLoadingMore || isLoadingMoreLocal || loading) return;
+      
+      const nextPage = currentPage + 1;
+      if (nextPage <= totalPages) {
+        setIsLoadingMoreLocal(true);
+        dispatch(setPage(nextPage));
+        loadMore();
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error loading more enquiries:', error);
+      }
+      setIsLoadingMoreLocal(false);
+      // Don't show alert for load more errors - just silently fail
+      // User can try again by scrolling
     }
   };
-
-  // Reset page changing state when data is loaded
+  
+  // Reset local loading state when data finishes loading
   useEffect(() => {
-    if (!loading && isPageChanging) {
+    if (!loading && isLoadingMoreLocal) {
       // Small delay to ensure smooth transition
       const timer = setTimeout(() => {
-        setIsPageChanging(false);
+        setIsLoadingMoreLocal(false);
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [loading, isPageChanging]);
-
-  // Generate page numbers to display with ellipsis
-  const getPageNumbers = () => {
-    const pages = [];
-    const maxVisible = 7; // Show up to 7 page numbers
-    
-    if (totalPages <= maxVisible) {
-      // Show all pages if total is less than max visible
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
+  }, [loading, isLoadingMoreLocal]);
+  
+  // Debug: Log loading states
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('📊 Loading States:', {
+        isLoadingMore,
+        isLoadingMoreLocal,
+        loading,
+        hasMore,
+        currentPage,
+        totalPages,
+        enrichedCount: enrichedFilteredEnquiries.length,
+      });
+    }
+  }, [isLoadingMore, isLoadingMoreLocal, loading, hasMore, currentPage, totalPages, enrichedFilteredEnquiries.length]);
+  
+  // Render enquiry card item for FlatList
+  const renderEnquiryItem = ({ item: enquiry }) => {
+    if (!enquiry || !enquiry.id) {
+      if (__DEV__) {
+        console.warn('Skipping invalid enquiry item:', enquiry);
       }
-    } else {
-      // Show pages with ellipsis
-      if (currentPage <= 4) {
-        // Show first 5 pages, ellipsis, last page
-        for (let i = 1; i <= 5; i++) {
-          pages.push(i);
-        }
-        pages.push('ellipsis');
-        pages.push(totalPages);
-      } else if (currentPage >= totalPages - 3) {
-        // Show first page, ellipsis, last 5 pages
-        pages.push(1);
-        pages.push('ellipsis');
-        for (let i = totalPages - 4; i <= totalPages; i++) {
-          pages.push(i);
-        }
-      } else {
-        // Show first page, ellipsis, current-1, current, current+1, ellipsis, last page
-        pages.push(1);
-        pages.push('ellipsis');
-        pages.push(currentPage - 1);
-        pages.push(currentPage);
-        pages.push(currentPage + 1);
-        pages.push('ellipsis');
-        pages.push(totalPages);
-      }
+      return null;
     }
     
-    return pages;
+    try {
+      return (
+        <CompactEnquiryCardMemo
+          key={enquiry.id}
+          enquiry={enquiry}
+          onPress={() => {
+            if (__DEV__) {
+              console.log('Navigating to SingleEnquiry with enquiry ID:', enquiry?.id);
+            }
+            try {
+              if (!enquiry?.id) {
+                if (__DEV__) {
+                  console.warn('Cannot navigate: enquiry missing ID');
+                }
+                Alert.alert('Error', 'Invalid enquiry data. Please refresh the list.');
+                return;
+              }
+              
+              if (!navigation || typeof navigation.navigate !== 'function') {
+                if (__DEV__) {
+                  console.error('Navigation not available');
+                }
+                Alert.alert('Error', 'Navigation is not available. Please try again.');
+                return;
+              }
+              
+              navigation.navigate('SingleEnquiry', { 
+                enquiryId: enquiry.id, 
+                enquiry,
+                shouldRefresh: false,
+              });
+            } catch (error) {
+              if (__DEV__) {
+                console.error('Navigation error:', error);
+              }
+              Alert.alert('Error', 'Failed to open enquiry. Please try again.');
+            }
+          }}
+          getStatusColor={getStatusColor}
+          getStatusIcon={getStatusIcon}
+          getPriorityColor={getPriorityColor}
+          getPriorityIcon={getPriorityIcon}
+          formatCurrency={formatCurrency}
+          formatDate={formatDate}
+          userRole={user?.role}
+        />
+      );
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error rendering enquiry item:', error, enquiry);
+      }
+      return null; // Return null on error to prevent crash
+    }
   };
+  
+  // Render list header - no longer needed as chips are moved outside FlatList
+  const renderListHeader = () => {
+    return null;
+  };
+  
+  // Render loading footer for infinite scroll
+  const renderListFooter = () => {
+    // Check if we have more data available
+    const hasMoreData = hasMore && totalPages > currentPage && totalPages > 1;
+    
+    // Check if currently loading more data
+    const isCurrentlyLoading = isLoadingMore || isLoadingMoreLocal || (loading && enrichedFilteredEnquiries.length > 0 && currentPage > 1);
+    
+    // Don't show anything if no data at all
+    if (enrichedFilteredEnquiries.length === 0) {
+      return null;
+    }
+    
+    // Show "No more data" message if we've loaded all pages
+    if (!hasMoreData && !isCurrentlyLoading) {
+      return (
+        <View style={styles.endOfListContainer}>
+          <View style={styles.endOfListDivider} />
+          <Text style={styles.endOfListText}>You've reached the end</Text>
+        </View>
+      );
+    }
+    
+    // Always show loader if we have more data OR if currently loading
+    if (hasMoreData || isCurrentlyLoading) {
+      return (
+        <View style={styles.loadingMoreContainer}>
+          <View style={styles.loadingMoreContent}>
+            <ActivityIndicator 
+              size="small" 
+              color={colors.primary} 
+              style={styles.loadingSpinner}
+            />
+            {isCurrentlyLoading && (
+              <Text style={styles.loadingMoreText}>Loading more...</Text>
+            )}
+          </View>
+        </View>
+      );
+    }
+    
+    return null;
+  };
+  
+  // Render empty state
+  const renderEmpty = () => {
+    const hasActiveFilters = (filters.status && filters.status !== 'all') || 
+                            (filters.priority && filters.priority !== 'all') ||
+                            (filters.clientId && filters.clientId !== 'all') ||
+                            searchQuery;
+    
+    return (
+      <Card style={styles.emptyCard}>
+        <Icon name="description" size={40} color={colors.textLight} />
+        <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 13 }]}>
+          {hasActiveFilters ? 'No enquiries match your filters' : 'No enquiries found'}
+        </Text>
+        <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
+          {hasActiveFilters 
+            ? 'Try adjusting your filters or search query' 
+            : 'Try adjusting your search or filters'}
+        </Text>
+        {hasActiveFilters && (
+          <TouchableOpacity
+            style={styles.clearFiltersButton}
+            onPress={() => {
+              dispatch(clearFilters());
+              dispatch(setSearchQuery(''));
+              dispatch(setSelectedStatus('All'));
+              dispatch(setSelectedClient('All'));
+            }}
+          >
+            <Text style={styles.clearFiltersButtonText}>Clear All Filters</Text>
+          </TouchableOpacity>
+        )}
+      </Card>
+    );
+  };
+
+
 
   // Handler for downloading all enquiries as PDF
   const handleDownloadAllPDF = async () => {
@@ -363,15 +832,17 @@ const EnquiryListScreen = ({ navigation }) => {
       const downloadFn = pdfGeneratorModule?.downloadAllEnquiriesPDF;
       
       if (!downloadFn || typeof downloadFn !== 'function') {
-        console.error('downloadAllEnquiriesPDF not available:', {
-          module: pdfGeneratorModule,
-          moduleType: typeof pdfGeneratorModule,
-          moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
-          functionType: typeof downloadFn,
-        });
+        if (__DEV__) {
+          console.error('downloadAllEnquiriesPDF not available:', {
+            module: pdfGeneratorModule,
+            moduleType: typeof pdfGeneratorModule,
+            moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
+            functionType: typeof downloadFn,
+          });
+        }
         Alert.alert(
           'Error', 
-          'PDF export function not available. Please restart Metro bundler with: npm start -- --reset-cache'
+          'PDF export function is not available. Please contact support if this issue persists.'
         );
         return;
       }
@@ -411,10 +882,13 @@ const EnquiryListScreen = ({ navigation }) => {
         [{ text: 'OK' }]
       );
     } catch (error) {
-      console.error('Error generating PDF:', error);
+      if (__DEV__) {
+        console.error('Error generating PDF:', error);
+      }
+      const errorMessage = error?.message || 'Unknown error occurred';
       Alert.alert(
         'Error',
-        `Failed to generate PDF: ${error.message || 'Unknown error'}. Please try again.`,
+        `Failed to generate PDF: ${errorMessage}. Please try again.`,
         [{ text: 'OK' }]
       );
     }
@@ -426,9 +900,17 @@ const EnquiryListScreen = ({ navigation }) => {
   }
   
   const onRefresh = async () => {
-    setRefreshing(true);
-    await refetch(); // RTK Query refetch
-    setRefreshing(false);
+    try {
+      setRefreshing(true);
+      await refetch(); // RTK Query refetch
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error refreshing enquiries:', error);
+      }
+      Alert.alert('Error', 'Failed to refresh enquiries. Please try again.');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // No need for applyFilters - handled by useFilteredEnquiries hook
@@ -441,11 +923,15 @@ const EnquiryListScreen = ({ navigation }) => {
     dispatch(clearFilters());
   };
 
+  const handleApplyFilters = (newFilters) => {
+    dispatch(setFilters(newFilters));
+    dispatch(setPage(1)); // Reset to first page when filters are applied
+  };
+
   const getStatusOptions = () => {
     const baseOptions = [
       { label: 'All Status', value: 'all' },
       { label: 'Pending', value: 'pending' },
-      { label: 'In Progress', value: 'in_progress' },
       { label: 'Completed', value: 'completed' },
     ];
 
@@ -476,7 +962,6 @@ const EnquiryListScreen = ({ navigation }) => {
   const getStatusColor = (status) => {
     const statusColors = {
       pending: colors.warning,
-      in_progress: colors.info,
       completed: colors.success,
       rejected: colors.error,
     };
@@ -486,7 +971,6 @@ const EnquiryListScreen = ({ navigation }) => {
   const getStatusIcon = (status) => {
     const statusIcons = {
       pending: 'pendingActions',
-      in_progress: 'work',
       completed: 'check-circle',
       rejected: 'cancel',
     };
@@ -585,6 +1069,7 @@ const EnquiryListScreen = ({ navigation }) => {
                 style={styles.compactChipClose}
                 onPress={() => {
                   dispatch(setSelectedStatus('All'));
+                  dispatch(setFilters({ status: 'all' }));
                 }}
               >
                 <Icon name="close" size={12} color={colors.textWhite} />
@@ -598,7 +1083,14 @@ const EnquiryListScreen = ({ navigation }) => {
               key={status}
               style={styles.compactChip}
               onPress={() => {
+                const filterStatus = status === 'All' ? 'all' : status;
+                if (__DEV__) {
+                  console.log('🔍 Status chip clicked:', status);
+                  console.log('🔍 Setting filter to:', filterStatus);
+                }
                 dispatch(setSelectedStatus(status));
+                dispatch(setFilters({ status: filterStatus }));
+                dispatch(setPage(1)); // Reset to first page when filter changes
               }}
             >
               <Text style={styles.compactChipText}>{status}</Text>
@@ -639,6 +1131,8 @@ const EnquiryListScreen = ({ navigation }) => {
                 style={styles.compactChipClose}
                 onPress={() => {
                   dispatch(setSelectedClient('All'));
+                  dispatch(setFilters({ clientId: 'all', client: 'all' }));
+                  dispatch(setPage(1)); // Reset to first page when filter changes
                 }}
               >
                 <Icon name="close" size={12} color={colors.textWhite} />
@@ -653,6 +1147,24 @@ const EnquiryListScreen = ({ navigation }) => {
               style={styles.compactChip}
               onPress={() => {
                 dispatch(setSelectedClient(client));
+                // Find client ID from clients array
+                const clientObj = clients.find(c => c.name === client);
+                const clientId = clientObj?.id || clientObj?._id;
+                
+                if (client === 'All') {
+                  dispatch(setFilters({ clientId: 'all', client: 'all' }));
+                } else if (clientId) {
+                  dispatch(setFilters({ 
+                    clientId: String(clientId).trim(),
+                    client: client 
+                  }));
+                } else {
+                  // Fallback: try to find by name match
+                  dispatch(setFilters({ 
+                    client: client 
+                  }));
+                }
+                dispatch(setPage(1)); // Reset to first page when filter changes
               }}
             >
               <Text style={styles.compactChipText}>{client}</Text>
@@ -664,106 +1176,14 @@ const EnquiryListScreen = ({ navigation }) => {
   };
 
   const renderFilterModal = () => (
-    <Modal
+    <EnquiryFiltersModal
       visible={showFilters}
-      animationType="slide"
-      presentationStyle="pageSheet">
-      <View style={styles.filterModal}>
-        <View style={styles.filterHeader}>
-          <Text style={{ fontSize: 16, fontFamily: fonts.bold, color: colors.textPrimary }}>
-            Filters
-          </Text>
-          <TouchableOpacity onPress={() => setShowFilters(false)}>
-            <Text style={{ fontSize: 20, color: colors.textPrimary }}>✕</Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={styles.filterContent}>
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
-              Status
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {getStatusOptions().map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.filterOption,
-                    filters.status === option.value && styles.filterOptionActive,
-                  ]}
-                  onPress={() => handleFilterChange('status', option.value)}>
-                  <Text style={{ 
-                    color: filters.status === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: 13 
-                  }}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
-              Priority
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {getPriorityOptions().map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.filterOption,
-                    filters.priority === option.value && styles.filterOptionActive,
-                  ]}
-                  onPress={() => handleFilterChange('priority', option.value)}>
-                  <Text style={{ 
-                    color: filters.priority === option.value ? colors.textWhite : colors.textSecondary, 
-                    fontSize: 13 
-                  }}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Hide client filter for clients (role 4) */}
-          {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
-            <View style={styles.filterSection}>
-              <Text style={[styles.filterLabel, { color: colors.textPrimary, fontSize: 13, fontWeight: '500' }]}>
-                Client
-              </Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {getClientOptions().map(option => (
-                  <TouchableOpacity
-                    key={option.value}
-                    style={[
-                      styles.filterOption,
-                      filters.client === option.value && styles.filterOptionActive,
-                    ]}
-                    onPress={() => handleFilterChange('client', option.value)}>
-                    <Text style={{ 
-                      color: filters.client === option.value ? colors.textWhite : colors.textSecondary, 
-                      fontSize: 13 
-                    }}>
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-        </ScrollView>
-
-        <View style={styles.filterFooter}>
-          <Button
-            title="Apply Filters"
-            onPress={() => setShowFilters(false)}
-            style={styles.applyButton}
-          />
-        </View>
-      </View>
-    </Modal>
+      onClose={() => setShowFilters(false)}
+      filters={filters}
+      onApplyFilters={handleApplyFilters}
+      onClearFilters={handleClearFilters}
+      user={user}
+    />
   );
 
   const renderSortModal = () => (
@@ -776,7 +1196,10 @@ const EnquiryListScreen = ({ navigation }) => {
         style={styles.modalOverlay}
         activeOpacity={1}
         onPress={() => setShowSortModal(false)}>
-        <View style={styles.sortModalContent}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={(e) => e.stopPropagation()}
+          style={styles.sortModalContent}>
           <View style={styles.sortModalHeader}>
             <Text style={styles.sortModalTitle}>Sort by</Text>
             <TouchableOpacity
@@ -820,23 +1243,18 @@ const EnquiryListScreen = ({ navigation }) => {
               </TouchableOpacity>
             ))}
           </View>
-        </View>
+        </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
   );
 
-  if (loading && !isPageChanging) {
+  // Show full screen loader only on initial load (when no data yet)
+  if (loading && enrichedFilteredEnquiries.length === 0) {
     return <AnimatedLogoLoader size={80} />;
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Page changing loader overlay */}
-      {isPageChanging && (
-        <View style={styles.pageChangeLoader}>
-          <AnimatedLogoLoader size={60} />
-        </View>
-      )}
       <TopNavbar navigation={navigation} />
       <View style={styles.header}>
         <View style={styles.searchRow}>
@@ -870,116 +1288,50 @@ const EnquiryListScreen = ({ navigation }) => {
         
       </View>
 
-      <ScrollView
-        style={styles.scrollView}
+      {/* Filter chips - moved outside FlatList to remove gap */}
+      {renderStatusChips()}
+      {user?.role === 'admin' && renderClientChips()}
+
+      <FlatList
+        data={enrichedFilteredEnquiries.filter(enquiry => enquiry && enquiry.id)}
+        renderItem={renderEnquiryItem}
+        keyExtractor={(item, index) => {
+          // Use stable IDs - fallback to index only if absolutely necessary
+          if (item?.id) return String(item.id);
+          if (item?._id) return String(item._id);
+          // Last resort: use index (not ideal but better than Math.random())
+          if (__DEV__) {
+            console.warn('Enquiry item missing ID, using index:', index, item);
+          }
+          return `enquiry-${index}`;
+        }}
+        ListHeaderComponent={null}
+        ListFooterComponent={renderListFooter}
+        ListEmptyComponent={renderEmpty}
+        contentContainerStyle={[
+          styles.flatListContent,
+          enrichedFilteredEnquiries.length === 0 && styles.flatListContentEmpty
+        ]}
+        style={styles.flatList}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }>
-        
-        {renderStatusChips()}
-        {/* Hide client filter for clients (role 4) */}
-        {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && renderClientChips()}
-        
-        {enrichedFilteredEnquiries.length === 0 ? (
-          <Card style={styles.emptyCard}>
-            <Icon name="description" size={40} color={colors.textLight} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 13 }]}>
-              No enquiries found
-            </Text>
-            <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
-              Try adjusting your search or filters
-            </Text>
-          </Card>
-        ) : (
-          <View style={styles.cardsContainer}>
-            {enrichedFilteredEnquiries.filter(enquiry => enquiry && enquiry.id).map(enquiry => (
-              <CompactEnquiryCard
-                key={enquiry.id}
-                enquiry={enquiry}
-                onPress={() => {
-                  console.log('Navigating to SingleEnquiry with enquiry:', enquiry);
-                  console.log('Enquiry ID:', enquiry?.id);
-                  console.log('Enquiry object keys:', enquiry ? Object.keys(enquiry) : 'No enquiry object');
-                  try {
-                    navigation.navigate('SingleEnquiry', { 
-                      enquiryId: enquiry.id, 
-                      enquiry,
-                      shouldRefresh: false,
-                    });
-                  } catch (error) {
-                    console.error('Navigation error:', error);
-                  }
-                }}
-                getStatusColor={getStatusColor}
-                getStatusIcon={getStatusIcon}
-                getPriorityColor={getPriorityColor}
-                getPriorityIcon={getPriorityIcon}
-                formatCurrency={formatCurrency}
-                formatDate={formatDate}
-                userRole={user?.role}
-              />
-            ))}
-          </View>
-        )}
-      </ScrollView>
-
-      {/* Pagination Controls */}
-      {totalPages > 1 && (
-        <View style={styles.paginationContainer}>
-          <TouchableOpacity
-            style={styles.paginationArrow}
-            onPress={() => handlePageChange(currentPage - 1)}
-            disabled={currentPage === 1}>
-            <Icon 
-              name="chevron-left" 
-              size={20} 
-              color={currentPage === 1 ? colors.textLight : colors.textPrimary} 
-            />
-          </TouchableOpacity>
-
-          <View style={styles.paginationNumbers}>
-            {getPageNumbers().map((page, index) => {
-              if (page === 'ellipsis') {
-                return (
-                  <Text key={`ellipsis-${index}`} style={styles.paginationEllipsis}>
-                    ...
-                  </Text>
-                );
-              }
-              
-              const isActive = page === currentPage;
-              return (
-                <TouchableOpacity
-                  key={page}
-                  style={[
-                    styles.paginationNumber,
-                    isActive && styles.paginationNumberActive
-                  ]}
-                  onPress={() => handlePageChange(page)}
-                  disabled={isActive}>
-                  <Text style={[
-                    styles.paginationNumberText,
-                    isActive && styles.paginationNumberTextActive
-                  ]}>
-                    {page}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <TouchableOpacity
-            style={styles.paginationArrow}
-            onPress={() => handlePageChange(currentPage + 1)}
-            disabled={currentPage === totalPages}>
-            <Icon 
-              name="chevron-right" 
-              size={20} 
-              color={currentPage === totalPages ? colors.textLight : colors.textPrimary} 
-            />
-          </TouchableOpacity>
-        </View>
-      )}
+        }
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.3}
+        numColumns={2}
+        columnWrapperStyle={styles.row}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        initialNumToRender={10}
+        updateCellsBatchingPeriod={50}
+        getItemLayout={(data, index) => ({
+          length: 280, // Approximate card height
+          offset: 280 * Math.floor(index / 2),
+          index,
+        })}
+      />
 
       {renderFilterModal()}
       {renderSortModal()}
@@ -996,16 +1348,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    borderBottomWidth: 0,
     shadowColor: colors.cardShadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 5,
-    marginBottom: 12,
+    marginBottom: 0,
   },
   headerActions: {
     flexDirection: 'row',
@@ -1110,6 +1459,59 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  flatList: {
+    flex: 1,
+  },
+  flatListContent: {
+    paddingBottom: 20,
+    paddingTop: 0,
+  },
+  row: {
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  loadingMoreContainer: {
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingMoreContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  loadingSpinner: {
+    marginRight: 0,
+  },
+  loadingMoreText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+  },
+  endOfListContainer: {
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  endOfListDivider: {
+    width: 60,
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginBottom: 12,
+  },
+  endOfListText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    letterSpacing: 0.3,
+  },
+  flatListContentEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   cardsContainer: {
     flexDirection: 'row',
@@ -1236,15 +1638,21 @@ const styles = StyleSheet.create({
   sortOrderIndicator: {
     marginLeft: 8,
   },
+  listHeaderContainer: {
+    backgroundColor: colors.background,
+    marginTop: 0,
+    paddingTop: 0,
+  },
   // Compact Filter Row Styles
   compactFilterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingVertical: 8,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
+    marginTop: 0,
   },
   compactFilterLabel: {
     fontSize: fonts.sm,
@@ -1296,6 +1704,19 @@ const styles = StyleSheet.create({
     fontSize: fonts.xs,
     fontFamily: fonts.medium,
     color: colors.textSecondary,
+  },
+  clearFiltersButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  clearFiltersButtonText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
   },
   
   // Old chip styles (keeping for backward compatibility if needed)
@@ -1444,17 +1865,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: colors.textSecondary,
     paddingHorizontal: 4,
-  },
-  pageChangeLoader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
   },
 });
 

@@ -1,11 +1,11 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import {
   useGetEnquiriesQuery,
   useGetEnquiryByIdQuery,
-  useGetClientsQuery,
 } from '../../store/api';
-import { setPagination } from './enquiriesSlice';
+import { useClients } from '../clients/clientsHooks';
+import { setPagination, setPage } from './enquiriesSlice';
 import { useAuth } from '../../context/AuthContext';
 
 /**
@@ -25,8 +25,8 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
   const isClient = role === 'client' || user?.role === 'client' || user?.roleId === 4 || user?.roleNumber === 4;
   const isAdmin = role === 'admin' || role === 'AD';
   
-  // Fetch clients to find client ID for client users
-  const { data: clientsData = [] } = useGetClientsQuery(undefined, {
+  // Fetch clients to find client ID for client users (using cached hook)
+  const { clients: clientsData = [] } = useClients({
     skip: !isClient, // Only fetch if user is a client
   });
   const clients = Array.isArray(clientsData) ? clientsData : [];
@@ -77,10 +77,11 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
   console.log('🔐 Clients Count:', clients.length);
   console.log('🔐 ===============================================');
   
+  // For infinite scroll: always fetch page 1 initially, then load more pages as needed
   // When searching, fetch ALL enquiries (use large limit) to search across all pages
-  // Otherwise use current page for normal pagination
+  // Otherwise use lazy loading with limit 10
   const pageToFetch = searchQuery ? 1 : currentPage;
-  const limitToFetch = searchQuery ? 10000 : undefined; // Fetch all when searching
+  const limitToFetch = searchQuery ? 10000 : 10; // Use 10 for lazy loading, 10000 when searching
   
   const filters = useSelector(state => state.enquiries.filters);
   const sortBy = useSelector(state => state.enquiries.sortBy);
@@ -125,12 +126,63 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
   const pagination = data?.pagination || {
     total: 0,
     page: 1,
-    limit: 25,
+    limit: 10,
     totalPages: 1,
   };
+  
+  // State to accumulate enquiries across pages for infinite scroll
+  const [accumulatedEnquiries, setAccumulatedEnquiries] = useState([]);
+  const [loadedPages, setLoadedPages] = useState(new Set());
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  
+  // Reset accumulated data when filters/search/sort change (but not when page changes)
+  useEffect(() => {
+    setAccumulatedEnquiries([]);
+    setLoadedPages(new Set());
+    // Reset to page 1 when filters change
+    if (currentPage !== 1) {
+      dispatch(setPage(1));
+    }
+  }, [searchQuery, filters.status, filters.priority, sortBy, sortOrder, dispatch]);
+  
+  // Accumulate enquiries when new data arrives
+  useEffect(() => {
+    if (!searchQuery && enquiries.length > 0 && !isLoading) {
+      if (currentPage === 1) {
+        // First page - replace accumulated data
+        setAccumulatedEnquiries(enquiries);
+        setLoadedPages(new Set([1]));
+        setIsLoadingMore(false); // Reset loading state
+      } else if (!loadedPages.has(currentPage)) {
+        // New page - append to accumulated data
+        setAccumulatedEnquiries(prev => {
+          // Avoid duplicates by checking IDs
+          const existingIds = new Set(prev.map(e => e.id || e._id));
+          const newEnquiries = enquiries.filter(e => !existingIds.has(e.id || e._id));
+          return [...prev, ...newEnquiries];
+        });
+        setLoadedPages(prev => new Set([...prev, currentPage]));
+        setIsLoadingMore(false); // Reset loading state when new data arrives
+      }
+    } else if (searchQuery) {
+      // When searching, use all enquiries directly
+      setAccumulatedEnquiries(enquiries);
+      setIsLoadingMore(false);
+    }
+  }, [enquiries, currentPage, searchQuery, isLoading, loadedPages]);
+  
+  // Set loading more state when page changes (for pages > 1)
+  useEffect(() => {
+    if (!searchQuery && currentPage > 1 && !loadedPages.has(currentPage)) {
+      setIsLoadingMore(true);
+    }
+  }, [currentPage, searchQuery, loadedPages]);
+  
+  // Use accumulated enquiries for infinite scroll, or all enquiries when searching
+  const enquiriesToUse = searchQuery ? enquiries : accumulatedEnquiries;
 
   const filteredEnquiries = useMemo(() => {
-    let filtered = [...enquiries];
+    let filtered = [...enquiriesToUse];
     
     // CRITICAL: For client users, ensure we only show their enquiries
     // This is a safety measure in case backend doesn't filter properly
@@ -177,104 +229,74 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
     
     // Apply status filter
     if (filters.status && filters.status !== 'all') {
-      filtered = filtered.filter(e => e.status === filters.status);
-    }
-    
-    // Apply category filter
-    if (filters.category && filters.category !== 'all') {
       filtered = filtered.filter(e => {
-        const category = e.category || e.Category || '';
-        return category === filters.category;
+        const enquiryStatus = (e.status || e.Status || e.CurrentStatus || '').toString();
+        const filterStatus = filters.status.toString();
+        
+        // Normalize both statuses for comparison (remove spaces, lowercase)
+        const normalizedEnquiryStatus = enquiryStatus.toLowerCase().replace(/\s+/g, '');
+        const normalizedFilterStatus = filterStatus.toLowerCase().replace(/\s+/g, '');
+        
+        // Exact match (case insensitive, space insensitive)
+        if (normalizedEnquiryStatus === normalizedFilterStatus) {
+          return true;
+        }
+        
+        // Handle "Design Approval Pending" variations
+        if (normalizedFilterStatus.includes('designapprovalpending') || 
+            normalizedFilterStatus.includes('approvalpending')) {
+          return normalizedEnquiryStatus.includes('approval') && 
+                 !normalizedEnquiryStatus.includes('approved');
+        }
+        
+        // Handle "Approved Cad" variations
+        if (normalizedFilterStatus.includes('approvedcad') || normalizedFilterStatus === 'approvedcad') {
+          return normalizedEnquiryStatus.includes('approvedcad') || 
+                 (normalizedEnquiryStatus.includes('approved') && normalizedEnquiryStatus.includes('cad'));
+        }
+        
+        // Handle "Order Placement" variations
+        if (normalizedFilterStatus.includes('orderplacement')) {
+          return normalizedEnquiryStatus.includes('orderplacement') ||
+                 (normalizedEnquiryStatus.includes('order') && normalizedEnquiryStatus.includes('placement'));
+        }
+        
+        // Handle "CAM Pending" variations
+        if (normalizedFilterStatus.includes('campending')) {
+          return normalizedEnquiryStatus.includes('campending') ||
+                 (normalizedEnquiryStatus.includes('cam') && normalizedEnquiryStatus.includes('pending'));
+        }
+        
+        // Handle "Production" status
+        if (normalizedFilterStatus === 'production') {
+          return normalizedEnquiryStatus === 'production';
+        }
+        
+        // Handle "Coral" status
+        if (normalizedFilterStatus === 'coral') {
+          return normalizedEnquiryStatus.includes('coral');
+        }
+        
+        // Handle "CAD" status (must be exact, not part of "Approved Cad")
+        if (normalizedFilterStatus === 'cad' && normalizedEnquiryStatus === 'cad') {
+          return true;
+        }
+        
+        // Fallback: partial match for other statuses
+        if (normalizedEnquiryStatus.includes(normalizedFilterStatus) || 
+            normalizedFilterStatus.includes(normalizedEnquiryStatus)) {
+          return true;
+        }
+        
+        return false;
       });
     }
     
     // Apply priority filter
     if (filters.priority && filters.priority !== 'all') {
-      filtered = filtered.filter(e => e.priority === filters.priority);
-    }
-    
-    // Apply client filter (by ID or name)
-    if (filters.clientId && filters.clientId !== 'all') {
       filtered = filtered.filter(e => {
-        const clientId = e.clientId || e.ClientId || '';
-        const clientName = e.clientName || e.ClientName || '';
-        return String(clientId) === String(filters.clientId) || clientName === filters.clientId;
-      });
-    }
-    
-    // Apply assignedTo filter
-    if (filters.assignedTo && filters.assignedTo !== 'all') {
-      filtered = filtered.filter(e => {
-        const assignedTo = e.assignedTo || e.AssignedTo || '';
-        return String(assignedTo) === String(filters.assignedTo);
-      });
-    }
-    
-    // Apply stoneType filter
-    if (filters.stoneType && filters.stoneType !== 'all') {
-      filtered = filtered.filter(e => {
-        const stoneType = e.stoneType || e.StoneType || '';
-        return stoneType === filters.stoneType;
-      });
-    }
-    
-    // Apply metalColor filter
-    if (filters.metalColor && filters.metalColor !== 'all') {
-      filtered = filtered.filter(e => {
-        const metalColor = e.Metal?.Color || e.metal?.color || e.metalColor || '';
-        return metalColor === filters.metalColor;
-      });
-    }
-    
-    // Apply metalQuality filter
-    if (filters.metalQuality && filters.metalQuality !== 'all') {
-      filtered = filtered.filter(e => {
-        const metalQuality = e.Metal?.Quality || e.metal?.quality || e.metalQuality || '';
-        return metalQuality === filters.metalQuality;
-      });
-    }
-    
-    // Apply date range filters
-    if (filters.shippingDateFrom) {
-      filtered = filtered.filter(e => {
-        const shippingDate = e.ShippingDate || e.shippingDate || e.deadline;
-        if (!shippingDate) return false;
-        return new Date(shippingDate) >= new Date(filters.shippingDateFrom);
-      });
-    }
-    if (filters.shippingDateTo) {
-      filtered = filtered.filter(e => {
-        const shippingDate = e.ShippingDate || e.shippingDate || e.deadline;
-        if (!shippingDate) return false;
-        return new Date(shippingDate) <= new Date(filters.shippingDateTo);
-      });
-    }
-    if (filters.assignedDateFrom) {
-      filtered = filtered.filter(e => {
-        const assignedDate = e.AssignedDate || e.assignedDate || e.updatedAt;
-        if (!assignedDate) return false;
-        return new Date(assignedDate) >= new Date(filters.assignedDateFrom);
-      });
-    }
-    if (filters.assignedDateTo) {
-      filtered = filtered.filter(e => {
-        const assignedDate = e.AssignedDate || e.assignedDate || e.updatedAt;
-        if (!assignedDate) return false;
-        return new Date(assignedDate) <= new Date(filters.assignedDateTo);
-      });
-    }
-    if (filters.createdDateFrom) {
-      filtered = filtered.filter(e => {
-        const createdDate = e.CreatedDate || e.createdDate || e.createdAt;
-        if (!createdDate) return false;
-        return new Date(createdDate) >= new Date(filters.createdDateFrom);
-      });
-    }
-    if (filters.createdDateTo) {
-      filtered = filtered.filter(e => {
-        const createdDate = e.CreatedDate || e.createdDate || e.createdAt;
-        if (!createdDate) return false;
-        return new Date(createdDate) <= new Date(filters.createdDateTo);
+        const priority = e.priority || e.Priority || '';
+        return priority === filters.priority || priority.toLowerCase() === filters.priority.toLowerCase();
       });
     }
     
@@ -300,17 +322,47 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
       });
     }
     
-    // Apply sorting
+    // Apply sorting - handle field name variations
     filtered.sort((a, b) => {
-      let aValue = a[sortBy];
-      let bValue = b[sortBy];
+      let aValue, bValue;
       
-      // Handle assignedDate specifically
-      if (sortBy === 'assignedDate') {
-        aValue = a.AssignedDate || a.assignedDate || a.updatedAt || a.createdAt || '';
-        bValue = b.AssignedDate || b.assignedDate || b.updatedAt || b.createdAt || '';
+      // Get values based on sortBy field, handling multiple possible field names
+      switch (sortBy) {
+        case 'title':
+          aValue = a.title || a.Name || a.name || '';
+          bValue = b.title || b.Name || b.name || '';
+          break;
+        case 'clientName':
+          aValue = a.clientName || a.ClientName || a.client || '';
+          bValue = b.clientName || b.ClientName || b.client || '';
+          break;
+        case 'budget':
+          aValue = a.budget || a.Budget || a.estimatedPrice || 0;
+          bValue = b.budget || b.Budget || b.estimatedPrice || 0;
+          break;
+        case 'status':
+          aValue = a.status || a.Status || a.CurrentStatus || '';
+          bValue = b.status || b.Status || b.CurrentStatus || '';
+          break;
+        case 'createdAt':
+          aValue = a.createdAt || a.CreatedDate || a.createdDate || a.CreatedAt || '';
+          bValue = b.createdAt || b.CreatedDate || b.createdDate || b.CreatedAt || '';
+          break;
+        case 'updatedAt':
+          aValue = a.updatedAt || a.UpdatedDate || a.updatedDate || a.UpdatedAt || '';
+          bValue = b.updatedAt || b.UpdatedDate || b.updatedDate || b.UpdatedAt || '';
+          break;
+        case 'assignedDate':
+          aValue = a.AssignedDate || a.assignedDate || a.updatedAt || a.createdAt || '';
+          bValue = b.AssignedDate || b.assignedDate || b.updatedAt || b.createdAt || '';
+          break;
+        default:
+          // Fallback to direct property access
+          aValue = a[sortBy] || '';
+          bValue = b[sortBy] || '';
       }
       
+      // Handle null/undefined values
       if (aValue == null) aValue = '';
       if (bValue == null) bValue = '';
       
@@ -343,30 +395,33 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
     });
     
     return filtered;
-  }, [enquiries, filters, searchQuery, sortBy, sortOrder, isClient, clientIdForFilter]);
+  }, [enquiriesToUse, filters, searchQuery, sortBy, sortOrder, isClient, clientIdForFilter]);
   
-  // Calculate pagination for filtered results
-  const limit = 25;
-  const filteredTotal = filteredEnquiries.length;
-  const filteredTotalPages = Math.ceil(filteredTotal / limit);
+  // Function to load more data (for infinite scroll)
+  const loadMore = useCallback(() => {
+    if (searchQuery || isLoading || isLoadingMore) return;
+    
+    const hasMore = currentPage < pagination.totalPages;
+    if (!hasMore) return;
+    
+    setIsLoadingMore(true);
+    // The component will handle incrementing currentPage
+  }, [searchQuery, isLoading, isLoadingMore, currentPage, pagination.totalPages]);
   
-  // Get paginated results based on current page
-  const paginatedEnquiries = useMemo(() => {
-    if (searchQuery) {
-      // When searching, paginate the filtered results client-side
-      const startIndex = (currentPage - 1) * limit;
-      const endIndex = startIndex + limit;
-      return filteredEnquiries.slice(startIndex, endIndex);
-    } else {
-      // When not searching, return all filtered (already paginated by backend)
-      return filteredEnquiries;
+  // Reset loading more state when data arrives
+  useEffect(() => {
+    if (!isLoading && isLoadingMore) {
+      setIsLoadingMore(false);
     }
-  }, [filteredEnquiries, currentPage, limit, searchQuery]);
+  }, [isLoading, isLoadingMore]);
   
   // Update Redux pagination state
   useEffect(() => {
     if (searchQuery) {
       // When searching, use filtered count for pagination
+      const filteredTotal = filteredEnquiries.length;
+      const limit = 10;
+      const filteredTotalPages = Math.ceil(filteredTotal / limit);
       dispatch(setPagination({
         total: filteredTotal,
         totalPages: filteredTotalPages,
@@ -382,20 +437,23 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
         }));
       }
     }
-  }, [pagination, dispatch, searchQuery, filteredTotal, filteredTotalPages, limit, currentPage]);
+  }, [pagination, dispatch, searchQuery, filteredEnquiries.length, currentPage]);
 
   return {
-    enquiries: paginatedEnquiries, // Return paginated results
-    allEnquiries: enquiries, // Keep all enquiries for reference
-    filteredEnquiries: filteredEnquiries, // All filtered results (for reference)
+    enquiries: filteredEnquiries, // Return all filtered/accumulated enquiries for infinite scroll
+    allEnquiries: enquiriesToUse, // Keep all enquiries for reference
+    filteredEnquiries: filteredEnquiries, // All filtered results
     isLoading,
+    isLoadingMore,
     error,
     refetch,
+    loadMore, // Function to load more data
+    hasMore: searchQuery ? false : currentPage < pagination.totalPages, // Whether more data is available
     pagination: searchQuery ? {
-      total: filteredTotal,
+      total: filteredEnquiries.length,
       page: currentPage,
-      limit: limit,
-      totalPages: filteredTotalPages,
+      limit: 10,
+      totalPages: Math.ceil(filteredEnquiries.length / 10),
     } : pagination,
   };
 };

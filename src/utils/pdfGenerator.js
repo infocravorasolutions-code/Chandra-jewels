@@ -346,7 +346,6 @@ export const generateEnquiryHTML = async (enquiry) => {
 
   const statusColors = {
     pending: '#FFA500',
-    in_progress: '#2196F3',
     completed: '#4CAF50',
     rejected: '#F44336',
   };
@@ -1092,7 +1091,6 @@ export const generateEnquiriesListHTML = async (enquiries) => {
   const getStatusColor = (status) => {
     const statusLower = (status || '').toLowerCase();
     if (statusLower === 'pending') return '#FFA500';
-    if (statusLower === 'in_progress' || statusLower.includes('progress')) return '#2196F3';
     if (statusLower === 'completed') return '#4CAF50';
     if (statusLower === 'rejected') return '#F44336';
     return '#9CA3AF';

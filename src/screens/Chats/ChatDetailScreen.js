@@ -20,7 +20,7 @@ import Video from 'react-native-video';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
-import { useGetClientsQuery } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 import { useChat } from '../../hooks/useChat';
 import { useAlert } from '../../context/AlertContext';
 import { Card } from '../../components/cards/Cards';
@@ -38,7 +38,13 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { chatId, chat: routeChat, enquiry, enquiryId: routeEnquiryId, chatType } = route.params || {};
   const alert = useAlert();
-  console.log('routeChat params:', { chatId, routeChat, enquiry, routeEnquiryId, chatType });
+  
+  // Only log once on mount, not on every render
+  React.useEffect(() => {
+    if (__DEV__) {
+      console.log('routeChat params:', { chatId, routeChat, enquiry, routeEnquiryId, chatType });
+    }
+  }, []); // Empty deps - only log once
   
   // Get enquiryId from route params (fallback to chat or enquiry object)
   const enquiryId = routeEnquiryId || routeChat?.EnquiryId || routeChat?.enquiryId || enquiry?.id || enquiry?._id;
@@ -61,48 +67,98 @@ const ChatDetailScreen = ({ route, navigation }) => {
     sendTyping,
     refetchMessages,
     refetchChat,
+    loadMoreMessages,
+    hasMore,
+    isLoadingMore,
   } = useChat(enquiryId, chatType, specificChatId);
   
   // Use routeChat if it has an _id and hook hasn't loaded yet, otherwise use hookChat
   const chat = (hookChat?._id || hookChat?.id) ? hookChat : (routeChat?._id || routeChat?.id ? routeChat : hookChat);
 
-  // Force refetch when screen is focused (user revisits)
+  // Track last refetch time to prevent excessive refetching
+  const lastRefetchTimeRef = React.useRef(0);
+  const REFETCH_COOLDOWN = 2000; // 2 seconds cooldown between refetches
+  
+  // Force refetch when screen is focused (user revisits or opens chat)
   useFocusEffect(
     React.useCallback(() => {
-      if (chat?._id && !messagesLoading) {
-        if (__DEV__) {
-          console.log('🔄 Screen focused - refetching messages for chat:', chat._id);
+      if (chat?._id) {
+        const now = Date.now();
+        // Only refetch if enough time has passed since last refetch
+        if (now - lastRefetchTimeRef.current > REFETCH_COOLDOWN) {
+          if (__DEV__) {
+            console.log('🔄 Screen focused - refetching messages for chat:', chat._id);
+          }
+          lastRefetchTimeRef.current = now;
+          
+          // Function to attempt refetch with retry logic
+          const timers = [];
+          const attemptRefetch = (retryCount = 0) => {
+            const maxRetries = 5;
+            const retryDelay = 300;
+            
+            // Small delay to ensure screen is fully mounted and query is initialized
+            const timer = setTimeout(() => {
+              try {
+                if (refetchMessages && typeof refetchMessages === 'function') {
+                  refetchMessages().catch(err => {
+                    if (__DEV__) {
+                      console.warn('⚠️ Refetch failed, will retry:', err.message);
+                    }
+                    // Retry if query wasn't ready yet
+                    if (retryCount < maxRetries) {
+                      attemptRefetch(retryCount + 1);
+                    }
+                  });
+                } else if (retryCount < maxRetries) {
+                  // Query not initialized yet, retry
+                  attemptRefetch(retryCount + 1);
+                }
+              } catch (error) {
+                if (__DEV__) {
+                  console.warn('⚠️ Could not refetch messages (query not initialized yet):', error.message);
+                }
+                // Retry if query wasn't ready yet
+                if (retryCount < maxRetries) {
+                  attemptRefetch(retryCount + 1);
+                }
+              }
+            }, 300);
+            
+            timers.push(timer);
+          };
+          
+          attemptRefetch();
+          return () => {
+            timers.forEach(timer => clearTimeout(timer));
+          };
         }
-        // Small delay to ensure screen is fully mounted
-        const timer = setTimeout(() => {
-          refetchMessages();
-        }, 300);
-        return () => clearTimeout(timer);
       }
-    }, [chat?._id, refetchMessages, messagesLoading])
+    }, [chat?._id, refetchMessages])
   );
 
   const [newMessage, setNewMessage] = useState('');
   const [showMediaModal, setShowMediaModal] = useState(false);
   const scrollViewRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const scrollPositionRef = useRef(0);
+  const previousMessageCountRef = useRef(0);
+
+  // Fetch clients to resolve sender names (using cached hook)
+  // MUST be called before any hooks that depend on enrichedMessages
+  const { clients = [] } = useClients({
+    skip: !user,
+  });
 
   const loading = isLoadingChat || messagesLoading;
   const messagesError = chatError;
 
-  // Scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (messages && messages.length > 0) {
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+  // Scroll to bottom function
+  const scrollToBottom = React.useCallback(() => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollToEnd({ animated: true });
     }
-  }, [messages]);
-
-  // Fetch clients to resolve sender names
-  const { data: clients = [] } = useGetClientsQuery(undefined, {
-    skip: !user,
-  });
+  }, []);
 
   // Create sender lookup map (senderId -> { name, role })
   const senderMap = useMemo(() => {
@@ -124,7 +180,18 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Enrich messages with sender names from senderMap
   const enrichedMessages = useMemo(() => {
+    if (__DEV__) {
+      console.log('🔍 Enriching messages:', {
+        messagesLength: messages?.length || 0,
+        messagesType: typeof messages,
+        messagesIsArray: Array.isArray(messages),
+      });
+    }
+    
     if (!messages || messages.length === 0) {
+      if (__DEV__) {
+        console.log('⚠️ No messages to enrich');
+      }
       return [];
     }
     
@@ -181,26 +248,61 @@ const ChatDetailScreen = ({ route, navigation }) => {
     });
   }, [messages, senderMap, user]);
 
-  // Scroll to bottom when new messages arrive
+  // Handle loading more messages - maintain scroll position
+  const handleLoadMore = React.useCallback(async () => {
+    if (!hasMore || isLoadingMore || loading) return;
+    
+    // Store current scroll position
+    scrollPositionRef.current = scrollPositionRef.current || 0;
+    previousMessageCountRef.current = (enrichedMessages && enrichedMessages.length) || 0;
+    
+    // Load more messages
+    await loadMoreMessages();
+  }, [hasMore, isLoadingMore, loading, loadMoreMessages, enrichedMessages]);
+
+  // Maintain scroll position when new messages are loaded from top
   useEffect(() => {
-    if (messages && messages.length > 0) {
+    const currentLength = (enrichedMessages && enrichedMessages.length) || 0;
+    if (previousMessageCountRef.current > 0 && currentLength > previousMessageCountRef.current) {
+      // New messages were added to the top
+      // Maintain scroll position by scrolling to the same relative position
       setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
+        if (scrollViewRef.current && scrollPositionRef.current > 0) {
+          // Calculate new scroll position
+          const newMessageCount = currentLength - previousMessageCountRef.current;
+          // Scroll to maintain position (approximate)
+          scrollViewRef.current.scrollTo({
+            y: scrollPositionRef.current + (newMessageCount * 100), // Approximate message height
+            animated: false,
+          });
+        }
       }, 100);
     }
-  }, [messages]);
+  }, [enrichedMessages]);
+
+  // Scroll to bottom when new messages arrive (at the end)
+  useEffect(() => {
+    if (messages && messages.length > 0) {
+      // Only auto-scroll if user is near bottom (within 500px)
+      if (scrollPositionRef.current < 500) {
+        setTimeout(() => {
+          scrollToBottom();
+        }, 100);
+      }
+    }
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
       setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
+        scrollToBottom();
       }, 100);
     });
 
     return () => {
       keyboardDidShowListener?.remove();
     };
-  }, []);
+  }, [scrollToBottom]);
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !chat) return;
@@ -417,9 +519,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
   };
 
-  const renderMessage = (message, index) => {
+  // Memoize renderMessage to prevent recreation on every render
+  const renderMessage = React.useCallback((message, index) => {
     const myMessage = isMyMessage(message);
-    const previousMessage = index > 0 ? messages[index - 1] : null;
+    const previousMessage = index > 0 ? enrichedMessages[index - 1] : null;
     const showSenderName = message.isGroup && !myMessage && 
       (!previousMessage || previousMessage.senderId !== message.senderId);
     
@@ -542,7 +645,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         </View>
       </View>
     );
-  };
+  }, [enrichedMessages, isMyMessage, handleFilePress, getMediaUrl, formatMessageTime, getMessageStatusIcon, getMessageStatusColor, user]);
 
   const renderChatHeader = () => {
     // Get chat/enquiry title - prioritize actual enquiry name
@@ -670,24 +773,70 @@ const ChatDetailScreen = ({ route, navigation }) => {
               contentContainerStyle={styles.messagesContent}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
-              onContentSizeChange={() => scrollToBottom()}>
+              onScroll={(event) => {
+                // Track scroll position for maintaining position when loading more
+                scrollPositionRef.current = event.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
+              onContentSizeChange={React.useCallback(() => {
+                // Only auto-scroll if user is near bottom
+                if (scrollPositionRef.current < 500) {
+                  scrollToBottom();
+                }
+              }, [scrollToBottom])}>
               
-              {loading && enrichedMessages.length === 0 ? (
-                renderEmptyState()
-              ) : !loading && enrichedMessages.length === 0 && !messagesError ? (
-                renderEmptyState()
-              ) : enrichedMessages.length > 0 ? (
+              {(() => {
+                // Debug what we're rendering
+                if (__DEV__) {
+                  console.log('🎨 RENDERING CHECK:', {
+                    loading,
+                    enrichedMessagesLength: enrichedMessages?.length || 0,
+                    messagesLength: messages?.length || 0,
+                    messagesError: !!messagesError,
+                    willShowEmpty: loading && (!enrichedMessages || enrichedMessages.length === 0),
+                    willShowMessages: enrichedMessages && enrichedMessages.length > 0,
+                  });
+                }
+                
+                if (loading && (!enrichedMessages || enrichedMessages.length === 0)) {
+                  return renderEmptyState();
+                }
+                if (!loading && (!enrichedMessages || enrichedMessages.length === 0) && !messagesError) {
+                  return renderEmptyState();
+                }
+                if (enrichedMessages && enrichedMessages.length > 0) {
+                  return (
                 <>
-                  {enrichedMessages.map((message, index) => renderMessage(message, index))}
-                  {isTyping && (
-                    <View style={styles.typingIndicator}>
-                      <Text style={styles.typingText}>Someone is typing...</Text>
+                  {/* Load More Button */}
+                  {hasMore && (
+                    <View style={styles.loadMoreContainer}>
+                      <TouchableOpacity
+                        style={styles.loadMoreButton}
+                        onPress={handleLoadMore}
+                        disabled={isLoadingMore || loading}>
+                        {isLoadingMore ? (
+                          <View style={styles.loadMoreLoading}>
+                            <Icon name="hourglass-empty" size={16} color={colors.primary} />
+                            <Text style={styles.loadMoreText}>Loading older messages...</Text>
+                          </View>
+                        ) : (
+                          <Text style={styles.loadMoreText}>Load Older Messages</Text>
+                        )}
+                      </TouchableOpacity>
                     </View>
                   )}
-                </>
-              ) : (
-                renderEmptyState()
-              )}
+                  
+                    {enrichedMessages.map((message, index) => renderMessage(message, index))}
+                    {isTyping && (
+                      <View style={styles.typingIndicator}>
+                        <Text style={styles.typingText}>Someone is typing...</Text>
+                      </View>
+                    )}
+                  </>
+                  );
+                }
+                return renderEmptyState();
+              })()}
             </ScrollView>
 
             <View style={styles.inputContainer}>
@@ -1120,10 +1269,26 @@ const styles = StyleSheet.create({
     fontSize: fonts.sm,
     opacity: 0.7,
   },
-  loadMoreButton: {
-    padding: 12,
+  loadMoreContainer: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    marginBottom: 8,
+  },
+  loadMoreButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: colors.background,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.primary + '30',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 180,
+  },
+  loadMoreLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   loadMoreText: {
     color: colors.primary,

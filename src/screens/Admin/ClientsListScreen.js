@@ -10,7 +10,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useGetClientsQuery } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 import { Card } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -31,8 +31,8 @@ const ClientsListScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
-  // Redux hook
-  const { data: clientsData = [], isLoading: loading, refetch } = useGetClientsQuery();
+  // Redux hook with caching
+  const { clients: clientsData = [], isLoading: loading, refetch } = useClients();
   const clients = clientsData || [];
 
   // Filter clients based on search query using useMemo for performance
@@ -59,7 +59,7 @@ const ClientsListScreen = ({ navigation }) => {
     const lastOrderDate = client.lastOrder ? formatDate(client.lastOrder) : 'No orders yet';
     Alert.alert(
       'Client Details',
-      `Name: ${client.name || 'N/A'}\nEmail: ${client.email || 'N/A'}\nPhone: ${client.phone || 'N/A'}\nTotal Orders: ${client.totalOrders || 0}\nTotal Spent: ${formatCurrency(client.totalSpent || 0)}\nLast Order: ${lastOrderDate}`,
+      `Name: ${client.name || 'N/A'}\nEmail: ${client.email || 'N/A'}\nPhone: ${client.phone || 'N/A'}\nLast Order: ${lastOrderDate}`,
       [{ text: 'OK' }]
     );
   };
@@ -188,20 +188,24 @@ const ClientsListScreen = ({ navigation }) => {
 
       <View style={styles.clientContent}>
         <View style={styles.clientHeader}>
-          <Text style={styles.clientName}>
-            {client.name || 'Unknown Client'}
-          </Text>
-          <Text style={styles.clientDate}>
-            {client.lastOrder ? formatDate(client.lastOrder) : 'No orders'}
-          </Text>
+          <View style={styles.clientNameContainer}>
+            <Text style={styles.clientName}>
+              {client.name || 'Unknown Client'}
+            </Text>
+            {client.lastOrder && (
+              <Text style={styles.clientDate}>
+                {formatDate(client.lastOrder)}
+              </Text>
+            )}
+          </View>
         </View>
 
         {client.email !== 'N/A' || client.phone !== 'N/A' ? (
           <View style={styles.clientDetails}>
             {client.email && client.email !== 'N/A' && (
               <View style={styles.clientRow}>
-                <Icon name="info" size={14} color={colors.textSecondary} />
-                <Text style={styles.clientDetailText}>
+                <Icon name="email" size={14} color={colors.textSecondary} />
+                <Text style={styles.clientDetailText} numberOfLines={1}>
                   {client.email}
                 </Text>
               </View>
@@ -209,7 +213,7 @@ const ClientsListScreen = ({ navigation }) => {
 
             {client.phone && client.phone !== 'N/A' && (
               <View style={styles.clientRow}>
-                <Icon name="info" size={14} color={colors.textSecondary} />
+                <Icon name="phone" size={14} color={colors.textSecondary} />
                 <Text style={styles.clientDetailText}>
                   {client.phone}
                 </Text>
@@ -217,18 +221,6 @@ const ClientsListScreen = ({ navigation }) => {
             )}
           </View>
         ) : null}
-
-        <View style={styles.clientStats}>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Orders</Text>
-            <Text style={styles.statValue}>{client.totalOrders || 0}</Text>
-          </View>
-
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Total Spent</Text>
-            <Text style={styles.statValue}>{formatCurrency(client.totalSpent || 0)}</Text>
-          </View>
-        </View>
       </View>
 
       <TouchableOpacity style={styles.moreButton}>
@@ -242,20 +234,10 @@ const ClientsListScreen = ({ navigation }) => {
     <View style={styles.statsContainer}>
       <Card style={styles.statCard}>
         <View style={styles.statContent}>
-          <Icon name="account" size={20} color={colors.primary} />
+          <Icon name="account" size={24} color={colors.primary} />
           <View style={styles.statText}>
             <Text style={styles.statCardValue}>{clients.length}</Text>
             <Text style={styles.statCardLabel}>Total Clients</Text>
-          </View>
-        </View>
-      </Card>
-
-      <Card style={styles.statCard}>
-        <View style={styles.statContent}>
-          <Icon name="dashboard" size={20} color={colors.success} />
-          <View style={styles.statText}>
-            <Text style={styles.statCardValue}>{formatCurrency(clients.reduce((sum, client) => sum + (client.totalSpent || 0), 0))}</Text>
-            <Text style={styles.statCardLabel}>Total Revenue</Text>
           </View>
         </View>
       </Card>
@@ -299,14 +281,12 @@ const ClientsListScreen = ({ navigation }) => {
             </View>
             {isAdmin && (
               <TouchableOpacity 
-                style={styles.createClientButton} 
+                style={[styles.adminActionButton, styles.adminActionButtonPrimary]} 
                 onPress={handleAddClient}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
               >
-                <View style={styles.createClientButtonContent}>
-                  <Icon name="add" size={18} color={colors.textWhite} />
-                  <Text style={[styles.createClientButtonText, { marginLeft: 6 }]}>Create Client</Text>
-                </View>
+                <Icon name="add" size={18} color={colors.textWhite} />
+                <Text style={styles.adminActionText}>Create Client</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -340,7 +320,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
@@ -354,24 +334,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
-    gap: 12,
   },
   statCard: {
-    flex: 1,
+    width: '100%',
   },
   statContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   statText: {
-    marginLeft: 12,
+    marginLeft: 16,
+    flex: 1,
   },
   clientsHeader: {
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginTop: 6,
     marginBottom: 8,
   },
@@ -406,7 +385,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semiBold,
   },
   clientsList: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   clientItem: {
     flexDirection: 'row',
@@ -434,25 +413,29 @@ const styles = StyleSheet.create({
   },
   clientContent: {
     flex: 1,
+    justifyContent: 'center',
   },
   clientHeader: {
+    marginBottom: 6,
+  },
+  clientNameContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    gap: 8,
   },
   clientName: {
     fontSize: 16,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
+    flex: 1,
   },
   clientDate: {
     color: colors.textLight,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: fonts.regular,
   },
   clientDetails: {
-    marginBottom: 12,
+    marginTop: 4,
   },
   clientRow: {
     flexDirection: 'row',
@@ -487,9 +470,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   statCardValue: {
-    fontSize: 16,
+    fontSize: 24,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
+    marginBottom: 2,
   },
   statCardLabel: {
     color: colors.textSecondary,

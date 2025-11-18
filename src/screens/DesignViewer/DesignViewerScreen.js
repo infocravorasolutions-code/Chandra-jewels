@@ -13,6 +13,7 @@ import {
   Modal,
   StatusBar,
   TextInput,
+  Switch,
 } from 'react-native';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input, AnimatedLogoLoader } from '../../components/common';
@@ -1538,7 +1539,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
     );
   };
 
-  const handleShowToClient = async () => {
+  const handleShowToClient = async (newValue) => {
     if (!selectedDesign) {
       Alert.alert('Error', 'No design version found');
       return;
@@ -1554,49 +1555,35 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
     // Get current ShowToClient status
     const currentShowToClient = selectedDesign?.ShowToClient || selectedDesign?.showToClient || false;
-    const newShowToClient = !currentShowToClient;
+    const newShowToClient = newValue !== undefined ? newValue : !currentShowToClient;
 
-    Alert.alert(
-      newShowToClient ? 'Show to Client' : 'Hide from Client',
-      `Are you sure you want to ${newShowToClient ? 'show' : 'hide'} ${designType.toUpperCase()} ${version} ${newShowToClient ? 'to' : 'from'} clients?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: newShowToClient ? 'Show' : 'Hide',
-          onPress: async () => {
-            try {
-              if (__DEV__) {
-                console.log('========== UPDATING SHOW TO CLIENT ==========');
-                console.log('Enquiry ID:', enquiryId);
-                console.log('Design Type:', designType);
-                console.log('Version:', version);
-                console.log('ShowToClient:', newShowToClient);
-              }
+    try {
+      if (__DEV__) {
+        console.log('========== UPDATING SHOW TO CLIENT ==========');
+        console.log('Enquiry ID:', enquiryId);
+        console.log('Design Type:', designType);
+        console.log('Version:', version);
+        console.log('ShowToClient:', newShowToClient);
+      }
 
-              await updateShowToClient({
-                enquiryId,
-                designType,
-                version,
-                showToClient: newShowToClient,
-              }).unwrap();
+      await updateShowToClient({
+        enquiryId,
+        designType,
+        version,
+        showToClient: newShowToClient,
+      }).unwrap();
 
-              Alert.alert('Success', `${designType.toUpperCase()} ${version} ${newShowToClient ? 'is now visible to clients' : 'is now hidden from clients'}`);
-              
-              // Refetch enquiry data to get updated ShowToClient status
-              if (enquiryId) {
-                refetchEnquiry();
-              }
-            } catch (error) {
-              console.error('Error updating ShowToClient:', error);
-              Alert.alert(
-                'Error',
-                error?.data?.error || error?.message || 'Failed to update ShowToClient. Please try again.'
-              );
-            }
-          },
-        },
-      ]
-    );
+      // Refetch enquiry data to get updated ShowToClient status
+      if (enquiryId) {
+        refetchEnquiry();
+      }
+    } catch (error) {
+      console.error('Error updating ShowToClient:', error);
+      Alert.alert(
+        'Error',
+        error?.data?.error || error?.message || 'Failed to update ShowToClient. Please try again.'
+      );
+    }
   };
 
   const handleSaveComment = async () => {
@@ -1957,13 +1944,17 @@ const DesignViewerScreen = ({ route, navigation }) => {
                     style={styles.commentInput}
                   />
                 </View>
-                <Button
-                  title={isUpdatingDescription ? "Saving..." : "Save Comment"}
+                <TouchableOpacity
                   onPress={handleSaveComment}
-                  style={styles.saveButton}
-                  textStyle={styles.saveButtonText}
                   disabled={isUpdatingDescription}
-                />
+                  style={[styles.adminActionButton, styles.adminActionButtonPrimary, isUpdatingDescription && styles.btnDisabled]}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="save" size={18} color={colors.textWhite} />
+                  <Text style={styles.adminActionText}>
+                    {isUpdatingDescription ? "Saving..." : "Save Comment"}
+                  </Text>
+                </TouchableOpacity>
               </>
             )}
           </View>
@@ -2000,20 +1991,18 @@ const DesignViewerScreen = ({ route, navigation }) => {
           ) : isDesigner ? (
             // Designer view: Download buttons + Delete Version (within 10 mins)
             <View style={styles.designerActions}>
-              <View style={styles.actionButtonsRow}>
-              <TouchableOpacity
-                onPress={handleDownloadImage}
-                disabled={isDownloadingImage}
-                  style={[styles.actionBtn, styles.actionBtnHalf, styles.downloadBtn, isDownloadingImage && styles.btnDisabled]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.btnContent}>
-                    <Icon name="file-download" size={18} color={colors.textWhite} />
-                  <Text style={styles.btnText}>
+              <View style={styles.adminActionsRow}>
+                <TouchableOpacity
+                  onPress={handleDownloadImage}
+                  disabled={isDownloadingImage}
+                  style={[styles.adminActionButton, styles.adminActionButtonPrimary, isDownloadingImage && styles.btnDisabled]}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="file-download" size={18} color={colors.textWhite} />
+                  <Text style={styles.adminActionText}>
                     {isDownloadingImage ? "Downloading..." : "Download Image"}
                   </Text>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
                 
                 {/* Delete Version Button - Only if within 10 minutes */}
                 {(() => {
@@ -2033,171 +2022,165 @@ const DesignViewerScreen = ({ route, navigation }) => {
                       onPress={handleDeleteVersion}
                       disabled={isDeletingVersion}
                       style={[
-                        styles.actionBtn, 
-                        styles.actionBtnHalf, 
-                        styles.deleteBtn,
+                        styles.adminActionButton, 
+                        styles.adminActionButtonDanger,
                         isDeletingVersion && styles.btnDisabled
                       ]}
-                      activeOpacity={0.8}
+                      activeOpacity={0.85}
                     >
-                      <View style={styles.btnContent}>
-                        <Icon name="delete-outline" size={18} color={colors.textWhite} />
-                        <Text style={styles.btnText}>
-                          {isDeletingVersion ? "Deleting..." : "Delete Version"}
-                        </Text>
-                      </View>
+                      <Icon name="delete-outline" size={18} color={colors.textWhite} />
+                      <Text style={styles.adminActionText}>
+                        {isDeletingVersion ? "Deleting..." : "Delete Version"}
+                      </Text>
                     </TouchableOpacity>
                   ) : (
-                    <View style={[styles.actionBtn, styles.actionBtnHalf, styles.deleteBtnDisabled]}>
-                      <View style={styles.btnContent}>
-                        <Icon name="delete-outline" size={18} color={colors.textSecondary} />
-                        <Text style={[styles.btnText, { color: colors.textSecondary }]}>
-                          Delete Expired
-                        </Text>
-                      </View>
+                    <View style={[styles.adminActionButton, styles.adminActionButtonSecondary, { opacity: 0.5 }]}>
+                      <Icon name="delete-outline" size={18} color={colors.textSecondary} />
+                      <Text style={[styles.adminActionText, { color: colors.textSecondary }]}>
+                        Delete Expired
+                      </Text>
                     </View>
                   );
                 })()}
               </View>
               
-              <TouchableOpacity
-                onPress={handleDownloadExcel}
-                disabled={isDownloadingExcel}
-                style={[styles.actionBtn, styles.excelBtn, isDownloadingExcel && styles.btnDisabled]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.btnContent}>
-                  <Icon name="insert-drive-file" size={20} color={colors.textWhite} />
-                  <Text style={styles.btnText}>
+              <View style={styles.adminActionsRow}>
+                <TouchableOpacity
+                  onPress={handleDownloadExcel}
+                  disabled={isDownloadingExcel}
+                  style={[styles.adminActionButton, styles.adminActionButtonSecondary, isDownloadingExcel && styles.btnDisabled]}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="insert-drive-file" size={18} color={colors.textWhite} />
+                  <Text style={styles.adminActionText}>
                     {isDownloadingExcel ? "Downloading..." : `Download Excel - ${designCode || 'N/A'}`}
                   </Text>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
             // Admin view: All buttons including Delete and Pricing
             <View style={styles.adminActions}>
-              <View style={styles.actionButtonsRow}>
+              <View style={styles.adminActionsRow}>
                 <TouchableOpacity
                   onPress={handleDownloadImage}
                   disabled={isDownloadingImage}
-                  style={[styles.actionBtn, styles.actionBtnHalf, styles.downloadBtn, isDownloadingImage && styles.btnDisabled]}
-                  activeOpacity={0.8}
+                  style={[styles.adminActionButton, styles.adminActionButtonPrimary, isDownloadingImage && styles.btnDisabled]}
+                  activeOpacity={0.85}
                 >
-                  <View style={styles.btnContent}>
-                    <Icon name="file-download" size={18} color={colors.textWhite} />
-                    <Text style={styles.btnText}>
-                      {isDownloadingImage ? "Downloading..." : "Download Image"}
-                    </Text>
-                  </View>
+                  <Icon name="file-download" size={18} color={colors.textWhite} />
+                  <Text style={styles.adminActionText}>
+                    {isDownloadingImage ? "Downloading..." : "Download Image"}
+                  </Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity
                   onPress={handleDeleteImage}
-                  style={[styles.actionBtn, styles.actionBtnHalf, styles.deleteBtn]}
-                  activeOpacity={0.8}
+                  style={[styles.adminActionButton, styles.adminActionButtonDanger]}
+                  activeOpacity={0.85}
                 >
-                  <View style={styles.btnContent}>
-                    <Icon name="delete-outline" size={18} color={colors.textWhite} />
-                    <Text style={styles.btnText}>Delete</Text>
-                  </View>
+                  <Icon name="delete-outline" size={18} color={colors.textWhite} />
+                  <Text style={styles.adminActionText}>Delete</Text>
                 </TouchableOpacity>
               </View>
 
               {/* Download Excel Button */}
-              <TouchableOpacity
-                onPress={handleDownloadExcel}
-                disabled={isDownloadingExcel}
-                style={[styles.actionBtn, styles.excelBtn, isDownloadingExcel && styles.btnDisabled]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.btnContent}>
-                  <Icon name="insert-drive-file" size={20} color={colors.textWhite} />
-                  <Text style={styles.btnText}>
+              <View style={styles.adminActionsRow}>
+                <TouchableOpacity
+                  onPress={handleDownloadExcel}
+                  disabled={isDownloadingExcel}
+                  style={[styles.adminActionButton, styles.adminActionButtonSecondary, isDownloadingExcel && styles.btnDisabled]}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="insert-drive-file" size={18} color={colors.textWhite} />
+                  <Text style={styles.adminActionText}>
                     {isDownloadingExcel ? "Downloading..." : `Download Excel - ${designCode || 'N/A'}`}
                   </Text>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+              </View>
 
               {/* Pricing Button - Admin only */}
               {isAdmin && (
-                <TouchableOpacity
-                  onPress={() => navigation.navigate('Pricing', {
-                    enquiry: enquiry,
-                    designType: designType,
-                  })}
-                  style={[styles.actionBtn, styles.pricingBtn]}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.btnContent}>
-                    <Icon name="attach-money" size={20} color={colors.textWhite} />
-                    <Text style={styles.btnText}>Pricing</Text>
-                  </View>
-                </TouchableOpacity>
+                <View style={styles.adminActionsRow}>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('Pricing', {
+                      enquiry: enquiry,
+                      designType: designType,
+                    })}
+                    style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+                    activeOpacity={0.85}
+                  >
+                    <Icon name="attach-money" size={18} color={colors.textWhite} />
+                    <Text style={styles.adminActionText}>Pricing</Text>
+                  </TouchableOpacity>
+                </View>
               )}
 
               {/* Approve and Reject Buttons - Admin only */}
               {isAdmin && (
-                <View style={styles.actionButtonsRow}>
+                <View style={styles.adminActionsRow}>
                   <TouchableOpacity
                     onPress={handleApprove}
                     disabled={isApproving || isRejecting}
-                    style={[styles.actionBtn, styles.actionBtnHalf, styles.approveBtn, (isApproving || isRejecting) && styles.btnDisabled]}
-                    activeOpacity={0.8}
+                    style={[styles.adminActionButton, styles.adminActionButtonPrimary, (isApproving || isRejecting) && styles.btnDisabled]}
+                    activeOpacity={0.85}
                   >
-                    <View style={styles.btnContent}>
-                      <Icon name="check-circle" size={18} color={colors.textWhite} />
-                      <Text style={styles.btnText}>
-                        {isApproving ? "Approving..." : "Approve"}
-                      </Text>
-                    </View>
+                    <Icon name="check-circle" size={18} color={colors.textWhite} />
+                    <Text style={styles.adminActionText}>
+                      {isApproving ? "Approving..." : "Approve"}
+                    </Text>
                   </TouchableOpacity>
                   
                   <TouchableOpacity
                     onPress={handleReject}
                     disabled={isApproving || isRejecting}
-                    style={[styles.actionBtn, styles.actionBtnHalf, styles.rejectBtn, (isApproving || isRejecting) && styles.btnDisabled]}
-                    activeOpacity={0.8}
+                    style={[styles.adminActionButton, styles.adminActionButtonDanger, (isApproving || isRejecting) && styles.btnDisabled]}
+                    activeOpacity={0.85}
                   >
-                    <View style={styles.btnContent}>
-                      <Icon name="cancel" size={18} color={colors.textWhite} />
-                      <Text style={styles.btnText}>
-                        {isRejecting ? "Rejecting..." : "Reject"}
-                      </Text>
-                    </View>
+                    <Icon name="cancel" size={18} color={colors.textWhite} />
+                    <Text style={styles.adminActionText}>
+                      {isRejecting ? "Rejecting..." : "Reject"}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               )}
 
-              {/* Show to Client Button - Admin only */}
+              {/* Show to Client Toggle - Admin only */}
               {isAdmin && (
-                <TouchableOpacity
-                  onPress={handleShowToClient}
-                  disabled={isUpdatingShowToClient}
-                  style={[
-                    styles.actionBtn, 
-                    (selectedDesign?.ShowToClient || selectedDesign?.showToClient) 
-                      ? styles.showToClientBtnActive 
-                      : styles.showToClientBtn,
-                    isUpdatingShowToClient && styles.btnDisabled
-                  ]}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.btnContent}>
-                    <Icon 
-                      name={(selectedDesign?.ShowToClient || selectedDesign?.showToClient) ? "visibility" : "visibility-off"} 
-                      size={20} 
-                      color={colors.textWhite} 
+                <View style={styles.toggleContainer}>
+                  <View style={styles.toggleContent}>
+                    <View style={styles.toggleLabelContainer}>
+                      <Icon 
+                        name={(selectedDesign?.ShowToClient || selectedDesign?.showToClient) ? "visibility" : "visibility-off"} 
+                        size={20} 
+                        color={colors.primary} 
+                      />
+                      <Text style={styles.toggleLabel}>
+                        {isUpdatingShowToClient 
+                          ? "Updating..." 
+                          : (selectedDesign?.ShowToClient || selectedDesign?.showToClient) 
+                            ? "Visible to Client" 
+                            : "Show to Client"}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={selectedDesign?.ShowToClient || selectedDesign?.showToClient || false}
+                      onValueChange={handleShowToClient}
+                      disabled={isUpdatingShowToClient}
+                      trackColor={{
+                        false: colors.border,
+                        true: colors.primaryLight,
+                      }}
+                      thumbColor={
+                        (selectedDesign?.ShowToClient || selectedDesign?.showToClient)
+                          ? colors.primary
+                          : colors.textSecondary
+                      }
+                      ios_backgroundColor={colors.border}
+                      style={styles.toggleSwitch}
                     />
-                    <Text style={styles.btnText}>
-                      {isUpdatingShowToClient 
-                        ? "Updating..." 
-                        : (selectedDesign?.ShowToClient || selectedDesign?.showToClient) 
-                          ? "Hide from Client" 
-                          : "Show to Client"}
-                    </Text>
                   </View>
-                </TouchableOpacity>
+                </View>
               )}
             </View>
           )}
@@ -2236,25 +2219,21 @@ const DesignViewerScreen = ({ route, navigation }) => {
                   setRejectionReason('');
                 }}
                 style={[styles.modalButton, styles.modalCancelBtn]}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
               >
-                <View style={styles.btnContent}>
-                  <Icon name="close" size={18} color={colors.textWhite} />
-                  <Text style={styles.btnText}>Cancel</Text>
-                </View>
+                <Icon name="close" size={18} color={colors.textWhite} />
+                <Text style={styles.adminActionText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={confirmReject}
                 disabled={isRejecting}
                 style={[styles.modalButton, styles.modalRejectBtn, isRejecting && styles.btnDisabled]}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
               >
-                <View style={styles.btnContent}>
-                  <Icon name="cancel" size={18} color={colors.textWhite} />
-                  <Text style={styles.btnText}>
-                    {isRejecting ? "Rejecting..." : "Reject"}
-                  </Text>
-                </View>
+                <Icon name="cancel" size={18} color={colors.textWhite} />
+                <Text style={styles.adminActionText}>
+                  {isRejecting ? "Rejecting..." : "Reject"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2478,65 +2457,43 @@ const styles = StyleSheet.create({
     marginVertical: 20,
   },
   designerActions: {
-    gap: 12,
+    gap: 0,
   },
   adminActions: {
-    gap: 12,
+    gap: 0,
   },
-  actionButtonsRow: {
+  adminActionsRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
     gap: 12,
   },
-  actionBtn: {
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    minHeight: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionBtnHalf: {
+  adminActionButton: {
     flex: 1,
-  },
-  btnContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
   },
-  btnText: {
+  adminActionButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  adminActionButtonSecondary: {
+    backgroundColor: colors.primaryLight,
+  },
+  adminActionButtonDanger: {
+    backgroundColor: colors.error,
+  },
+  adminActionText: {
     color: colors.textWhite,
-    fontFamily: fonts.bold,
-    fontSize: fonts.base,
-    letterSpacing: 0.2,
-  },
-  downloadBtn: {
-    backgroundColor: colors.primary,
-    width: '100%',
-  },
-  deleteBtn: {
-    backgroundColor: colors.error || '#EF4444',
-  },
-  deleteBtnDisabled: {
-    backgroundColor: colors.backgroundSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    opacity: 0.6,
-  },
-  excelBtn: {
-    backgroundColor: colors.primary,
-    width: '100%',
-  },
-  pricingBtn: {
-    backgroundColor: colors.primary,
-    width: '100%',
-  },
-  shareBtn: {
-  backgroundColor: colors.primary,
-    width: '100%',
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    marginLeft: 8,
   },
   btnDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   imageWrapper: {
     width: '100%',
@@ -2595,19 +2552,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  approveBtn: {
-    backgroundColor: colors.success,
+  toggleContainer: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: 16,
   },
-  rejectBtn: {
-    backgroundColor: colors.error,
+  toggleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  showToClientBtn: {
-    backgroundColor: colors.info || '#2196F3',
-    width: '100%',
+  toggleLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
   },
-  showToClientBtnActive: {
-    backgroundColor: colors.success || '#4CAF50',
-    width: '100%',
+  toggleLabel: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+    letterSpacing: 0.2,
+  },
+  toggleSwitch: {
+    transform: [{ scaleX: 1.1 }, { scaleY: 1.1 }],
   },
   modalOverlay: {
     flex: 1,
@@ -2659,18 +2630,26 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    minHeight: 50,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    minHeight: 52,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   modalCancelBtn: {
-    backgroundColor: colors.textSecondary,
+    backgroundColor: colors.primaryLight,
   },
   modalRejectBtn: {
-    backgroundColor: colors.error,
+    backgroundColor: colors.primaryDark,
   },
 });
 

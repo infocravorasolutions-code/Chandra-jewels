@@ -518,12 +518,13 @@ export const api = createApi({
           const status = currentStatus.toLowerCase();
           if (status === 'enquiry created' || status === 'pending' || status.includes('pending')) {
             normalizedStatus = 'pending';
-          } else if (status.includes('progress') || status === 'coral' || status === 'cad' || status === 'design approval pending') {
-            normalizedStatus = 'in_progress';
           } else if (status.includes('completed') || status.includes('approved')) {
             normalizedStatus = 'completed';
           } else if (status.includes('rejected')) {
             normalizedStatus = 'rejected';
+          } else {
+            // For statuses like coral, cad, progress, etc., normalize to pending
+            normalizedStatus = 'pending';
           }
           
           // Extract metal type info
@@ -660,12 +661,13 @@ export const api = createApi({
         const status = currentStatus.toLowerCase();
         if (status === 'enquiry created' || status === 'pending') {
           normalizedStatus = 'pending';
-        } else if (status.includes('progress') || status === 'coral' || status === 'cad') {
-          normalizedStatus = 'in_progress';
         } else if (status.includes('completed') || status.includes('approved')) {
           normalizedStatus = 'completed';
         } else if (status.includes('rejected')) {
           normalizedStatus = 'rejected';
+          } else {
+            // For statuses like coral, cad, progress, etc., normalize to pending
+            normalizedStatus = 'pending';
         }
         
         const metalColor = enquiry?.Metal?.Color || enquiry?.metal?.color || '';
@@ -1041,8 +1043,8 @@ export const api = createApi({
     }),
 
     // ==================== DASHBOARD ====================
-    // Dashboard data is computed from enquiries and clients
-    // This uses queryFn to aggregate data from multiple endpoints
+    // Dashboard data is computed from aggregate endpoints
+    // Uses /api/enquiries/aggregate?groupBy=status and groupBy=client
     getDashboardData: builder.query({
       queryFn: async (arg, { dispatch, getState }, extraOptions, baseQuery) => {
         try {
@@ -1050,57 +1052,48 @@ export const api = createApi({
           const role = typeof arg === 'object' ? arg?.role : arg;
           const userId = typeof arg === 'object' ? arg?.userId : undefined;
           
-          // Determine if we should use aggregate endpoint
-          // Admin: Use regular enquiries data (no aggregate)
-          // Coral/CAD: Use aggregate endpoint with assignedTo filter
-          // Client: Use aggregate endpoint with clientId filter (clientId = userId)
           const isAdmin = role === 'admin' || role === 'AD';
           const isClient = role === 'client' || role === 'CL';
-          const shouldUseAggregate = !isAdmin && userId; // Only for non-admin users
           
-          // Build aggregate URL - only for non-admin users
-          // Client users: Filter by clientId (which equals userId)
-          // Coral/CAD users: Filter by assignedTo (which equals userId)
-          let aggregateUrl = null;
-          if (shouldUseAggregate) {
-            if (isClient) {
-              // For client users, filter by clientId (not assignedTo)
-              aggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${encodeURIComponent(userId)}`;
-            } else {
-              // For coral/cad users, filter by assignedTo
-            aggregateUrl = `/api/enquiries/aggregate?groupBy=status&assignedTo=${encodeURIComponent(userId)}`;
-            }
+          // Build aggregate URLs
+          // For status counts: use aggregate endpoint with appropriate filters
+          let statusAggregateUrl;
+          if (isAdmin) {
+            // Admin: Get all status counts
+            statusAggregateUrl = '/api/enquiries/aggregate?groupBy=status';
+          } else if (isClient) {
+            // Client: Filter by clientId
+            statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${encodeURIComponent(userId)}`;
+          } else {
+            // Coral/CAD: Filter by assignedTo
+            statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&assignedTo=${encodeURIComponent(userId)}`;
           }
+          
+          // For client counts: only for admin users
+          const clientAggregateUrl = isAdmin ? '/api/enquiries/aggregate?groupBy=client' : null;
           
           // Fetch data in parallel
-          // Admin: Fetch ALL enquiries (use large limit to get all data for accurate counts)
-          // Client: Fetch enquiries filtered by clientId (clientId = userId)
-          // Coral/CAD: Fetch enquiries filtered by assignedTo (assignedTo = userId)
-          let enquiriesSearchUrl;
-          if (isAdmin) {
-            enquiriesSearchUrl = '/api/enquiries/search?page=1&limit=10000'; // Fetch all enquiries for admin
-          } else if (isClient) {
-            // For client users, filter by clientId
-            enquiriesSearchUrl = `/api/enquiries/search?page=1&clientId=${encodeURIComponent(userId)}`;
-          } else {
-            // For coral/cad users, filter by assignedTo
-            enquiriesSearchUrl = `/api/enquiries/search?page=1&assignedTo=${encodeURIComponent(userId)}`;
-          }
-          
           const fetchPromises = [
-            baseQuery(enquiriesSearchUrl),
+            baseQuery(statusAggregateUrl),
+            clientAggregateUrl ? baseQuery(clientAggregateUrl) : Promise.resolve({ data: null }),
             role === 'admin' ? baseQuery('/api/clients') : Promise.resolve({ data: [] }),
           ];
           
-          // Only fetch aggregate for non-admin users
-          if (shouldUseAggregate && aggregateUrl) {
-            fetchPromises.unshift(baseQuery(aggregateUrl));
+          // For revenue calculation, we still need some enquiry data
+          // Fetch a reasonable limit of enquiries and filter client-side for completed ones
+          let enquiriesSearchUrl;
+          if (isAdmin) {
+            // For admin, fetch a reasonable number of enquiries for revenue calculation
+            enquiriesSearchUrl = '/api/enquiries/search?page=1&limit=1000';
+          } else if (isClient) {
+            enquiriesSearchUrl = `/api/enquiries/search?page=1&limit=100&clientId=${encodeURIComponent(userId)}`;
           } else {
-            // For admin, add a resolved promise to maintain array structure
-            fetchPromises.unshift(Promise.resolve({ data: null }));
+            enquiriesSearchUrl = `/api/enquiries/search?page=1&limit=100&assignedTo=${encodeURIComponent(userId)}`;
           }
           
-          const [statusAggregateResult, enquiriesResult, clientsResult] = await Promise.all(fetchPromises);
+          fetchPromises.push(baseQuery(enquiriesSearchUrl));
+          
+          const [statusAggregateResult, clientAggregateResult, clientsResult, enquiriesResult] = await Promise.all(fetchPromises);
 
           // Handle status aggregate response and categorize
           let categorizedCounts = {
@@ -1114,13 +1107,12 @@ export const api = createApi({
           let statusCounts = {
             pending: 0,
             completed: 0,
-            in_progress: 0,
             rejected: 0,
             total: 0,
           };
           
-          // Only process aggregate data for non-admin users (coral, cad, client)
-          if (shouldUseAggregate && statusAggregateResult.data && !statusAggregateResult.error) {
+          // Process status aggregate data for ALL users (including admin)
+          if (statusAggregateResult.data && !statusAggregateResult.error) {
             const aggregateData = statusAggregateResult.data;
             
             console.log('🔍 [DASHBOARD DEBUG] ============================================');
@@ -1128,9 +1120,7 @@ export const api = createApi({
             console.log('🔍 [DASHBOARD DEBUG] UserId:', userId);
             console.log('🔍 [DASHBOARD DEBUG] Is Admin:', isAdmin);
             console.log('🔍 [DASHBOARD DEBUG] Is Client:', isClient);
-            console.log('🔍 [DASHBOARD DEBUG] Should Use Aggregate:', shouldUseAggregate, '(boolean)');
-            console.log('🔍 [DASHBOARD DEBUG] Aggregate URL:', aggregateUrl);
-            console.log('🔍 [DASHBOARD DEBUG] Enquiries Search URL:', enquiriesSearchUrl);
+            console.log('🔍 [DASHBOARD DEBUG] Status Aggregate URL:', statusAggregateUrl);
             console.log('🔍 [DASHBOARD DEBUG] Status Aggregate API Response:', JSON.stringify(aggregateData, null, 2));
             
             // Handle different response formats
@@ -1167,10 +1157,11 @@ export const api = createApi({
                   statusCounts.pending += count;
                 } else if (status === 'completed' || status.includes('completed') || status.includes('approved')) {
                   statusCounts.completed += count;
-                } else if (status === 'in_progress' || status.includes('progress') || status === 'coral' || status === 'cad') {
-                  statusCounts.in_progress += count;
                 } else if (status === 'rejected' || status.includes('rejected')) {
                   statusCounts.rejected += count;
+                } else {
+                  // For statuses like coral, cad, progress, etc., count them as pending
+                  statusCounts.pending += count;
                 }
                 statusCounts.total += count;
               });
@@ -1197,12 +1188,13 @@ export const api = createApi({
                   statusCounts.pending = value || 0;
                 } else if (keyLower === 'completed' || keyLower.includes('completed')) {
                   statusCounts.completed = value || 0;
-                } else if (keyLower === 'in_progress' || keyLower.includes('progress')) {
-                  statusCounts.in_progress = value || 0;
                 } else if (keyLower === 'rejected' || keyLower.includes('rejected')) {
                   statusCounts.rejected = value || 0;
                 } else if (keyLower === 'total') {
                   statusCounts.total = value || 0;
+                } else {
+                  // For statuses like coral, cad, progress, etc., count them as pending
+                  statusCounts.pending = (statusCounts.pending || 0) + (value || 0);
                 }
               });
             }
@@ -1211,10 +1203,22 @@ export const api = createApi({
             console.log('🔍 [DASHBOARD DEBUG] Final Status Counts (legacy):', statusCounts);
             console.log('🔍 [DASHBOARD DEBUG] Total from categorized counts:', categorizedCounts['All']);
             console.log('🔍 [DASHBOARD DEBUG] Total from status counts:', statusCounts.total);
-          } else if (shouldUseAggregate && statusAggregateResult.error) {
+          } else if (statusAggregateResult.error) {
             console.warn('🔍 [DASHBOARD DEBUG] Status aggregate API error, falling back to counting from enquiries:', statusAggregateResult.error);
-          } else if (isAdmin) {
-            console.log('🔍 [DASHBOARD DEBUG] Admin user - Using regular enquiries data (no aggregate endpoint)');
+          }
+          
+          // Process client aggregate data for admin users
+          let totalClientsFromAggregate = 0;
+          let clientAggregateData = null;
+          if (isAdmin && clientAggregateResult.data && !clientAggregateResult.error) {
+            clientAggregateData = clientAggregateResult.data;
+            console.log('🔍 [DASHBOARD DEBUG] Client Aggregate API Response:', JSON.stringify(clientAggregateData, null, 2));
+            
+            if (Array.isArray(clientAggregateData)) {
+              // Count unique clients from aggregate
+              totalClientsFromAggregate = clientAggregateData.length;
+              console.log('🔍 [DASHBOARD DEBUG] Total Clients from aggregate:', totalClientsFromAggregate);
+            }
           }
 
           // Handle paginated response from new aggregated endpoint
@@ -1260,12 +1264,13 @@ export const api = createApi({
             const status = currentStatus.toLowerCase();
             if (status === 'enquiry created' || status === 'pending' || status.includes('pending')) {
               normalizedStatus = 'pending';
-            } else if (status.includes('progress') || status === 'coral' || status === 'cad' || status === 'design approval pending') {
-              normalizedStatus = 'in_progress';
             } else if (status.includes('completed') || status.includes('approved')) {
               normalizedStatus = 'completed';
             } else if (status.includes('rejected')) {
               normalizedStatus = 'rejected';
+            } else {
+              // For statuses like coral, cad, progress, etc., normalize to pending
+              normalizedStatus = 'pending';
             }
             
             let budget = 0;
@@ -1284,39 +1289,36 @@ export const api = createApi({
           });
 
           // Calculate dashboard stats based on role
-          // Admin: Use regular enquiries data (count from normalizedEnquiries)
-          // Non-admin (coral/cad/client): Use categorized counts from aggregate API
+          // All users now use aggregate endpoints for counts
           if (role === 'admin') {
-            // Admin: Count from normalizedEnquiries (all enquiries, no aggregate)
-            // Use pagination total if available (more accurate), otherwise use array length
-            const totalEnquiries = paginationTotal !== null ? paginationTotal : normalizedEnquiries.length;
-            const pendingEnquiries = normalizedEnquiries.filter(e => e.status === 'pending').length;
-            const approvalPendingEnquiries = normalizedEnquiries.filter(e => {
-              const status = (e.status || '').toLowerCase();
-              return status.includes('approval') && !status.includes('approved');
-            }).length;
-            const completedEnquiries = normalizedEnquiries.filter(e => {
+            // Admin: Use aggregate endpoints for counts
+            const totalEnquiries = categorizedCounts['All'] || statusCounts.total || 0;
+            const pendingEnquiries = categorizedCounts['Pending'] || statusCounts.pending || 0;
+            const approvalPendingEnquiries = categorizedCounts['Approval Pending'] || 0;
+            const completedEnquiries = categorizedCounts['Completed'] || statusCounts.completed || 0;
+            
+            // Use client aggregate count if available, otherwise fallback to clients API
+            const totalClients = totalClientsFromAggregate > 0 ? totalClientsFromAggregate : clients.length;
+            
+            // Revenue calculation still needs enquiry data (limited fetch for completed enquiries)
+            const revenue = normalizedEnquiries
+              .filter(e => {
               const status = (e.status || '').toLowerCase();
               return status.includes('completed') || status.includes('approved');
-            }).length;
-            const totalClients = clients.length;
-            const revenue = normalizedEnquiries
-              .filter(e => e.status === 'completed')
+              })
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
             
             console.log('🔍 [DASHBOARD DEBUG] ============================================');
-            console.log('🔍 [DASHBOARD DEBUG] ADMIN DASHBOARD CALCULATIONS (from enquiries data, NO aggregate):');
-            console.log('🔍 [DASHBOARD DEBUG] - Total Enquiries:', totalEnquiries, '(from pagination.total:', paginationTotal, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending Enquiries:', pendingEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
-            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Enquiries:', approvalPendingEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
-            console.log('🔍 [DASHBOARD DEBUG] - Completed Enquiries:', completedEnquiries, '(counted from', normalizedEnquiries.length, 'enquiries)');
-            console.log('🔍 [DASHBOARD DEBUG] - Total Clients:', totalClients);
-            console.log('🔍 [DASHBOARD DEBUG] - Revenue:', revenue);
+            console.log('🔍 [DASHBOARD DEBUG] ADMIN DASHBOARD CALCULATIONS (from aggregate endpoints):');
+            console.log('🔍 [DASHBOARD DEBUG] - Total Enquiries:', totalEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Pending Enquiries:', pendingEnquiries, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Enquiries:', approvalPendingEnquiries, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Completed Enquiries:', completedEnquiries, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Total Clients:', totalClients, '(from aggregate:', totalClientsFromAggregate, '| from clients API:', clients.length, ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Revenue:', revenue, '(calculated from', normalizedEnquiries.length, 'completed enquiries)');
             const sumOfStatuses = pendingEnquiries + approvalPendingEnquiries + completedEnquiries;
             console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', sumOfStatuses);
             console.log('🔍 [DASHBOARD DEBUG] - Does sum match Total?', sumOfStatuses === totalEnquiries, '(Total:', totalEnquiries, '| Sum:', sumOfStatuses, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Note: Status counts are from fetched enquiries array, total uses pagination.total if available');
-            console.log('🔍 [DASHBOARD DEBUG] - ⚠️ WARNING: If sum ≠ total, status counts may be incomplete due to pagination');
             console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
@@ -1327,8 +1329,8 @@ export const api = createApi({
                 completedEnquiries,
                 totalClients,
                 revenue,
-                // Include categorized counts for direct access (empty for admin)
                 categorizedCounts,
+                clientAggregateData, // Include client aggregate data for mapping counts
               },
             };
           } else if (role === 'client') {
@@ -2098,6 +2100,194 @@ export const api = createApi({
       providesTags: (result, error, { enquiryId }) => [{ type: 'Chat', id: enquiryId }],
     }),
 
+    // Get all chats for an enquiry (both admin-client and admin-designer)
+    // Uses /api/chats with search parameter and filters client-side
+    // Renamed from getChatsByEnquiry to getChatsByEnquiryV2 to bypass old cached queries
+    getChatsByEnquiryV2: builder.query({
+      query: ({ enquiryId }) => {
+        if (!enquiryId) {
+          throw new Error('enquiryId is required');
+        }
+        // Use /api/chats with search parameter (searches by enquiry name or ID)
+        // Fetch with high limit to get all chats, then filter client-side
+        const enquiryIdStr = String(enquiryId).trim();
+        const params = new URLSearchParams();
+        params.append('search', enquiryIdStr);
+        params.append('limit', '100'); // High limit to get all matching chats
+        params.append('page', '1');
+        const url = `/api/chats?${params.toString()}`;
+        if (__DEV__) {
+          console.log('✅✅✅ getChatsByEnquiryV2 (NEW CODE) ✅✅✅');
+          console.log('🔍 Fetching from:', url);
+          console.log('🔍 For enquiryId:', enquiryIdStr);
+          console.log('✅✅✅ If you see OLD endpoint /api/chats/enquiry/, the app needs reload ✅✅✅');
+        }
+        return url;
+      },
+      providesTags: (result, error, { enquiryId }) => [{ type: 'Chat', id: enquiryId }],
+      transformResponse: (data, meta, arg) => {
+        try {
+          const { enquiryId } = arg;
+          const enquiryIdStr = String(enquiryId).trim();
+          
+          // Handle different response formats
+          if (!data) {
+            if (__DEV__) {
+              console.log('getChatsByEnquiry: No data returned');
+            }
+            return [];
+          }
+          
+          let chatsArray = [];
+          if (Array.isArray(data)) {
+            chatsArray = data;
+          } else if (data.Data && Array.isArray(data.Data)) {
+            chatsArray = data.Data;
+          } else if (data.data && Array.isArray(data.data)) {
+            chatsArray = data.data;
+          } else if (data.chats && Array.isArray(data.chats)) {
+            chatsArray = data.chats;
+          } else {
+            if (__DEV__) {
+              console.warn('getChatsByEnquiry: Unexpected response format:', data);
+            }
+            return [];
+          }
+          
+          if (__DEV__) {
+            console.log('getChatsByEnquiry: Found', chatsArray.length, 'chats before filtering');
+          }
+          
+          // Normalize chat objects and filter by enquiryId
+          const normalizedChats = chatsArray.map((chat, index) => {
+            try {
+          // Handle MongoDB ObjectId format
+          let chatId = chat._id;
+          if (chatId?.$oid) {
+            chatId = chatId.$oid;
+          } else if (chatId?._id) {
+            chatId = chatId._id;
+          } else {
+            chatId = chatId || chat.id;
+          }
+          
+          let enquiryId = chat.EnquiryId || chat.enquiryId;
+          if (enquiryId?.$oid) {
+            enquiryId = enquiryId.$oid;
+          } else if (enquiryId?._id) {
+            enquiryId = enquiryId._id;
+          }
+          
+          // Handle last message
+          let lastMessage = '';
+          let lastMessageTime = null;
+          if (chat.LastMessage) {
+            if (typeof chat.LastMessage === 'object') {
+              lastMessage = chat.LastMessage.Message || chat.LastMessage.message || chat.LastMessage.text || '';
+              lastMessageTime = chat.LastMessage.Timestamp || chat.LastMessage.timestamp || chat.LastMessage.updatedAt;
+            } else {
+              lastMessage = chat.LastMessage;
+            }
+          } else if (chat.lastMessage) {
+            lastMessage = chat.lastMessage;
+          }
+          
+          if (lastMessageTime?.$date) {
+            lastMessageTime = lastMessageTime.$date;
+          }
+          
+          return {
+            _id: chatId,
+            id: chatId,
+            _originalData: chat,
+            EnquiryId: enquiryId,
+            enquiryId: enquiryId,
+            EnquiryName: chat.EnquiryName || chat.enquiryTitle || chat.EnquiryTitle || 'Untitled Chat',
+            enquiryTitle: chat.EnquiryName || chat.enquiryTitle || chat.EnquiryTitle || 'Untitled Chat',
+            Type: chat.Type || chat.type,
+            type: chat.Type || chat.type,
+            LastMessage: chat.LastMessage,
+            lastMessage: lastMessage,
+            lastMessageTime: lastMessageTime,
+            UnreadCount: chat.UnreadCount || chat.unreadCount || 0,
+            unreadCount: chat.UnreadCount || chat.unreadCount || 0,
+            IsGroup: chat.IsGroup || chat.isGroup || false,
+            isGroup: chat.IsGroup || chat.isGroup || false,
+          };
+            } catch (chatError) {
+              if (__DEV__) {
+                console.error('Error normalizing chat at index', index, ':', chatError, chat);
+              }
+              // Return a minimal valid chat object
+              return {
+                _id: chat?._id || chat?.id || `error-${index}`,
+                id: chat?._id || chat?.id || `error-${index}`,
+                _originalData: chat,
+                EnquiryId: chat?.EnquiryId || chat?.enquiryId || null,
+                enquiryId: chat?.EnquiryId || chat?.enquiryId || null,
+                EnquiryName: 'Error loading chat',
+                enquiryTitle: 'Error loading chat',
+                Type: chat?.Type || chat?.type || null,
+                type: chat?.Type || chat?.type || null,
+                LastMessage: null,
+                lastMessage: 'Error loading message',
+                lastMessageTime: null,
+                UnreadCount: 0,
+                unreadCount: 0,
+                IsGroup: false,
+                isGroup: false,
+              };
+            }
+          }).filter(chat => chat && (chat._id || chat.id)); // Filter out any null/undefined chats
+          
+          // Filter to only include chats matching the enquiryId
+          const filteredChats = normalizedChats.filter(chat => {
+            const chatEnquiryId = String(chat.enquiryId || chat.EnquiryId || '').trim();
+            return chatEnquiryId === enquiryIdStr;
+          });
+          
+          if (__DEV__) {
+            console.log('getChatsByEnquiry: Found', filteredChats.length, 'chats after filtering for enquiryId:', enquiryIdStr);
+          }
+          
+          return filteredChats;
+        } catch (error) {
+          if (__DEV__) {
+            console.error('Error in getChatsByEnquiry transformResponse:', error);
+          }
+          return [];
+        }
+      },
+      transformErrorResponse: (response, meta, arg) => {
+        if (__DEV__) {
+          const { enquiryId } = arg || {};
+          console.error('❌ getChatsByEnquiryV2 API Error:', {
+            enquiryId,
+            status: response.status,
+            originalStatus: response.originalStatus,
+            data: response.data,
+            message: response.data?.message || response.data?.error || 'Unknown error',
+            url: meta?.request?.url || meta?.request?.endpoint || 'unknown',
+            endpointName: 'getChatsByEnquiryV2',
+          });
+          // Check if error is from old endpoint
+          if (response.data && typeof response.data === 'string' && response.data.includes('/api/chats/enquiry/')) {
+            console.error('⚠️ CRITICAL ERROR: Old endpoint detected! URL:', meta?.request?.url || 'unknown');
+            console.error('⚠️ This means the app is still using cached code. Please:');
+            console.error('⚠️ 1. Stop the Metro bundler completely');
+            console.error('⚠️ 2. Clear app cache/data');
+            console.error('⚠️ 3. Restart Metro bundler');
+            console.error('⚠️ 4. Reload the app');
+          }
+        }
+        return {
+          status: response.status,
+          data: response.data,
+          error: response.data?.message || response.data?.error || 'Failed to load chats',
+        };
+      },
+    }),
+
     // Get all chats (for chat list)
     getChats: builder.query({
       query: ({ page = 1, limit = 10, search = '', type } = {}) => {
@@ -2330,13 +2520,17 @@ export const api = createApi({
           
           // Check if response is HTML (404 page or error page)
           if (responseText.includes('<!DOCTYPE') || responseText.includes('<html') || responseText.includes('Cannot GET')) {
-            if (__DEV__) {
-              console.error('❌ Backend returned HTML instead of JSON. This usually means the endpoint does not exist.');
-              console.error('Expected endpoint: /api/message/:chatId/messages');
-              console.error('ChatId:', chatId);
-              console.error('Response preview:', responseText.substring(0, 200));
+            // Backend endpoint /api/message/:chatId/messages doesn't exist yet
+            // This is expected - messages work via WebSocket, historical messages will be empty
+            // Only log once per chat to reduce noise
+            if (__DEV__ && !global._loggedMissingMessagesEndpoint) {
+              console.warn('⚠️ Backend endpoint /api/message/:chatId/messages not implemented yet.');
+              console.warn('⚠️ Historical messages will be empty. New messages work via WebSocket.');
+              console.warn('⚠️ This is expected behavior until backend implements the endpoint.');
+              global._loggedMissingMessagesEndpoint = true;
             }
             // Return empty array - messages will be empty but app won't crash
+            // WebSocket messages will still work fine
             return { data: [] };
           }
 
@@ -2613,6 +2807,7 @@ export const {
   // Chats
   useGetChatsQuery,
   useGetChatByEnquiryQuery,
+  useGetChatsByEnquiryV2Query,
   useGetChatMessagesQuery,
   useUploadChatMediaMutation,
   

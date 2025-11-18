@@ -9,11 +9,11 @@ import {
   Text,
   Platform,
   Modal,
-  RefreshControl,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
-import { useGetEnquiryByIdQuery, useDeleteEnquiryMutation, useGetClientsQuery, useApproveDesignVersionMutation, useRejectDesignVersionMutation } from '../../store/api';
+import { useGetEnquiryByIdQuery, useDeleteEnquiryMutation, useApproveDesignVersionMutation, useRejectDesignVersionMutation } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input, EnquiryImage } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -31,6 +31,9 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { enquiry: initialEnquiry, enquiryId: routeEnquiryId, shouldRefresh } = route.params || {};
   
+  if (__DEV__) {
+    console.log('initialEnquiry', initialEnquiry);
+  }
   // Log route params when screen loads or params change
   useEffect(() => {
     if (__DEV__) {
@@ -67,9 +70,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     refetch 
   } = useGetEnquiryByIdQuery(enquiryId, {
     skip: !enquiryId,
-    refetchOnFocus: true, // ✅ Refetch when screen comes into focus (to get latest status updates)
-    refetchOnMountOrArgChange: true, // ✅ Refetch when enquiryId changes
-    pollingInterval: 10000, // ✅ Poll every 10 seconds to get latest updates (when admin changes status)
   });
   
 
@@ -101,8 +101,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   const [deleteEnquiry, { isLoading: isDeleting }] = useDeleteEnquiryMutation();
   
-  // Fetch clients for name lookup
-  const { data: clientsData = [], isLoading: clientsLoading } = useGetClientsQuery(undefined, {
+  // Fetch clients for name lookup (using cached hook)
+  const { clients: clientsData = [], isLoading: clientsLoading } = useClients({
     skip: false,
   });
   
@@ -358,11 +358,44 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
   }, [enquiry]);
   
-  // Get priority from API (Priority field)
+  // Get priority from API (Priority field) - use original value, not normalized
+  // Check _originalData first to get the full priority value (e.g., "Super High" not "high")
   const priority = originalData?.Priority || enquiry?.Priority || enquiry?.priority || 'Normal';
   
-  // Get status from API (Status field or StatusHistory)
-  const status = originalData?.Status || enquiry?.Status || enquiry?.status || 'pending';
+  // Get status from API - use original value, not normalized
+  // Priority order:
+  // 1. Extract from StatusHistory (latest status entry) - most accurate source
+  // 2. CurrentStatus from originalData (if API provides it)
+  // 3. Status from originalData (direct Status field)
+  // 4. Fallback to normalized status fields
+  // This ensures we display the full status like "Design Approval Pending" instead of just "pending"
+  let status = null;
+  
+  // First, try to get status from StatusHistory (most accurate source)
+  const statusHistory = originalData?.StatusHistory || enquiry?.StatusHistory || [];
+  if (Array.isArray(statusHistory) && statusHistory.length > 0) {
+    // Sort by timestamp (newest first) and get the latest status
+    const sortedHistory = [...statusHistory].sort((a, b) => {
+      const dateA = new Date(a.Timestamp || a.timestamp || 0);
+      const dateB = new Date(b.Timestamp || b.timestamp || 0);
+      return dateB - dateA;
+    });
+    const latestStatus = sortedHistory[0];
+    status = latestStatus?.Status || latestStatus?.status || null;
+  }
+  
+  // If not found in StatusHistory, check other fields
+  if (!status) {
+    status = originalData?.CurrentStatus || 
+             originalData?.Status || 
+             enquiry?.CurrentStatus ||
+             enquiry?.Status;
+  }
+  
+  // Final fallback to normalized status
+  if (!status) {
+    status = enquiry?.status || 'pending';
+  }
   
   // Get client name from ClientId - prioritize already resolved name, then lookup
   const clientId = originalData?.ClientId || enquiry?.ClientId || enquiry?.clientId;
@@ -436,14 +469,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 console.error('❌ Refetch error:', error);
               }
             });
-        }, 300);
+        }, 100);
         
         return () => clearTimeout(timeoutId);
-      }
-      
-      // Also handle shouldRefresh flag if provided
-      const shouldRefetch = shouldRefresh && shouldRefresh !== lastShouldRefreshRef.current && enquiryId;
-      if (shouldRefetch) {
+      } else {
+        // Update ref even if not refetching
         lastShouldRefreshRef.current = shouldRefresh;
       }
     }, [shouldRefresh, enquiryId, refetch])
@@ -834,12 +864,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             </Text>
             <View style={styles.statusContainer}>
               <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status) }]}>
-                <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
+                <Text 
+                  style={{ color: colors.textWhite, fontSize: fonts.sm, textAlign: 'center' }}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit={false}
+                >
                   {status.toUpperCase()}
                 </Text>
               </View>
               <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(priority) }]}>
-                <Text style={{ color: colors.textWhite, fontSize: fonts.sm }}>
+                <Text 
+                  style={{ color: colors.textWhite, fontSize: fonts.sm }}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.8}
+                >
                   {priority.toUpperCase()}
                 </Text>
               </View>
@@ -1252,18 +1291,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const cadCode = originalData?.CadCode || enquiry?.CadCode || enquiry?.cadCode || enquiry?.cadVersion;
     
     // Get all versions
-    let coralVersions = originalData?.Coral || enquiry?.Coral || [];
-    let cadVersions = originalData?.Cad || enquiry?.Cad || [];
-    
-    // Filter versions for clients - only show versions with ShowToClient: true
-    if (user?.role === 'client') {
-      coralVersions = Array.isArray(coralVersions) ? coralVersions.filter(version => 
-        version?.ShowToClient === true || version?.showToClient === true || version?.IsVisibleToClient === true || version?.isVisibleToClient === true
-      ) : [];
-      cadVersions = Array.isArray(cadVersions) ? cadVersions.filter(version => 
-        version?.ShowToClient === true || version?.showToClient === true || version?.IsVisibleToClient === true || version?.isVisibleToClient === true
-      ) : [];
-    }
+    const coralVersions = originalData?.Coral || enquiry?.Coral || [];
+    const cadVersions = originalData?.Cad || enquiry?.Cad || [];
     
     // Check if Coral/CAD data exists
     const hasCoral = coralCode || coralVersions.length > 0;
@@ -1433,8 +1462,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         Actions
         </Text>
       
-      {/* Clients cannot edit enquiries - removed Edit Enquiry button */}
-      {/* Clients can only view their enquiries, not edit them */}
+      <Button
+        title="Edit Enquiry"
+        onPress={handleEditEnquiry}
+        style={[styles.actionButton, styles.editButton]}
+      />
 
       {/* Hide enquiry history for clients (role 4) */}
       {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
@@ -1449,7 +1481,23 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
       <TouchableOpacity
         style={styles.chatButton}
-        onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
+        onPress={() => {
+          const currentEnquiry = enquiry || initialEnquiry || {};
+          const currentEnquiryId = enquiryId || currentEnquiry?.id || currentEnquiry?._id;
+          
+          if (!currentEnquiryId) {
+            if (__DEV__) {
+              console.error('Cannot open chat: enquiryId is missing', { enquiry, initialEnquiry, enquiryId });
+            }
+            Alert.alert('Error', 'Cannot open chat: Enquiry ID is missing');
+            return;
+          }
+          
+          navigation.navigate('ChatGroups', { 
+            enquiry: currentEnquiry, 
+            enquiryId: currentEnquiryId 
+          });
+        }}>
         <Icon name="chat" size={16} color={colors.primary} />
         <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
           Open Chat
@@ -1464,22 +1512,33 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         Designer Actions
         </Text>
       
-      <Button
-        title={`Upload ${role === 'coral' ? 'Coral' : 'CAD'} Design`}
-        onPress={role === 'coral' ? handleUploadCoral : handleUploadCAD}
-        style={styles.uploadButton}
-      />
+      <View style={styles.adminActionsRow}>
+        <TouchableOpacity
+          onPress={role === 'coral' ? handleUploadCoral : handleUploadCAD}
+          style={[styles.adminActionButton, styles.adminActionButtonPrimary]}
+          activeOpacity={0.85}
+        >
+          <Icon name="cloud-upload" size={18} color={colors.textWhite} />
+          <Text style={styles.adminActionText}>
+            Upload {role === 'coral' ? 'Coral' : 'CAD'} Design
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Enquiry History button removed for coral and CAD designers - only visible for admin */}
 
-      <TouchableOpacity
-        style={styles.chatButton}
-        onPress={() => navigation.navigate('ChatDetail', { enquiry })}>
-        <Icon name="chat" size={16} color={colors.primary} />
-        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
-          Open Chat
-        </Text>
-      </TouchableOpacity>
+      <View style={styles.adminActionsRow}>
+        <TouchableOpacity
+          style={[styles.adminActionButton, styles.adminActionButtonOutline]}
+          onPress={() => navigation.navigate('ChatGroups', { enquiry, enquiryId: enquiry?.id || enquiry?._id })}
+          activeOpacity={0.85}
+        >
+          <Icon name="chat" size={18} color={colors.primary} />
+          <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>
+            Open Chat
+          </Text>
+        </TouchableOpacity>
+      </View>
     </Card>
   );
 
@@ -1575,7 +1634,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           <TouchableOpacity
             style={[styles.adminActionButton, styles.adminActionButtonOutline]}
             activeOpacity={0.85}
-            onPress={() => navigation.navigate('ChatDetail', { enquiry })}
+            onPress={() =>  navigation.navigate('ChatGroups', { enquiry, enquiryId: enquiry?.id || enquiry?._id })}
           >
             <Icon name="chat" size={18} color={colors.primary} />
             <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>Open Chat</Text>
@@ -1640,18 +1699,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={loading}
-            onRefresh={() => {
-              if (__DEV__) {
-                console.log('🔄 Manual refresh triggered by pull-to-refresh');
-              }
-              refetch();
-            }}
-            tintColor={colors.primary}
-          />
-        }
       >
         {renderImages()}
         {renderEnquiryDetails()}
@@ -1723,15 +1770,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    minWidth: 80,
+    minWidth: 120,
+    maxWidth: '90%',
     alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 1,
   },
   priorityBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    minWidth: 80,
+    minWidth: 100,
+    maxWidth: '100%',
     alignItems: 'center',
+    flexShrink: 1,
   },
   detailsGrid: {
     gap: 12,

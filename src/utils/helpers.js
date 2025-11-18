@@ -76,7 +76,6 @@ console.log('date', date);
 export const getStatusColor = (status) => {
   const statusColors = {
     pending: colors.warning,
-    in_progress: colors.info,
     completed: colors.success,
     rejected: colors.error,
   };

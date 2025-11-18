@@ -4,7 +4,6 @@ const initialState = {
   filters: {
     status: 'all',
     priority: 'all',
-    client: 'all',
   },
   searchQuery: '',
   sortBy: 'createdAt',
@@ -16,7 +15,7 @@ const initialState = {
     currentPage: 1,
     totalPages: 1,
     total: 0,
-    limit: 25,
+    limit: 10, // Changed to 10 for lazy loading
   },
 };
 
@@ -39,22 +38,17 @@ const enquiriesSlice = createSlice({
     },
     setSelectedStatus: (state, action) => {
       state.selectedStatus = action.payload;
-      // Update filters.status to match
-      const statusMap = {
-        'All': 'all',
-        'Pending': 'pending',
-        'In Progress': 'in_progress',
-        'Completed': 'completed',
-        'Rejected': 'rejected',
-      };
-      state.filters.status = statusMap[action.payload] || 'all';
+      // Legacy support - no longer updates filters
     },
     setSelectedClient: (state, action) => {
       state.selectedClient = action.payload;
-      state.filters.client = action.payload === 'All' ? 'all' : action.payload;
+      // Legacy support - no longer updates filters
     },
     clearFilters: (state) => {
-      state.filters = initialState.filters;
+      state.filters = {
+        status: 'all',
+        priority: 'all',
+      };
       state.searchQuery = '';
       state.selectedStatus = 'All';
       state.selectedClient = 'All';

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../constants/colors';
@@ -8,6 +8,7 @@ import { formatCount } from '../../utils/helpers';
 import Icon from '../common/Icon';
 import { FILE_BASE_URL, API_BASE_URL } from '../../config/apiConfig';
 import { getCachedImage, cacheImage } from '../../utils/imageCache';
+import { getCachedImageData, cacheImageData } from '../../utils/imageMemoryCache';
 import { getUserName } from '../../utils/userUtils';
 
 export const Card = ({ children, style, onPress, ...props }) => {
@@ -102,7 +103,7 @@ export const CompactEnquiryCard = ({
   // Check design progress stages
   const hasDesign = enquiry.Coral && Array.isArray(enquiry.Coral) && enquiry.Coral.length > 0;
   const hasCAD = enquiry.Cad && Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0;
-  const hasOrder = enquiry.status === 'completed' || enquiry.status === 'in_progress';
+  const hasOrder = enquiry.status === 'completed';
 
   // Get reference image - fetch latest from ReferenceImages array
   const getReferenceImage = () => {
@@ -228,8 +229,17 @@ export const CompactEnquiryCard = ({
     enquiry?.Images,
   ]);
   
-  const [imageDataUri, setImageDataUri] = useState(null);
+  // Check memory cache first (instant, no async needed)
+  const memoryCachedImage = useMemo(() => {
+    return referenceImageUri ? getCachedImageData(referenceImageUri) : null;
+  }, [referenceImageUri]);
+  
+  const [imageDataUri, setImageDataUri] = useState(() => {
+    // Initialize with memory cache if available
+    return memoryCachedImage;
+  });
   const fetchAbortController = useRef(null);
+  const hasLoadedRef = useRef(false);
   
   // Log when referenceImageUri changes
   useEffect(() => {
@@ -285,6 +295,7 @@ export const CompactEnquiryCard = ({
         enquiryId: enquiry?.id,
         referenceImageUri: referenceImageUri,
         hasUri: !!referenceImageUri,
+        currentImageDataUri: imageDataUri ? 'exists' : 'null',
       });
     }
 
@@ -298,6 +309,44 @@ export const CompactEnquiryCard = ({
       return;
     }
 
+    // If it's already a data URI, use it directly
+    if (referenceImageUri.startsWith('data:')) {
+      if (imageDataUri !== referenceImageUri) {
+        setImageDataUri(referenceImageUri);
+        setImageLoading(false);
+        setImageError(false);
+      }
+      return;
+    }
+
+    // Check memory cache FIRST before resetting state (prevents reload flash)
+    const memoryCached = getCachedImageData(referenceImageUri);
+    if (memoryCached) {
+      if (__DEV__) {
+        console.log('✅ Using memory cached image (instant) for:', referenceImageUri.substring(0, 50));
+      }
+      // Only update if different to prevent unnecessary re-renders
+      if (imageDataUri !== memoryCached) {
+        setImageDataUri(memoryCached);
+        setImageLoading(false);
+        setImageError(false);
+        hasLoadedRef.current = true;
+      }
+      return; // Exit early, no fetch needed
+    }
+
+    // If we already have this image loaded, don't reload it
+    if (imageDataUri) {
+      const currentCached = getCachedImageData(referenceImageUri);
+      // If the current imageDataUri matches what's cached for this URI, skip reload
+      if (currentCached === imageDataUri || (hasLoadedRef.current && imageDataUri)) {
+        if (__DEV__) {
+          console.log('⏭️ Image already loaded, skipping reload for:', referenceImageUri.substring(0, 50));
+        }
+        return;
+      }
+    }
+
     // Abort previous fetch if any
     if (fetchAbortController.current) {
       fetchAbortController.current.abort();
@@ -307,31 +356,28 @@ export const CompactEnquiryCard = ({
     fetchAbortController.current = new AbortController();
     const signal = fetchAbortController.current.signal;
 
-    // Reset state
-    setImageError(false);
-    setImageLoading(true);
-    setImageDataUri(null);
-
-    // If it's already a data URI, use it directly
-    if (referenceImageUri.startsWith('data:')) {
-      setImageDataUri(referenceImageUri);
-      setImageLoading(false);
-      return;
+    // Only reset loading state if we don't have the image
+    if (!imageDataUri) {
+      setImageError(false);
+      setImageLoading(true);
     }
 
     // Check cache first
     const checkCacheAndFetch = async () => {
       try {
-        // Try to get from cache
+        // Check persistent cache (async)
         const cachedImage = await getCachedImage(referenceImageUri);
         
         if (cachedImage) {
           if (__DEV__) {
-            console.log('✅ Using cached image for:', referenceImageUri.substring(0, 50));
+            console.log('✅ Using persistent cached image for:', referenceImageUri.substring(0, 50));
           }
+          // Store in memory cache for faster access
+          cacheImageData(referenceImageUri, cachedImage);
           setImageDataUri(cachedImage);
           setImageLoading(false);
           setImageError(false);
+          hasLoadedRef.current = true;
           return;
         }
 
@@ -448,13 +494,15 @@ export const CompactEnquiryCard = ({
                 console.log('✅ Using S3/public URL directly (no base64 conversion needed)');
               }
               
-              // Cache the URL
+              // Cache the URL (both persistent and memory)
               await cacheImage(referenceImageUri, actualImageUrl);
+              cacheImageData(referenceImageUri, actualImageUrl);
               
               // Use the URL directly - React Native Image can handle it
               setImageDataUri(actualImageUrl);
               setImageLoading(false);
               setImageError(false);
+              hasLoadedRef.current = true;
               
               if (__DEV__) {
                 console.log('✅ Image URL set, should render now');
@@ -523,13 +571,15 @@ export const CompactEnquiryCard = ({
               console.log('   - Data URI length:', dataUri.length);
             }
             
-            // Cache the data URI
+            // Cache the data URI (both persistent and memory)
             await cacheImage(referenceImageUri, dataUri);
+            cacheImageData(referenceImageUri, dataUri);
             
             // Set the image data URI
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
+            hasLoadedRef.current = true;
             
             if (__DEV__) {
               console.log('✅ Image state updated, should render now');
@@ -566,12 +616,14 @@ export const CompactEnquiryCard = ({
               console.log('   - Data URI length:', dataUri.length);
             }
             
-            // Cache the data URI
+            // Cache the data URI (both persistent and memory)
             await cacheImage(referenceImageUri, dataUri);
+            cacheImageData(referenceImageUri, dataUri);
             
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
+            hasLoadedRef.current = true;
           }
         } else {
           if (__DEV__) {
@@ -680,23 +732,11 @@ export const CompactEnquiryCard = ({
           </View>
         </View>
 
-        {/* Row 3: Assigned to and Created Date */}
+        {/* Row 3: Created Date */}
         <View style={styles.compactRow3}>
-          <View style={styles.compactFieldGroup}>
-            <Text style={styles.compactLabelText}>Assigned to</Text>
-            <Text style={styles.compactValueText} numberOfLines={1}>{assignedTo}</Text>
-          </View>
           <View style={styles.compactFieldGroup}>
             <Text style={styles.compactLabelText}>Created</Text>
             <Text style={styles.compactValueText}>{createdDate}</Text>
-          </View>
-        </View>
-
-        {/* Row 4: Shipping Date (right aligned) */}
-        <View style={styles.compactRow4}>
-          <View style={styles.compactFieldGroup}>
-            <Text style={styles.compactLabelText}>Shipping</Text>
-            <Text style={styles.compactValueText}>{shippingDate}</Text>
           </View>
         </View>
 
@@ -740,6 +780,18 @@ export const CompactEnquiryCard = ({
     </Card>
   );
 };
+
+// Memoize the component to prevent unnecessary re-renders on scroll
+export const CompactEnquiryCardMemo = memo(CompactEnquiryCard, (prevProps, nextProps) => {
+  // Only re-render if enquiry data actually changed
+  return (
+    prevProps.enquiry?.id === nextProps.enquiry?.id &&
+    prevProps.enquiry?.status === nextProps.enquiry?.status &&
+    prevProps.enquiry?.priority === nextProps.enquiry?.priority &&
+    JSON.stringify(prevProps.enquiry?.ReferenceImages) === JSON.stringify(nextProps.enquiry?.ReferenceImages) &&
+    JSON.stringify(prevProps.enquiry?._originalData?.ReferenceImages) === JSON.stringify(nextProps.enquiry?._originalData?.ReferenceImages)
+  );
+});
 
 export const EnquiryCard = ({
   enquiry,
@@ -831,16 +883,14 @@ export const EnquiryCard = ({
             style={[
               styles.progressFill, 
               { 
-                width: (enquiry.status || 'pending') === 'completed' ? '100%' : 
-                      (enquiry.status || 'pending') === 'in_progress' ? '60%' : '20%',
+                width: (enquiry.status || 'pending') === 'completed' ? '100%' : '20%',
                 backgroundColor: statusColor 
               }
             ]} 
           />
         </View>
         <Text style={styles.progressText}>
-          {(enquiry.status || 'pending') === 'completed' ? 'Completed' : 
-           (enquiry.status || 'pending') === 'in_progress' ? 'In Progress' : 'Pending'}
+          {(enquiry.status || 'pending') === 'completed' ? 'Completed' : 'Pending'}
         </Text>
       </View>
     </Card>
@@ -850,7 +900,6 @@ export const EnquiryCard = ({
 const getStatusColor = (status) => {
   const colors = {
     pending: '#F59E0B',
-    in_progress: '#3B82F6',
     completed: '#10B981',
     rejected: '#EF4444',
   };

@@ -12,7 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
-import { useGetDashboardDataQuery, useGetClientsQuery, useGetEnquiriesQuery } from '../../store/api';
+import { useGetDashboardDataQuery, useGetEnquiriesQuery, useGetStatusStatisticsQuery } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 import { StatusCard, Card, EnquiryStatusCard } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -197,7 +198,9 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
           {isLoadingImage ? (
             <AnimatedLogoLoader size={20} />
           ) : (
-            <Icon name="account" size={24} color={colors.textSecondary} />
+            <Text style={styles.clientNamePlaceholder} numberOfLines={2}>
+              {client.name || 'Client'}
+            </Text>
           )}
         </View>
       )}
@@ -227,10 +230,10 @@ const DashboardScreen = ({ navigation }) => {
   );
 
   const { 
-    data: clientsData = [], 
+    clients: clientsData = [], 
     isLoading: clientsLoading, 
     refetch: refetchClients 
-  } = useGetClientsQuery(undefined, {
+  } = useClients({
     skip: !user || user?.role !== 'admin',
   });
 
@@ -241,46 +244,102 @@ const DashboardScreen = ({ navigation }) => {
     skip: !user || user?.role !== 'admin',
   });
 
+  // Fetch status statistics for all status cards
+  const { 
+    data: statusStatisticsData, 
+    isLoading: statusStatisticsLoading,
+    refetch: refetchStatusStatistics
+  } = useGetStatusStatisticsQuery(undefined, {
+    skip: !user || user?.role !== 'admin',
+  });
+
   // Extract enquiries array from response (new API returns { data, pagination })
   const enquiriesData = enquiriesResponse?.data || [];
+  
+  // Extract status statistics array
+  const statusStats = statusStatisticsData?.statusStats || [];
 
-  // Compute clients with enquiry counts
+  // Compute clients with enquiry counts using aggregate data
   const clients = useMemo(() => {
     if (user?.role !== 'admin' || !clientsData || clientsData.length === 0) {
       return [];
     }
 
-    if (!enquiriesData || !Array.isArray(enquiriesData) || enquiriesData.length === 0) {
-      return clientsData.map(client => ({
-        ...client,
-        enquiryCount: 0,
-      }));
+    // Use client aggregate data from dashboard if available (more accurate)
+    const clientAggregateData = dashboardData?.clientAggregateData;
+    
+    // Create a map of client ID to enquiry count from aggregate data
+    const clientCountMap = new Map();
+    if (Array.isArray(clientAggregateData)) {
+      if (__DEV__) {
+        console.log('🔍 [DASHBOARD] Client Aggregate Data:', clientAggregateData.length, 'clients');
+      }
+      clientAggregateData.forEach(item => {
+        // Aggregate API returns client ID in 'name' field
+        const clientId = item.name || item.id || item._id;
+        const count = item.count || 0;
+        if (clientId) {
+          // Store with multiple key formats for matching
+          clientCountMap.set(String(clientId), count);
+          clientCountMap.set(clientId, count);
+          if (__DEV__) {
+            console.log('🔍 [DASHBOARD] Mapped client ID:', clientId, '→ count:', count);
+          }
+        }
+      });
     }
 
+    // Map clients with their enquiry counts
     return clientsData.map(client => {
-      const enquiryCount = enquiriesData.filter(
-        enquiry => enquiry.clientId === client.id || enquiry.clientName === client.name
-      ).length;
+      // Try to find count from aggregate data first (most accurate)
+      const clientId = client.id || client._id;
+      let enquiryCount = 0;
+      
+      if (clientCountMap.size > 0 && clientId) {
+        // Try multiple ID formats to match client ID from aggregate
+        enquiryCount = clientCountMap.get(String(clientId)) || 
+                      clientCountMap.get(clientId) ||
+                      clientCountMap.get(String(client._id)) ||
+                      clientCountMap.get(client._id) ||
+                      0;
+        
+        if (__DEV__ && enquiryCount === 0) {
+          console.log('⚠️ [DASHBOARD] No count found for client:', client.name, 'ID:', clientId, 'Available IDs in map:', Array.from(clientCountMap.keys()).slice(0, 5));
+        }
+      } else {
+        // Fallback to counting from enquiries data if aggregate not available
+        if (enquiriesData && Array.isArray(enquiriesData) && enquiriesData.length > 0) {
+          enquiryCount = enquiriesData.filter(
+            enquiry => {
+              const enquiryClientId = enquiry.clientId || enquiry.ClientId;
+              return enquiryClientId === clientId || 
+                     enquiryClientId === client._id ||
+                     enquiry.clientName === client.name;
+            }
+          ).length;
+        }
+      }
       
       return {
         ...client,
         enquiryCount: enquiryCount,
       };
     });
-  }, [clientsData, enquiriesData, user?.role]);
+  }, [clientsData, dashboardData?.clientAggregateData, enquiriesData, user?.role]);
 
   // Safety check - don't render if user is not loaded
   if (!user) {
     return <AnimatedLogoLoader size={60} />;
   }
 
-  const loading = dashboardLoading || clientsLoading || enquiriesLoading;
+  const loading = dashboardLoading || clientsLoading || enquiriesLoading || statusStatisticsLoading;
 
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([
       refetchDashboard(),
       user?.role === 'admin' && refetchClients(),
+      user?.role === 'admin' && refetchStatusStatistics(),
     ]);
     setRefreshing(false);
   };
@@ -298,34 +357,74 @@ const DashboardScreen = ({ navigation }) => {
       <View style={styles.sectionContainer}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Status </Text>
-          <TouchableOpacity 
-            onPress={() => navigation.navigate('StatusStatistics')}
-            style={styles.viewAllButton}
-          >
-            <Text style={styles.viewAllText}>View All</Text>
-            <Icon name="keyboard-arrow-up" size={20} color={colors.primary} />
-          </TouchableOpacity>
         </View>
-        <View style={styles.enquiryStatusGrid}>
-          {(() => {
-            const allValue = dashboardData?.totalEnquiries || dashboardData?.categorizedCounts?.['All'] || '0';
-            const pendingValue = dashboardData?.pendingEnquiries || dashboardData?.categorizedCounts?.['Pending'] || '0';
-            const approvalPendingValue = dashboardData?.approvalPendingEnquiries || dashboardData?.categorizedCounts?.['Approval Pending'] || '0';
-            const completedValue = dashboardData?.completedEnquiries || dashboardData?.categorizedCounts?.['Completed'] || '0';
-            
-            console.log('📊 [UI DEBUG] ============================================');
-            console.log('📊 [UI DEBUG] DISPLAYING STATUS CARDS:');
-            console.log('📊 [UI DEBUG] - All:', allValue, '(from totalEnquiries:', dashboardData?.totalEnquiries, '| categorizedCounts.All:', dashboardData?.categorizedCounts?.['All'], ')');
-            console.log('📊 [UI DEBUG] - Pending:', pendingValue, '(from pendingEnquiries:', dashboardData?.pendingEnquiries, '| categorizedCounts.Pending:', dashboardData?.categorizedCounts?.['Pending'], ')');
-            console.log('📊 [UI DEBUG] - Approval Pending:', approvalPendingValue, '(from approvalPendingEnquiries:', dashboardData?.approvalPendingEnquiries, '| categorizedCounts["Approval Pending"]:', dashboardData?.categorizedCounts?.['Approval Pending'], ')');
-            console.log('📊 [UI DEBUG] - Completed:', completedValue, '(from completedEnquiries:', dashboardData?.completedEnquiries, '| categorizedCounts.Completed:', dashboardData?.categorizedCounts?.['Completed'], ')');
-            console.log('📊 [UI DEBUG] - Full dashboardData:', JSON.stringify(dashboardData, null, 2));
-            console.log('📊 [UI DEBUG] - Sum Check (Pending + Approval Pending + Completed):', Number(pendingValue) + Number(approvalPendingValue) + Number(completedValue));
-            console.log('📊 [UI DEBUG] - Does sum match All?', (Number(pendingValue) + Number(approvalPendingValue) + Number(completedValue)) === Number(allValue));
-            console.log('📊 [UI DEBUG] ============================================');
-            
-            return null;
-          })()}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.statusScroll}
+          contentContainerStyle={styles.statusScrollContent}
+        >
+          {statusStats.length > 0 ? (
+            statusStats
+              .filter((item) => {
+                const statusName = (item.name || item.status || item.Status || '').toLowerCase();
+                // Filter out statuses containing "progress" or "in_progress"
+                return !statusName.includes('progress') && !statusName.includes('in_progress');
+              })
+              .map((item) => {
+              const statusName = item.name || item.status || item.Status || '';
+              const count = item.count || item.Count || item.value || 0;
+              
+              // Get status color based on status name
+              const getStatusColor = (name) => {
+                const upperName = name.toUpperCase();
+                if (upperName.includes('CORAL')) return colors.primary;
+                if (upperName.includes('CAD')) return colors.info || '#3B82F6';
+                if (upperName.includes('APPROVAL') && !upperName.includes('APPROVED')) return '#EF4444';
+                if (upperName.includes('APPROVED') || upperName.includes('COMPLETED')) return '#14B8A6';
+                if (upperName.includes('ORDER') || upperName.includes('PLACEMENT')) return colors.accent || '#8B5CF6';
+                if (upperName.includes('CAM')) return colors.secondary || '#6B7280';
+                if (upperName.includes('PRODUCTION')) return colors.error || '#EF4444';
+                if (upperName.includes('PENDING') || upperName.includes('CREATED')) return '#F97316';
+                return '#D4A574';
+              };
+              
+              // Get status display name
+              const getStatusDisplayName = (name) => {
+                const statusMap = {
+                  'ENQUIRY CREATED': 'Enquiry Created',
+                  'CORAL': 'Coral',
+                  'CAD': 'CAD',
+                  'DESIGN APPROVAL PENDING': 'Design Approval Pending',
+                  'APPROVED CAD': 'Approved Cad',
+                  'ORDER PLACEMENT': 'Order Placement',
+                  'CAM PENDING': 'CAM Pending',
+                  'PRODUCTION': 'Production',
+                  'COMPLETED': 'Completed',
+                  'REJECTED': 'Rejected',
+                };
+                const upperName = name.toUpperCase();
+                return statusMap[upperName] || name;
+              };
+              
+              const statusColor = getStatusColor(statusName);
+              const displayName = getStatusDisplayName(statusName);
+              
+              return (
+                <EnquiryStatusCard
+                  key={statusName}
+                  status={displayName}
+                  value={count}
+                  color={statusColor}
+                  borderColor={statusColor}
+                  style={styles.enquiryStatusItem}
+                  onPress={() => navigation.navigate('Enquiries', { filter: statusName.toLowerCase() })}
+                />
+              );
+            })
+          ) : (
+            // Fallback to main status cards if status stats not available
+            <>
           <EnquiryStatusCard
             status="All"
             value={dashboardData?.totalEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
@@ -358,7 +457,9 @@ const DashboardScreen = ({ navigation }) => {
             style={styles.enquiryStatusItem}
             onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
           />
-        </View>
+            </>
+          )}
+        </ScrollView>
       </View>
 
       {/* Clients Section */}
@@ -403,7 +504,11 @@ const DashboardScreen = ({ navigation }) => {
                   key={client.id}
                   client={client}
                   imageUrl={imageUrl}
-                  onPress={() => navigation.navigate('Enquiries', { filterType: 'client', filter: client.name })}
+                  onPress={() => navigation.navigate('Enquiries', { 
+                    filterType: 'client', 
+                    filter: client.name,
+                    clientId: client.id || client._id 
+                  })}
                 />
               );
             })}
@@ -431,13 +536,6 @@ const DashboardScreen = ({ navigation }) => {
           icon={<Icon name="people" size={20} color={colors.textWhite} />}
           color={colors.primary}
           onPress={() => navigation.navigate('ClientsList')}
-        />
-        <StatusCard
-          title="Revenue"
-          value={formatCurrency(dashboardData?.revenue || 0)}
-          icon={<Icon name="attach-money" size={20} color={colors.textWhite} />}
-          color={colors.primary}
-          onPress={() => navigation.navigate('RevenueReport')}
         />
       </View>
     </View>
@@ -518,11 +616,6 @@ const DashboardScreen = ({ navigation }) => {
 
     if (user?.role === 'admin') {
       actions.push(
-        {
-          title: 'Add New Enquiry',
-          icon: 'add-circle',
-          onPress: () => navigation.navigate('AddEnquiryStep1'),
-        },
         {
           title: 'Metal Prices',
           icon: 'trending-up',
@@ -651,7 +744,7 @@ const DashboardScreen = ({ navigation }) => {
               </View>
               <View style={styles.welcomeIconContainer}>
                 <View style={styles.welcomeIcon}>
-                  <Icon name="diamond" size={26} color={colors.textWhite} />
+                  <Icon name="diamond" size={22} color={colors.textWhite} />
                 </View>
               </View>
             </View>
@@ -683,7 +776,7 @@ const DashboardScreen = ({ navigation }) => {
           onPress={() => navigation.navigate('AddEnquiryStep1')}
           activeOpacity={0.8}
         >
-          <Icon name="add-circle" size={28} color={colors.textWhite} />
+          <Icon name="add-circle" size={24} color={colors.textWhite} />
         </TouchableOpacity>
       )}
     </SafeAreaView>
@@ -705,13 +798,13 @@ const styles = StyleSheet.create({
   // Welcome Section - Premium Design
   welcomeSection: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
   welcomeCard: {
     backgroundColor: colors.primary,
     borderRadius: 16,
-    padding: 20,
+    padding: 16,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
@@ -727,11 +820,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   welcomeGreeting: {
-    fontSize: fonts['2xl'],
+    fontSize: fonts.lg,
     fontFamily: fonts.bold,
     color: colors.textWhite,
     marginBottom: 4,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   userNameHighlight: {
     fontFamily: fonts.bold,
@@ -745,12 +838,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   welcomeIconContainer: {
-    marginLeft: 12,
+    marginLeft: 10,
   },
   welcomeIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -763,20 +856,20 @@ const styles = StyleSheet.create({
   
   // Section Container
   sectionContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
     paddingHorizontal: 16,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: fonts.lg,
+    fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   viewAllButton: {
     flexDirection: 'row',
@@ -793,17 +886,24 @@ const styles = StyleSheet.create({
   // Overview Section
   overviewSection: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 6,
+    paddingTop: 6,
+    paddingBottom: 4,
   },
   overviewTitle: {
-    fontSize: fonts.lg,
+    fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   
-  // Enquiry Status Grid
+  // Enquiry Status Grid - Now using horizontal scroll
+  statusScroll: {
+    flexGrow: 0,
+  },
+  statusScrollContent: {
+    paddingRight: 16,
+    gap: 6,
+  },
   enquiryStatusGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -811,10 +911,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   enquiryStatusItem: {
-    flex: 1,
+    width: 85,
     marginBottom: 12,
-    marginHorizontal: 1,
-    minWidth: 0, // Allow flex items to shrink below their content size
+    marginRight: 6,
+    minWidth: 85,
   },
   simpleIcon: {
     width: 10,
@@ -834,18 +934,18 @@ const styles = StyleSheet.create({
 
   // Clients Section
   clientsSection: {
-    marginBottom: 20,
+    marginBottom: 16,
     paddingLeft: 16,
   },
   clientsHeaderContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
     paddingRight: 16,
   },
   clientsHeader: {
-    fontSize: fonts.lg,
+    fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
     letterSpacing: 0.3,
@@ -857,32 +957,40 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   clientCard: {
-    width: 95,
-    height: 95,
+    width: 85,
+    height: 85,
     backgroundColor: colors.background,
-    borderRadius: 14,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
   },
   clientImage: {
     width: '100%',
-    height: 60,
-    marginBottom: 4,
-    borderRadius: 8,
+    height: 50,
+    marginBottom: 3,
+    borderRadius: 6,
   },
   clientImagePlaceholder: {
     width: '100%',
-    height: 60,
-    marginBottom: 4,
-    borderRadius: 8,
+    height: 50,
+    marginBottom: 3,
+    borderRadius: 6,
     backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  clientNamePlaceholder: {
+    fontSize: 10,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    lineHeight: 12,
   },
   clientName: {
     fontSize: 11,
@@ -893,28 +1001,28 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   clientCount: {
-    fontSize: fonts['2xl'],
+    fontSize: fonts.lg,
     fontFamily: fonts.bold,
     color: colors.primary,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
 
   // Quick Actions Section
   quickActionsSection: {
     paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingBottom: 6,
   },
   quickActionsCard: {
     marginHorizontal: 0,
     marginVertical: 0,
-    padding: 18,
+    padding: 16,
   },
   quickActionsTitle: {
-    fontSize: fonts.lg,
+    fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    marginBottom: 16,
-    letterSpacing: 0.3,
+    marginBottom: 12,
+    letterSpacing: 0.2,
   },
   actionsGrid: {
     flexDirection: 'row',
@@ -925,13 +1033,13 @@ const styles = StyleSheet.create({
     width: '48%',
     backgroundColor: colors.background,
     borderRadius: 12,
-    padding: 18,
+    padding: 14,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.border,
-    minHeight: 110,
-    marginBottom: 12,
+    minHeight: 100,
+    marginBottom: 10,
   },
   actionIcon: {
     // width: 48,
@@ -940,7 +1048,7 @@ const styles = StyleSheet.create({
     // backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   actionText: {
     fontSize: fonts.sm,
@@ -954,25 +1062,25 @@ const styles = StyleSheet.create({
   // Recent Activity Section
   recentActivitySection: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
   recentActivityCard: {
     marginHorizontal: 0,
     marginVertical: 0,
-    padding: 18,
+    padding: 16,
   },
   recentActivityTitle: {
-    fontSize: fonts.lg,
+    fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    marginBottom: 16,
-    letterSpacing: 0.3,
+    marginBottom: 12,
+    letterSpacing: 0.2,
   },
   activityItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.backgroundSecondary,
   },
@@ -983,7 +1091,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(33, 150, 243, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 14,
+    marginRight: 12,
   },
   activityTextContainer: {
     flex: 1,
@@ -1009,9 +1117,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 20,
     bottom: 10, // Position above bottom tab bar
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',

@@ -6,15 +6,13 @@ import {
   TouchableOpacity,
   Text,
   Modal,
-  Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Input } from '../common';
 import Icon from '../common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
-import { useGetClientsQuery, useGetUsersQuery } from '../../store/api';
+import { useClients } from '../../features/clients/clientsHooks';
 
 const EnquiryFiltersModal = ({
   visible,
@@ -26,28 +24,21 @@ const EnquiryFiltersModal = ({
 }) => {
   const [localFilters, setLocalFilters] = useState(filters);
   const [showDropdown, setShowDropdown] = useState(null);
-  const [showDatePicker, setShowDatePicker] = useState(null); // Track which date picker is open
-  const [tempDate, setTempDate] = useState(new Date()); // Temporary date for picker
 
-  // Fetch clients and users for dropdowns
-  const { data: clientsData = [] } = useGetClientsQuery(undefined, {
-    skip: !user,
-  });
-  const { data: usersData = [] } = useGetUsersQuery(undefined, {
+  // Fetch clients for dropdown (using cached hook)
+  const { clients: clientsData = [] } = useClients({
     skip: !user,
   });
 
   const clients = Array.isArray(clientsData) ? clientsData : [];
-  const users = Array.isArray(usersData) ? usersData : [];
 
   useEffect(() => {
     setLocalFilters(filters);
   }, [filters]);
 
-  // Close date picker when modal closes
+  // Close dropdown when modal closes
   useEffect(() => {
     if (!visible) {
-      setShowDatePicker(null);
       setShowDropdown(null);
     }
   }, [visible]);
@@ -65,19 +56,7 @@ const EnquiryFiltersModal = ({
   const handleClear = () => {
     const clearedFilters = {
       status: 'all',
-      category: 'all',
       priority: 'all',
-      clientId: 'all',
-      assignedTo: 'all',
-      stoneType: 'all',
-      metalColor: 'all',
-      metalQuality: 'all',
-      shippingDateFrom: null,
-      shippingDateTo: null,
-      assignedDateFrom: null,
-      assignedDateTo: null,
-      createdDateFrom: null,
-      createdDateTo: null,
     };
     setLocalFilters(clearedFilters);
     onClearFilters();
@@ -86,53 +65,23 @@ const EnquiryFiltersModal = ({
 
   const statusOptions = [
     { label: 'All Status', value: 'all' },
-    { label: 'Pending', value: 'pending' },
-    { label: 'In Progress', value: 'in_progress' },
-    { label: 'Completed', value: 'completed' },
-    ...(user?.role === 'admin' ? [{ label: 'Rejected', value: 'rejected' }] : []),
-  ];
-
-  const categoryOptions = [
-    { label: 'All Categories', value: 'all' },
-    { label: 'Ring', value: 'Ring' },
-    { label: 'Necklace', value: 'Necklace' },
-    { label: 'Earring', value: 'Earring' },
-    { label: 'Bracelet', value: 'Bracelet' },
-    { label: 'Pendant', value: 'Pendant' },
-    { label: 'Other', value: 'Other' },
+    { label: 'Enquiry Created', value: 'Enquiry Created' },
+    { label: 'Design Approval Pending', value: 'Design Approval Pending' },
+    { label: 'CAD', value: 'CAD' },
+    { label: 'Coral', value: 'Coral' },
+    { label: 'Approved Cad', value: 'Approved Cad' },
+    { label: 'Order Placement', value: 'Order Placement' },
+    { label: 'CAM Pending', value: 'CAM Pending' },
+    { label: 'Production', value: 'Production' },
+    { label: 'Completed', value: 'Completed' },
+    { label: 'Rejected', value: 'Rejected' },
   ];
 
   const priorityOptions = [
     { label: 'All Priority', value: 'all' },
-    { label: 'High', value: 'high' },
-    { label: 'Medium', value: 'medium' },
-    { label: 'Low', value: 'low' },
-  ];
-
-  const stoneTypeOptions = [
-    { label: 'All Stone Types', value: 'all' },
-    { label: 'Natural Regular', value: 'NaturalRegular' },
-    { label: 'Natural Premium', value: 'NaturalPremium' },
-    { label: 'Lab Grown', value: 'LabGrown' },
-    { label: 'No Stone', value: 'NoStone' },
-  ];
-
-  const metalColorOptions = [
-    { label: 'All Colors', value: 'all' },
-    { label: 'Gold', value: 'Gold' },
-    { label: 'Silver', value: 'Silver' },
-    { label: 'Platinum', value: 'Platinum' },
-    { label: 'Rose Gold', value: 'RoseGold' },
-    { label: 'White Gold', value: 'WhiteGold' },
-  ];
-
-  const metalQualityOptions = [
-    { label: 'All Qualities', value: 'all' },
-    { label: '10K', value: '10K' },
-    { label: '14K', value: '14K' },
-    { label: '18K', value: '18K' },
-    { label: '22K', value: '22K' },
-    { label: '24K', value: '24K' },
+    { label: 'Super High', value: 'Super High' },
+    { label: 'High', value: 'High' },
+    { label: 'Normal', value: 'Normal' },
   ];
 
   const renderDropdown = (key, options, label) => {
@@ -150,7 +99,6 @@ const EnquiryFiltersModal = ({
             isSelected && styles.dropdownButtonSelected,
           ]}
           onPress={() => {
-            setShowDatePicker(null); // Close any open date picker
             setShowDropdown(isOpen ? null : key);
           }}
           activeOpacity={0.7}>
@@ -349,45 +297,13 @@ const EnquiryFiltersModal = ({
     );
   };
 
-  const renderClientDropdown = () => {
-    const clientOptions = [
-      { label: 'All Clients', value: 'all' },
-      ...clients.map(client => ({
-        label: client.name || client.Name || 'Unknown',
-        value: client.id || client._id || client.Id,
-      })),
-    ];
-    return renderDropdown('clientId', clientOptions, 'Client');
-  };
 
-  const renderAssignedToDropdown = () => {
-    const assignedToOptions = [
-      { label: 'All Users', value: 'all' },
-      ...users.map(user => ({
-        label: user.name || user.Name || user.email || 'Unknown',
-        value: user.id || user._id || user.Id,
-      })),
-    ];
-    return renderDropdown('assignedTo', assignedToOptions, 'Assigned To');
-  };
 
   // Count active filters for badge
   const getActiveFiltersCount = () => {
     let count = 0;
     if (localFilters.status !== 'all') count++;
-    if (localFilters.category !== 'all') count++;
     if (localFilters.priority !== 'all') count++;
-    if (localFilters.clientId !== 'all') count++;
-    if (localFilters.assignedTo !== 'all') count++;
-    if (localFilters.stoneType !== 'all') count++;
-    if (localFilters.metalColor !== 'all') count++;
-    if (localFilters.metalQuality !== 'all') count++;
-    if (localFilters.shippingDateFrom) count++;
-    if (localFilters.shippingDateTo) count++;
-    if (localFilters.assignedDateFrom) count++;
-    if (localFilters.assignedDateTo) count++;
-    if (localFilters.createdDateFrom) count++;
-    if (localFilters.createdDateTo) count++;
     return count;
   };
 
@@ -434,25 +350,7 @@ const EnquiryFiltersModal = ({
             </View>
             
             {renderDropdown('status', statusOptions, 'Status')}
-            {renderDropdown('category', categoryOptions, 'Category')}
             {renderDropdown('priority', priorityOptions, 'Priority')}
-            {renderClientDropdown()}
-            {renderAssignedToDropdown()}
-            {renderDropdown('stoneType', stoneTypeOptions, 'Stone Type')}
-            {renderDropdown('metalColor', metalColorOptions, 'Metal Color')}
-            {renderDropdown('metalQuality', metalQualityOptions, 'Metal Quality')}
-          </View>
-
-          {/* Date Range Filters Card */}
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Icon name="calendar-today" size={20} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Date Ranges</Text>
-            </View>
-            
-            {renderDateRange('shippingDateFrom', 'shippingDateTo', 'Shipping Date')}
-            {renderDateRange('assignedDateFrom', 'assignedDateTo', 'Assigned Date')}
-            {renderDateRange('createdDateFrom', 'createdDateTo', 'Created Date')}
           </View>
         </ScrollView>
 
@@ -772,6 +670,13 @@ const styles = StyleSheet.create({
   },
   textInput: {
     backgroundColor: colors.backgroundSecondary,
+  },
+  filterHint: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    marginTop: 6,
+    fontStyle: 'italic',
   },
   footer: {
     flexDirection: 'row',

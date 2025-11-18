@@ -484,25 +484,21 @@ const MetalPricesScreen = () => {
             <TouchableOpacity
               onPress={handleAddMetalPrice}
               disabled={isAddingPrice}
-              style={[styles.actionBtn, styles.saveBtn, isAddingPrice && styles.btnDisabled]}
-              activeOpacity={0.8}
+              style={[styles.adminActionButton, styles.adminActionButtonPrimary, isAddingPrice && styles.btnDisabled]}
+              activeOpacity={0.85}
             >
-              <View style={styles.btnContent}>
-                <Icon name="add" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>
-                  {isAddingPrice ? "Adding..." : "Add Metal Price"}
-                </Text>
-              </View>
+              <Icon name="add" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>
+                {isAddingPrice ? "Adding..." : "Add Metal Price"}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleCancelEdit}
-              style={[styles.actionBtn, styles.cancelBtn]}
-              activeOpacity={0.8}
+              style={[styles.adminActionButton, styles.adminActionButtonOutline]}
+              activeOpacity={0.85}
             >
-              <View style={styles.btnContent}>
-                <Icon name="close" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>Cancel</Text>
-              </View>
+              <Icon name="close" size={18} color={colors.primary} />
+              <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>Cancel</Text>
             </TouchableOpacity>
           </>
         ) : isEditing ? (
@@ -510,48 +506,40 @@ const MetalPricesScreen = () => {
             <TouchableOpacity
               onPress={handleSavePrices}
               disabled={isUpdatingPrice}
-              style={[styles.actionBtn, styles.saveBtn, isUpdatingPrice && styles.btnDisabled]}
-              activeOpacity={0.8}
+              style={[styles.adminActionButton, styles.adminActionButtonPrimary, isUpdatingPrice && styles.btnDisabled]}
+              activeOpacity={0.85}
             >
-              <View style={styles.btnContent}>
-                <Icon name="save" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>
-                  {isUpdatingPrice ? "Saving..." : "Save Changes"}
-                </Text>
-              </View>
+              <Icon name="save" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>
+                {isUpdatingPrice ? "Saving..." : "Save Changes"}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleCancelEdit}
-              style={[styles.actionBtn, styles.cancelBtn]}
-              activeOpacity={0.8}
+              style={[styles.adminActionButton, styles.adminActionButtonOutline]}
+              activeOpacity={0.85}
             >
-              <View style={styles.btnContent}>
-                <Icon name="close" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>Cancel</Text>
-              </View>
+              <Icon name="close" size={18} color={colors.primary} />
+              <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>Cancel</Text>
             </TouchableOpacity>
           </>
         ) : (
           <>
             <TouchableOpacity
               onPress={handleStartEditing}
-              style={[styles.actionBtn, styles.editBtn]}
-              activeOpacity={0.8}
+              style={[styles.adminActionButton, styles.adminActionButtonPrimary]}
+              activeOpacity={0.85}
             >
-              <View style={styles.btnContent}>
-                <Icon name="edit" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>Edit Prices</Text>
-              </View>
+              <Icon name="edit" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>Edit Prices</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setIsAdding(true)}
-              style={[styles.actionBtn, styles.addBtn]}
-              activeOpacity={0.8}
+              style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+              activeOpacity={0.85}
             >
-              <View style={styles.btnContent}>
-                <Icon name="add" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>Add Metal Price</Text>
-              </View>
+              <Icon name="add" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>Add Metal Price</Text>
             </TouchableOpacity>
           </>
         )}
@@ -653,7 +641,7 @@ const styles = StyleSheet.create({
   header: {
     paddingTop: 0,
     paddingBottom: 8,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
@@ -662,7 +650,7 @@ const styles = StyleSheet.create({
   priceCard: {
     marginTop: 8,
     marginBottom: 12,
-    marginHorizontal: 20,
+    marginHorizontal: 16,
   },
   priceHeader: {
     flexDirection: 'row',
@@ -705,7 +693,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   actionCard: {
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginVertical: 12,
   },
   actionTitle: {
@@ -714,41 +702,37 @@ const styles = StyleSheet.create({
   actionButtons: {
     gap: 12,
   },
-  actionBtn: {
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    minHeight: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: '100%',
-  },
-  btnContent: {
+  adminActionButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
   },
-  btnText: {
+  adminActionButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  adminActionButtonSecondary: {
+    backgroundColor: colors.primaryLight,
+  },
+  adminActionButtonOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  adminActionText: {
     color: colors.textWhite,
-    fontFamily: fonts.bold,
-    fontSize: fonts.sm,
-    letterSpacing: 0.2,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    marginLeft: 8,
   },
-  editBtn: {
-    backgroundColor: colors.primary,
-  },
-  saveBtn: {
-    backgroundColor: colors.primary,
-  },
-  cancelBtn: {
-    backgroundColor: colors.textSecondary,
-  },
-  addBtn: {
-    backgroundColor: colors.primary,
+  adminActionOutlineText: {
+    color: colors.primary,
   },
   btnDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   addInput: {
     marginBottom: 12,
@@ -817,7 +801,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   historyCard: {
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginVertical: 12,
   },
   historyTitle: {
@@ -844,7 +828,7 @@ const styles = StyleSheet.create({
   },
   summaryRow: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     marginTop: 8,
     marginBottom: 8,
   },

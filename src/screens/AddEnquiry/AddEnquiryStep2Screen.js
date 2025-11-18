@@ -8,20 +8,25 @@ import {
   Image,
   Platform,
   PermissionsAndroid,
+  Text,
 } from 'react-native';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Button } from '../../components/common';
-import { Heading, CustomText, BodyText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { useUploadImageMutation, useCreateEnquiryMutation, useUpdateEnquiryMutation } from '../../store/api';
 import { useAuth } from '../../context/AuthContext';
+import { useUsers } from '../../features/users/usersHooks';
+import { getUserName } from '../../utils/userUtils';
 
 const AddEnquiryStep2Screen = ({ route, navigation }) => {
   const { formData, enquiry: enquiryToEdit, isEditMode } = route.params;
   const { user } = useAuth();
   const [selectedImages, setSelectedImages] = useState([]);
+  
+  // Fetch and cache users for name resolution
+  useUsers();
   
   // Log when Step 2 screen loads
   useEffect(() => {
@@ -566,77 +571,176 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
     }
   };
 
-  const renderFormSummary = () => (
-    <View style={styles.summaryCard}>
-      <Heading level={4} style={styles.summaryTitle}>
-        Enquiry Summary
-      </Heading>
-      
-      <View style={styles.summaryItem}>
-        <CustomText variant="label" color="secondary">
-          Title
-        </CustomText>
-        <CustomText variant="body" color="primary">
-          {formData.title}
-        </CustomText>
-      </View>
+  const renderFormSummary = () => {
+    // Helper function to format weight values
+    const formatWeight = (from, to, exact) => {
+      if (exact) return `${exact} g`;
+      if (from && to) return `${from} - ${to} g`;
+      if (from) return `From ${from} g`;
+      if (to) return `Up to ${to} g`;
+      return 'Not specified';
+    };
 
-      <View style={styles.summaryItem}>
-        <CustomText variant="label" color="secondary">
-          Client
-        </CustomText>
-        <CustomText variant="body" color="primary">
-          {formData.clientName}
-        </CustomText>
-      </View>
+    // Helper function to format date
+    const formatDate = (dateString) => {
+      if (!dateString) return 'Not specified';
+      try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      } catch {
+        return dateString;
+      }
+    };
 
-      <View style={styles.summaryItem}>
-        <CustomText variant="label" color="secondary">
-          Budget
-        </CustomText>
-        <CustomText variant="body" color="primary">
-          ₹{formData.estimatedBudget}
-        </CustomText>
-      </View>
+    return (
+      <View style={styles.summaryCard}>
+        <Text style={styles.sectionTitle}>
+          Enquiry Summary
+        </Text>
+        
+        {formData.title && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Title</Text>
+            <Text style={styles.summaryValue}>{formData.title}</Text>
+          </View>
+        )}
 
-      <View style={styles.summaryItem}>
-        <CustomText variant="label" color="secondary">
-          Priority
-        </CustomText>
-        <CustomText variant="body" color="primary">
-          {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
-        </CustomText>
-      </View>
+        {formData.clientName && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Client</Text>
+            <Text style={styles.summaryValue}>{formData.clientName}</Text>
+          </View>
+        )}
 
-      <View style={styles.summaryItem}>
-        <CustomText variant="label" color="secondary">
-          Description
-        </CustomText>
-        <BodyText color="secondary" style={styles.descriptionText}>
-          {formData.description}
-        </BodyText>
+        {formData.category && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Category</Text>
+            <Text style={styles.summaryValue}>{formData.category}</Text>
+          </View>
+        )}
+
+        {formData.priority && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Priority</Text>
+            <Text style={styles.summaryValue}>
+              {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
+            </Text>
+          </View>
+        )}
+
+        {formData.status && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Status</Text>
+            <Text style={styles.summaryValue}>{formData.status}</Text>
+          </View>
+        )}
+
+        {formData.assignedTo && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Assigned To</Text>
+            <Text style={styles.summaryValue}>
+              {formData.assignedToName || getUserName(formData.assignedTo) || 'Not assigned'}
+            </Text>
+          </View>
+        )}
+
+        {formData.quantity && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Quantity</Text>
+            <Text style={styles.summaryValue}>{formData.quantity}</Text>
+          </View>
+        )}
+
+        {formData.stoneType && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Stone Type</Text>
+            <Text style={styles.summaryValue}>{formData.stoneType}</Text>
+          </View>
+        )}
+
+        {(formData.metalColor || formData.metalQuality) && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Metal</Text>
+            <Text style={styles.summaryValue}>
+              {formData.metalColor || 'N/A'} {formData.metalQuality ? `(${formData.metalQuality})` : ''}
+            </Text>
+          </View>
+        )}
+
+        {(formData.metalWeightFrom || formData.metalWeightTo || formData.metalWeightExact) && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Metal Weight</Text>
+            <Text style={styles.summaryValue}>
+              {formatWeight(formData.metalWeightFrom, formData.metalWeightTo, formData.metalWeightExact)}
+            </Text>
+          </View>
+        )}
+
+        {(formData.diamondWeightFrom || formData.diamondWeightTo || formData.diamondWeightExact) && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Diamond Weight</Text>
+            <Text style={styles.summaryValue}>
+              {formatWeight(formData.diamondWeightFrom, formData.diamondWeightTo, formData.diamondWeightExact)}
+            </Text>
+          </View>
+        )}
+
+        {formData.stamping && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Stamping</Text>
+            <Text style={styles.summaryValue}>{formData.stamping}</Text>
+          </View>
+        )}
+
+        {formData.styleNumber && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Style Number</Text>
+            <Text style={styles.summaryValue}>{formData.styleNumber}</Text>
+          </View>
+        )}
+
+        {formData.gatiOrderNumber && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Gati Order Number</Text>
+            <Text style={styles.summaryValue}>{formData.gatiOrderNumber}</Text>
+          </View>
+        )}
+
+        {formData.deadline && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Shipping Date</Text>
+            <Text style={styles.summaryValue}>{formatDate(formData.deadline)}</Text>
+          </View>
+        )}
+
+        {formData.description && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Description</Text>
+            <Text style={styles.descriptionText}>{formData.description}</Text>
+          </View>
+        )}
       </View>
-    </View>
-  );
+    );
+  };
 
   const renderImageUpload = () => (
     <View style={styles.imageCard}>
-      <Heading level={4} style={styles.sectionTitle}>
+      <Text style={styles.sectionTitle}>
         Reference Images/Videos
-      </Heading>
+      </Text>
       
-      <CustomText variant="caption" color="secondary" style={styles.sectionSubtitle}>
+      <Text style={styles.sectionSubtitle}>
         Upload reference images or videos to help designers understand your requirements
-      </CustomText>
+      </Text>
 
       <TouchableOpacity style={styles.uploadButton} onPress={handleImagePicker}>
-        <Icon name="add-a-photo" size={32} color={colors.primary} />
-        <CustomText variant="body" color="primary" style={styles.uploadText}>
+        <Icon name="add-a-photo" size={28} color={colors.primary} />
+        <Text style={styles.uploadText}>
           Add Images/Videos
-        </CustomText>
-        <CustomText variant="caption" color="secondary">
+        </Text>
+        <Text style={styles.uploadSubtext}>
           Tap to select from camera or gallery
-        </CustomText>
+        </Text>
       </TouchableOpacity>
 
       {selectedImages.length > 0 && (
@@ -661,29 +765,29 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
 
   const renderInstructions = () => (
     <View style={styles.instructionsCard}>
-      <Heading level={4} style={styles.sectionTitle}>
+      <Text style={styles.sectionTitle}>
         Instructions
-      </Heading>
+      </Text>
       
       <View style={styles.instructionItem}>
-        <Icon name="info" size={20} color={colors.info} />
-        <CustomText variant="body" color="secondary" style={styles.instructionText}>
+        <Icon name="info" size={18} color={colors.info} />
+        <Text style={styles.instructionText}>
           Make sure to provide clear and detailed descriptions
-        </CustomText>
+        </Text>
       </View>
 
       <View style={styles.instructionItem}>
-        <Icon name="photo-camera" size={20} color={colors.info} />
-        <CustomText variant="body" color="secondary" style={styles.instructionText}>
+        <Icon name="photo-camera" size={18} color={colors.info} />
+        <Text style={styles.instructionText}>
           Upload high-quality reference images for better results
-        </CustomText>
+        </Text>
       </View>
 
       <View style={styles.instructionItem}>
-        <Icon name="schedule" size={20} color={colors.info} />
-        <CustomText variant="body" color="secondary" style={styles.instructionText}>
+        <Icon name="schedule" size={18} color={colors.info} />
+        <Text style={styles.instructionText}>
           Our team will review and respond within 24 hours
-        </CustomText>
+        </Text>
       </View>
     </View>
   );
@@ -691,10 +795,10 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   return (
     <ScrollView style={styles.container}>
             <View style={styles.header}>
-              <Heading level={3}>{isEditMode ? 'Update References' : 'Upload References'}</Heading>
-              <CustomText variant="caption" color="secondary">
+              <Text style={styles.headerTitle}>{isEditMode ? 'Update References' : 'Upload References'}</Text>
+              <Text style={styles.headerSubtitle}>
                 {isEditMode ? 'Update reference materials (optional)' : 'Step 2 of 2 - Add Reference Materials'}
-              </CustomText>
+              </Text>
             </View>
 
       {renderFormSummary()}
@@ -702,19 +806,37 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       {renderInstructions()}
 
             <View style={styles.footer}>
-              <Button
-                title={isEditMode ? "Update Enquiry" : "Submit Enquiry"}
+              <TouchableOpacity
                 onPress={handleSubmit}
-                loading={loading}
-                style={styles.submitButton}
-              />
+                disabled={loading}
+                style={[styles.adminActionButton, styles.adminActionButtonPrimary, loading && styles.btnDisabled]}
+                activeOpacity={0.85}
+              >
+                {loading ? (
+                  <>
+                    <Icon name="hourglass-empty" size={18} color={colors.textWhite} />
+                    <Text style={styles.adminActionText}>Submitting...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="check-circle" size={18} color={colors.textWhite} />
+                    <Text style={styles.adminActionText}>
+                      {isEditMode ? "Update Enquiry" : "Submit Enquiry"}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
               
-              <Button
-                title="Back to Step 1"
-                variant="outline"
+              <TouchableOpacity
                 onPress={() => navigation.goBack()}
-                style={styles.backButton}
-              />
+                style={[styles.adminActionButton, styles.adminActionButtonOutline]}
+                activeOpacity={0.85}
+              >
+                <Icon name="arrow-back" size={18} color={colors.primary} />
+                <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>
+                  Back to Step 1
+                </Text>
+              </TouchableOpacity>
             </View>
     </ScrollView>
   );
@@ -726,10 +848,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    padding: 20,
+    padding: 16,
     backgroundColor: colors.backgroundSecondary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  headerTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
   },
   summaryCard: {
     margin: 16,
@@ -737,13 +870,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundSecondary,
     borderRadius: 8,
   },
-  summaryTitle: {
-    marginBottom: 16,
-  },
   summaryItem: {
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  summaryLabel: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  summaryValue: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
   },
   descriptionText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
     marginTop: 4,
     fontStyle: 'italic',
   },
@@ -751,14 +895,20 @@ const styles = StyleSheet.create({
     margin: 16,
   },
   sectionTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
     marginBottom: 8,
   },
   sectionSubtitle: {
-    marginBottom: 16,
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    marginBottom: 12,
   },
   uploadButton: {
     alignItems: 'center',
-    padding: 32,
+    padding: 24,
     borderWidth: 2,
     borderColor: colors.border,
     borderStyle: 'dashed',
@@ -766,8 +916,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundSecondary,
   },
   uploadText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.primary,
     marginTop: 8,
     marginBottom: 4,
+  },
+  uploadSubtext: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
   },
   imagesGrid: {
     flexDirection: 'row',
@@ -800,21 +958,46 @@ const styles = StyleSheet.create({
   instructionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   instructionText: {
-    marginLeft: 12,
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    marginLeft: 10,
     flex: 1,
   },
   footer: {
     padding: 20,
     gap: 12,
   },
-  submitButton: {
-    marginBottom: 8,
+  adminActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
   },
-  backButton: {
-    marginTop: 8,
+  adminActionButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  adminActionButtonOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  adminActionText: {
+    color: colors.textWhite,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  adminActionOutlineText: {
+    color: colors.primary,
+  },
+  btnDisabled: {
+    opacity: 0.5,
   },
 });
 
