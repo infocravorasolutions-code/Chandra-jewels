@@ -67,69 +67,119 @@ const ChatGroupsScreen = ({ route, navigation }) => {
 
   const renderChatGroup = (chat) => {
     if (!chat) return null;
-    
-    // Get unique chat ID (handle both normalized and original data structures)
-
-    const  chatDataOriginal = chat?._originalData || chat;
-    // Normalize to string for consistent comparison
-    const chatId = String(chatDataOriginal.id || chatDataOriginal._id || chatDataOriginal._id || '').trim();
-    
-    // Get enquiry name from multiple possible sources
-    const enquiryName =  chatDataOriginal?.enquiryTitle || chat?.enquiryTitle || chat?._originalData?.EnquiryName || 'Untitled Chat';
-    
-    // Get chat type from multiple possible sources
-    const chatType = chatDataOriginal?.Type || chat?.type || chat?._originalData?.Type;
-    
+  
+    // Normalize chat object (support both original + wrapped)
+    const chatDataOriginal = chat?._originalData || chat;
+  
+    // -------------------------------
+    // Fix: Chat ID extraction
+    // -------------------------------
+    const chatId = String(
+      chatDataOriginal?._id ||
+      chatDataOriginal?.id ||
+      chat?._originalData?._id ||
+      ''
+    ).trim();
+  
+    // -------------------------------
+    // Fix: Enquiry Name (your dataset uses EnquiryName)
+    // -------------------------------
+    const enquiryName =
+      chatDataOriginal?.EnquiryName ||
+      chatDataOriginal?.enquiryTitle ||
+      chat?.enquiryTitle ||
+      chat?._originalData?.EnquiryName ||
+      'Untitled Chat';
+  
+    // -------------------------------
+    // Fix: Chat Type
+    // -------------------------------
+    const chatType =
+      chatDataOriginal?.Type ||
+      chat?.type ||
+      chat?._originalData?.Type ||
+      '';
+  
+    // -------------------------------
     // Build chat title
-    const chatTitle = `${enquiryName} - ${chatType === 'admin-client' ? 'Client' : 'Designer'}`;
-    
-    // Get last message - handle both object and string formats
+    // -------------------------------
+    const chatTitle = `${enquiryName} - ${
+      chatType === 'admin-client' ? 'Client' : 'Designer'
+    }`;
+  
+    // -------------------------------
+    // Fix: Last Message
+    // -------------------------------
     let lastMessage = 'No messages yet';
+  
     if (chat?.LastMessage) {
-      // Handle object format
-      if (typeof chat.LastMessage === 'object') {
-        const senderId = chat.LastMessage?.SenderId?._id || chat.LastMessage?.SenderId || chat.LastMessage?.senderId;
-        const messageText = chat.LastMessage?.Message || chat.LastMessage?.message || chat.LastMessage?.text || '';
-        const senderName = chat.LastMessage?.SenderId?.name || chat.LastMessage?.senderName || '';
-        lastMessage = String(senderId).trim() === String(user?.id).trim() ? `You: ${messageText}` : senderName ? `${senderName}: ${messageText}` : messageText;
-      }
+      const senderId =
+        chat.LastMessage?.SenderId?._id ||
+        chat.LastMessage?.SenderId ||
+        chat.LastMessage?.senderId;
+  
+      const messageText =
+        chat.LastMessage?.Message ||
+        chat.LastMessage?.message ||
+        chat.LastMessage?.text ||
+        '';
+  
+      const senderName =
+        chat.LastMessage?.SenderId?.name ||
+        chat.LastMessage?.senderName ||
+        '';
+  
+      lastMessage =
+        String(senderId).trim() === String(user?.id).trim()
+          ? `You: ${messageText}`
+          : senderName
+          ? `${senderName}: ${messageText}`
+          : messageText;
     } else if (chat?.lastMessage) {
-      // Handle string format (normalized)
-      lastMessage = chat.lastMessage;
+      lastMessage = chat.lastMessage; // fallback for string messages
     }
-    
-    // Get last message time - handle multiple formats
-    const lastMessageTime = chat?.LastMessage?.updatedAt 
-      ? formatChatDate(chat.LastMessage.updatedAt)
-      : chat?.lastMessageTime 
-        ? formatChatDate(chat.lastMessageTime)
+  
+    // -------------------------------
+    // Fix: Last Message Time
+    // -------------------------------
+    const lastMessageTime =
+      chat?.LastMessage?.updatedAt
+        ? formatChatDate(chat.LastMessage.updatedAt)
         : chat?.LastMessage?.Timestamp
-          ? formatChatDate(chat.LastMessage.Timestamp)
-          : '';
-    
+        ? formatChatDate(chat.LastMessage.Timestamp)
+        : chat?.lastMessageTime
+        ? formatChatDate(chat.lastMessageTime)
+        : '';
+  
+    // -------------------------------
+    // Unread count + group flag
+    // -------------------------------
     const unreadCount = chat.unreadCount || chat.UnreadCount || 0;
     const isGroup = chat.isGroup || chat.IsGroup || false;
-    
-    // Normalize focusedChat for comparison
+  
+    // -------------------------------
+    // Focused Chat Handling
+    // -------------------------------
     const normalizedFocusedChat = focusedChat ? String(focusedChat).trim() : null;
     const isFocused = normalizedFocusedChat === chatId;
-
+  
+    // -------------------------------
+    // Render component
+    // -------------------------------
     return (
       <TouchableOpacity
-        style={[styles.chatItem, isFocused && styles.chatItemFocused]}   
+        style={[styles.chatItem, isFocused && styles.chatItemFocused]}
         onPress={() => handleChatPress(chat)}
         activeOpacity={0.7}
         onPressIn={() => setFocusedChat(chatId)}
         onPressOut={() => setFocusedChat(null)}
       >
         <View style={styles.avatarContainer}>
-         
-            <View style={styles.avatar}>
-              <Icon name="group" size={24} color={colors.textWhite} />
-            </View>
-        
+          <View style={styles.avatar}>
+            <Icon name="group" size={24} color={colors.textWhite} />
+          </View>
         </View>
-
+  
         <View style={styles.chatContent}>
           <View style={styles.chatHeader}>
             <Text style={styles.chatTitle} numberOfLines={1}>
@@ -139,11 +189,12 @@ const ChatGroupsScreen = ({ route, navigation }) => {
               <Text style={styles.chatTime}>{lastMessageTime}</Text>
             ) : null}
           </View>
-
+  
           <View style={styles.chatFooter}>
             <Text style={styles.chatMessage} numberOfLines={1}>
               {lastMessage}
             </Text>
+  
             {unreadCount > 0 && (
               <View style={styles.unreadBadge}>
                 <Text style={styles.unreadBadgeText}>
@@ -156,6 +207,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
       </TouchableOpacity>
     );
   };
+  
 
   if (isLoading && chats.length === 0) {
     return (
