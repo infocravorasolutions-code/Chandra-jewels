@@ -146,6 +146,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
       }
       
       if (navigation?.navigate) {
+        console.log('Navigating to chat:', { chatId, chatType, chat });
         navigation.navigate('ChatDetail', {
           chatId: chatId, // Pass the specific chat ID
           chat: chat, // Pass the full chat object

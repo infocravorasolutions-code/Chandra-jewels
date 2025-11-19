@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,15 +8,25 @@ import {
   Text,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card } from '../../components/cards/Cards';
+import { useFocusEffect } from '@react-navigation/native';
 import { AnimatedLogoLoader } from '../../components/common';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatDateTime } from '../../utils/helpers';
+import {
+  useGetNotificationsQuery,
+  useGetUnreadNotificationsCountQuery,
+  useMarkNotificationReadMutation,
+  useMarkAllNotificationsReadMutation,
+} from '../../store/api';
 
 // Helper function to format relative time
-const formatRelativeTime = (date) => {
+const formatRelativeTime = (inputDate) => {
+  const date = inputDate instanceof Date ? inputDate : new Date(inputDate);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
   const now = new Date();
   const diffMs = now - date;
   const diffMins = Math.floor(diffMs / 60000);
@@ -59,92 +69,74 @@ const addOpacityToHex = (hex, opacity) => {
 };
 
 const NotificationsScreen = ({ navigation }) => {
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadNotifications();
-  }, []);
+  const { data: notifications = [], isLoading, isFetching, refetch } = useGetNotificationsQuery();
+  const { data: unreadCountData = 0, refetch: refetchUnreadCount } = useGetUnreadNotificationsCountQuery();
+  const [markNotificationRead] = useMarkNotificationReadMutation();
+  const [markAllNotificationsRead, { isLoading: isMarkingAll }] = useMarkAllNotificationsReadMutation();
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  useFocusEffect(
+    useCallback(() => {
+      refetch();
+      refetchUnreadCount();
+    }, [refetch, refetchUnreadCount])
+  );
 
-  const loadNotifications = async () => {
-    try {
-      setLoading(true);
-      // Mock notifications data - replace with actual API call
-      const mockNotifications = [
-        {
-          id: '1',
-          type: 'enquiry',
-          title: 'New Enquiry Received',
-          message: 'John Smith has submitted a new enquiry for Diamond Ring',
-          timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-          isRead: false,
-        },
-        {
-          id: '2',
-          type: 'approval',
-          title: 'Design Approved',
-          message: 'Your design for Gold Necklace has been approved by the client',
-          timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-          isRead: false,
-        },
-        {
-          id: '3',
-          type: 'payment',
-          title: 'Payment Received',
-          message: 'Payment of ₹25,000 has been received for Order #1234',
-          timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
-          isRead: true,
-        },
-        {
-          id: '4',
-          type: 'chat',
-          title: 'New Message',
-          message: 'Sarah Johnson sent you a message about her enquiry',
-          timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-          isRead: true,
-        },
-        {
-          id: '5',
-          type: 'system',
-          title: 'System Update',
-          message: 'New features have been added to the app. Check them out!',
-          timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
-          isRead: true,
-        },
-      ];
-      
-      setNotifications(mockNotifications);
-    } catch (error) {
-      console.error('Error loading notifications:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const processedNotifications = useMemo(() => {
+    return (notifications || []).map((notification, index) => {
+      const timestampValue = notification.timestamp || notification.createdAt || notification.updatedAt;
+      const timestamp = timestampValue ? new Date(timestampValue) : new Date();
 
-  const onRefresh = async () => {
+      return {
+        id: notification.id || notification._id || `notification-${index}`,
+        type: notification.type || 'system',
+        title: notification.title || 'Notification',
+        message: notification.message || '',
+        isRead: Boolean(notification.isRead),
+        link: notification.link || null,
+        timestamp,
+        raw: notification.raw || notification,
+      };
+    });
+  }, [notifications]);
+
+  const derivedUnreadCount = typeof unreadCountData === 'number'
+    ? unreadCountData
+    : processedNotifications.filter(notification => !notification.isRead).length;
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadNotifications();
-    setRefreshing(false);
-  };
+    try {
+      await Promise.all([refetch(), refetchUnreadCount()]);
+    } catch (error) {
+      console.error('Error refreshing notifications:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch, refetchUnreadCount]);
 
-  const markAsRead = (notificationId) => {
-    setNotifications(prev =>
-      prev.map(notification =>
-        notification.id === notificationId
-          ? { ...notification, isRead: true }
-          : notification
-      )
-    );
-  };
+  const markAsRead = useCallback(async (notification) => {
+    if (!notification?.id || notification.isRead) {
+      return;
+    }
+    try {
+      await markNotificationRead(notification.id).unwrap();
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  }, [markNotificationRead]);
 
-  const markAllAsRead = () => {
-    setNotifications(prev =>
-      prev.map(notification => ({ ...notification, isRead: true }))
-    );
-  };
+  const markAllAsRead = useCallback(async () => {
+    if (derivedUnreadCount === 0) {
+      return;
+    }
+    try {
+      await markAllNotificationsRead().unwrap();
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    }
+  }, [derivedUnreadCount, markAllNotificationsRead]);
 
   const getNotificationIcon = (type) => {
     const icons = {
@@ -160,6 +152,9 @@ const NotificationsScreen = ({ navigation }) => {
   const renderNotificationItem = (notification) => {
     const iconBgColor = addOpacityToHex(colors.primary, 0.15);
     const unreadBgColor = addOpacityToHex(colors.primary, 0.05);
+    const timestamp = notification.timestamp instanceof Date
+      ? notification.timestamp
+      : new Date(notification.timestamp);
     
     return (
       <TouchableOpacity
@@ -169,7 +164,7 @@ const NotificationsScreen = ({ navigation }) => {
           !notification.isRead && [styles.unreadNotification, { backgroundColor: unreadBgColor }],
         ]}
         activeOpacity={0.7}
-        onPress={() => markAsRead(notification.id)}>
+        onPress={() => markAsRead(notification)}>
         
         <View style={[styles.notificationIconContainer, { backgroundColor: iconBgColor }]}>
           <View style={[styles.notificationIcon, { backgroundColor: colors.primary }]}>
@@ -199,7 +194,7 @@ const NotificationsScreen = ({ navigation }) => {
               numberOfLines={1}
               ellipsizeMode="tail"
               style={styles.notificationDate}>
-              {formatRelativeTime(notification.timestamp)}
+              {formatRelativeTime(timestamp)}
             </Text>
           </View>
           <Text
@@ -213,7 +208,7 @@ const NotificationsScreen = ({ navigation }) => {
     );
   };
 
-  if (loading) {
+  if (isLoading && !refreshing) {
     return <AnimatedLogoLoader size={80} />;
   }
 
@@ -230,32 +225,33 @@ const NotificationsScreen = ({ navigation }) => {
           <Text style={styles.headerTitle} numberOfLines={1}>
             Notifications
           </Text>
-          {unreadCount > 0 && (
+          {derivedUnreadCount > 0 && (
             <View style={styles.unreadCountBadge}>
-              <Text style={styles.unreadCountText}>{unreadCount}</Text>
+              <Text style={styles.unreadCountText}>{derivedUnreadCount}</Text>
             </View>
           )}
         </View>
-        {unreadCount > 0 && (
+        {derivedUnreadCount > 0 ? (
           <TouchableOpacity
             style={styles.markAllButton}
             onPress={markAllAsRead}
             activeOpacity={0.7}>
             <Text style={styles.markAllText} numberOfLines={1}>
-              Mark All
+              {isMarkingAll ? 'Marking...' : 'Mark All'}
             </Text>
           </TouchableOpacity>
+        ) : (
+          <View style={styles.markAllButton} />
         )}
-        {unreadCount === 0 && <View style={styles.markAllButton} />}
       </View>
 
       <ScrollView
         style={styles.scrollView}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl refreshing={refreshing || (isFetching && !isLoading)} onRefresh={onRefresh} />
         }>
         
-        {notifications.length === 0 ? (
+        {processedNotifications.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconContainer}>
               <Icon name="notification" size={64} color={colors.textLight} />
@@ -269,7 +265,7 @@ const NotificationsScreen = ({ navigation }) => {
           </View>
         ) : (
           <View style={styles.notificationsList}>
-            {notifications.map(renderNotificationItem)}
+            {processedNotifications.map(renderNotificationItem)}
           </View>
         )}
       </ScrollView>

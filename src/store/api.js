@@ -40,6 +40,8 @@ export const api = createApi({
     'Message',
     'StatusStatistics',
     'Roles',
+    'Notification',
+    'DeviceToken',
   ],
   // Prevent memory buildup by removing unused data after 60 seconds
   keepUnusedDataFor: 60,
@@ -410,6 +412,9 @@ export const api = createApi({
           if (filters.sortOrder) {
             queryString += `&sortOrder=${encodeURIComponent(filters.sortOrder)}`;
           }
+        } else {
+          // Even if no filters, ensure default sort is applied for consistent ordering
+          queryString += `&sortBy=createdAt&sortOrder=desc`;
         }
         
         const finalUrl = `/api/enquiries/search?${queryString}`;
@@ -1666,18 +1671,23 @@ export const api = createApi({
       query: ({ enquiryId, designType, version, pricingData }) => {
         const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
         
+        // Wrap pricing array in Pricing key as per API specification
+        const requestBody = {
+          Pricing: Array.isArray(pricingData) ? pricingData : [pricingData]
+        };
+        
         if (__DEV__) {
           console.log('========== SAVE PRICING API REQUEST ==========');
           console.log('URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
           console.log('Method: PUT');
-          console.log('Body (pricing array):', JSON.stringify(pricingData, null, 2));
+          console.log('Body (wrapped in Pricing key):', JSON.stringify(requestBody, null, 2));
           console.log('=============================================');
         }
         
         return {
           url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
           method: 'PUT',
-          body: pricingData, // Array of pricing objects
+          body: requestBody, // { Pricing: [...] }
         };
       },
       invalidatesTags: (result, error, { enquiryId }) => [
@@ -2547,23 +2557,65 @@ export const api = createApi({
             return { data: [] };
           }
 
+          // Log the raw response for debugging
+          if (__DEV__) {
+            console.log('📥 Raw API Response:', {
+              hasData: !!data,
+              dataKeys: data ? Object.keys(data) : [],
+              isArray: Array.isArray(data),
+              dataType: typeof data,
+              sample: data ? JSON.stringify(data).substring(0, 200) : null,
+            });
+          }
+
           // Handle different response formats
           let messagesArray = [];
           let nextCursor = null;
           
+          // Check for various response formats
           if (data && data.Data && Array.isArray(data.Data)) {
-            // New format from guide
+            // Format: { Data: [...], NextCursor: "..." }
             messagesArray = data.Data;
-            nextCursor = data.NextCursor || null;
-          } else if (Array.isArray(data)) {
-            messagesArray = data;
-          } else if (data && data.messages && Array.isArray(data.messages)) {
-            messagesArray = data.messages;
+            nextCursor = data.NextCursor || data.nextCursor || null;
+            if (__DEV__) {
+              console.log('✅ Using format: data.Data (capital D)');
+            }
           } else if (data && data.data && Array.isArray(data.data)) {
+            // Format: { data: [...], nextCursor: "..." }
             messagesArray = data.data;
+            nextCursor = data.nextCursor || data.NextCursor || null;
+            if (__DEV__) {
+              console.log('✅ Using format: data.data (lowercase d)');
+            }
+          } else if (data && data.messages && Array.isArray(data.messages)) {
+            // Format: { messages: [...], nextCursor: "..." }
+            messagesArray = data.messages;
+            nextCursor = data.nextCursor || data.NextCursor || null;
+            if (__DEV__) {
+              console.log('✅ Using format: data.messages');
+            }
+          } else if (Array.isArray(data)) {
+            // Format: direct array [...]
+            messagesArray = data;
+            if (__DEV__) {
+              console.log('✅ Using format: direct array');
+            }
+          } else if (data && data.result && Array.isArray(data.result)) {
+            // Format: { result: [...] }
+            messagesArray = data.result;
+            nextCursor = data.nextCursor || data.NextCursor || null;
+            if (__DEV__) {
+              console.log('✅ Using format: data.result');
+            }
           } else {
             if (__DEV__) {
-              console.warn('Unexpected response format from /api/message/:chatId/messages:', data);
+              console.warn('⚠️ Unexpected response format from /api/message/:chatId/messages');
+              console.warn('Response structure:', {
+                type: typeof data,
+                isArray: Array.isArray(data),
+                keys: data ? Object.keys(data) : [],
+                sample: data ? JSON.stringify(data).substring(0, 300) : null,
+              });
             }
             messagesArray = [];
           }
@@ -2688,6 +2740,123 @@ export const api = createApi({
       },
     }),
 
+    // ==================== PUSH NOTIFICATION TOKENS ====================
+    registerPushToken: builder.mutation({
+      query: ({ token, device }) => ({
+        url: '/api/users/registerPushToken',
+        method: 'POST',
+        body: {
+          token,
+          platform: device?.platform || Platform.OS,
+          osVersion: device?.osVersion || Platform.Version?.toString(),
+        },
+      }),
+      invalidatesTags: [{ type: 'DeviceToken', id: 'CURRENT' }],
+    }),
+
+    removePushToken: builder.mutation({
+      query: ({ token }) => ({
+        url: '/api/users/registerPushToken',
+        method: 'DELETE',
+        body: { token },
+      }),
+      invalidatesTags: [{ type: 'DeviceToken', id: 'CURRENT' }],
+    }),
+
+    // ==================== NOTIFICATIONS ====================
+    getNotifications: builder.query({
+      query: () => '/api/notifications',
+      transformResponse: (response) => {
+        const notificationsArray = Array.isArray(response)
+          ? response
+          : response?.data && Array.isArray(response.data)
+            ? response.data
+            : [];
+
+        return notificationsArray.map((notification, index) => {
+          const notificationId =
+            notification._id?.$oid ||
+            notification._id ||
+            notification.id ||
+            `notification-${index}`;
+
+          const createdAt =
+            notification.createdAt ||
+            notification.CreatedAt ||
+            notification.timestamp ||
+            notification.Timestamp ||
+            notification.updatedAt ||
+            notification.UpdatedAt ||
+            new Date().toISOString();
+
+          return {
+            id: notificationId,
+            _id: notificationId,
+            title: notification.Title || notification.title || 'Notification',
+            message: notification.Body || notification.body || '',
+            type: notification.Type || notification.type || 'system_alert',
+            link: notification.Link || notification.link || '',
+            isRead:
+              notification.Read ??
+              notification.read ??
+              notification.IsRead ??
+              notification.isRead ??
+              false,
+            timestamp: createdAt,
+            createdAt,
+            raw: notification,
+          };
+        });
+      },
+      providesTags: (result) =>
+        result && result.length
+          ? [
+              ...result.map((notification) => ({
+                type: 'Notification',
+                id: notification.id,
+              })),
+              { type: 'Notification', id: 'LIST' },
+            ]
+          : [{ type: 'Notification', id: 'LIST' }],
+    }),
+
+    getUnreadNotificationsCount: builder.query({
+      query: () => '/api/notifications/unread-count',
+      transformResponse: (response) => {
+        if (typeof response === 'number') {
+          return response;
+        }
+        if (response?.count !== undefined) {
+          return response.count;
+        }
+        return 0;
+      },
+      providesTags: [{ type: 'Notification', id: 'UNREAD_COUNT' }],
+    }),
+
+    markNotificationRead: builder.mutation({
+      query: (notificationId) => ({
+        url: `/api/notifications/${notificationId}/read`,
+        method: 'PATCH',
+      }),
+      invalidatesTags: (result, error, notificationId) => [
+        { type: 'Notification', id: notificationId },
+        { type: 'Notification', id: 'LIST' },
+        { type: 'Notification', id: 'UNREAD_COUNT' },
+      ],
+    }),
+
+    markAllNotificationsRead: builder.mutation({
+      query: () => ({
+        url: '/api/notifications/mark-all-read',
+        method: 'POST',
+      }),
+      invalidatesTags: [
+        { type: 'Notification', id: 'LIST' },
+        { type: 'Notification', id: 'UNREAD_COUNT' },
+      ],
+    }),
+
     // Upload media for chat messages
     uploadChatMedia: builder.mutation({
       queryFn: async (file, { dispatch }, extraOptions, baseQuery) => {
@@ -2803,6 +2972,14 @@ export const {
   useRejectDesignVersionMutation,
   useUpdateShowToClientMutation,
   useDeleteDesignVersionMutation,
+  
+  // Notifications
+  useGetNotificationsQuery,
+  useGetUnreadNotificationsCountQuery,
+  useMarkNotificationReadMutation,
+  useMarkAllNotificationsReadMutation,
+  useRegisterPushTokenMutation,
+  useRemovePushTokenMutation,
   
   // Chats
   useGetChatsQuery,

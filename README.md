@@ -267,3 +267,16 @@ For support or questions, please contact the development team.
 ---
 
 **Built with ❤️ using React Native**
+
+## 🔔 Push Notification Setup
+
+1. **Install native configs**
+   - Place your Firebase `google-services.json` under `android/app/`.
+   - Place your `GoogleService-Info.plist` inside `ios/chandrajewellery/`.
+2. **iOS pods**
+   - Run `cd ios && pod install` after adding the plist.
+3. **Android build**
+   - Ensure `com.google.gms:google-services` plugin syncs by running `./gradlew clean` once.
+4. **Environment**
+   - The app now requests notification permission at runtime, registers the FCM token, and sends it to `/api/notifications/device-token`.
+   - Confirm that backend endpoints exist to store/delete tokens for authenticated users.

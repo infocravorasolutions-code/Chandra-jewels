@@ -6,13 +6,16 @@ import {
   TouchableOpacity,
   Text,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Button, Input } from '../common';
 import Icon from '../common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { useClients } from '../../features/clients/clientsHooks';
+import { useGetUsersQuery } from '../../store/api';
 
 const EnquiryFiltersModal = ({
   visible,
@@ -24,13 +27,24 @@ const EnquiryFiltersModal = ({
 }) => {
   const [localFilters, setLocalFilters] = useState(filters);
   const [showDropdown, setShowDropdown] = useState(null);
+  const [showDatePicker, setShowDatePicker] = useState(null);
+  const [tempDate, setTempDate] = useState(new Date());
 
-  // Fetch clients for dropdown (using cached hook)
+  // Check if user is a designer (coral or cad)
+  const isDesigner = user?.role === 'coral' || user?.role === 'cad';
+
+  // Fetch clients for dropdown (using cached hook) - skip for designers
   const { clients: clientsData = [] } = useClients({
-    skip: !user,
+    skip: !user || isDesigner,
   });
 
   const clients = Array.isArray(clientsData) ? clientsData : [];
+
+  // Fetch users for Assigned To dropdown - skip for designers
+  const { data: usersData = [] } = useGetUsersQuery(undefined, {
+    skip: !user || isDesigner,
+  });
+  const users = Array.isArray(usersData) ? usersData : [];
 
   useEffect(() => {
     setLocalFilters(filters);
@@ -57,31 +71,119 @@ const EnquiryFiltersModal = ({
     const clearedFilters = {
       status: 'all',
       priority: 'all',
+      category: 'all',
+      clientId: 'all',
+      assignedTo: 'all',
+      stoneType: 'all',
+      metalColor: 'all',
+      metalQuality: 'all',
+      shippingDateFrom: '',
+      shippingDateTo: '',
+      assignedDateFrom: '',
+      assignedDateTo: '',
+      createdDateFrom: '',
+      createdDateTo: '',
     };
     setLocalFilters(clearedFilters);
     onClearFilters();
     onClose();
   };
 
-  const statusOptions = [
-    { label: 'All Status', value: 'all' },
-    { label: 'Enquiry Created', value: 'Enquiry Created' },
-    { label: 'Design Approval Pending', value: 'Design Approval Pending' },
-    { label: 'CAD', value: 'CAD' },
-    { label: 'Coral', value: 'Coral' },
-    { label: 'Approved Cad', value: 'Approved Cad' },
-    { label: 'Order Placement', value: 'Order Placement' },
-    { label: 'CAM Pending', value: 'CAM Pending' },
-    { label: 'Production', value: 'Production' },
-    { label: 'Completed', value: 'Completed' },
-    { label: 'Rejected', value: 'Rejected' },
-  ];
+  // Status options - limited for designers
+  // Designers (coral and cad) only see: All, Design Approval Pending, Coral
+  const statusOptions = isDesigner
+    ? [
+        { label: 'All Status', value: 'all' },
+        { label: 'Design Approval Pending', value: 'Design Approval Pending' },
+        { label: 'Coral', value: 'Coral' },
+      ]
+    : [
+        { label: 'All Status', value: 'all' },
+        { label: 'Enquiry Created', value: 'Enquiry Created' },
+        { label: 'Design Approval Pending', value: 'Design Approval Pending' },
+        { label: 'CAD', value: 'CAD' },
+        { label: 'Coral', value: 'Coral' },
+        { label: 'Approved Cad', value: 'Approved Cad' },
+        { label: 'Order Placement', value: 'Order Placement' },
+        { label: 'CAM Pending', value: 'CAM Pending' },
+        { label: 'Production', value: 'Production' },
+        { label: 'Completed', value: 'Completed' },
+        { label: 'Rejected', value: 'Rejected' },
+      ];
 
   const priorityOptions = [
     { label: 'All Priority', value: 'all' },
     { label: 'Super High', value: 'Super High' },
     { label: 'High', value: 'High' },
     { label: 'Normal', value: 'Normal' },
+  ];
+
+  const categoryOptions = [
+    { label: 'All Categories', value: 'all' },
+    { label: 'Necklace', value: 'Necklace' },
+    { label: 'Ring', value: 'Ring' },
+    { label: 'Earring', value: 'Earring' },
+    { label: 'Bracelet', value: 'Bracelet' },
+    { label: 'Pendant', value: 'Pendant' },
+    { label: 'Hoops', value: 'Hoops' },
+    { label: 'Chain', value: 'Chain' },
+    { label: 'Bangle', value: 'Bangle' },
+    { label: 'Belt Buckle', value: 'Belt Buckle' },
+    { label: 'Custom', value: 'Custom' },
+  ];
+
+  // Create client options for dropdown
+  const clientOptions = [
+    { label: 'All Clients', value: 'all' },
+    ...clients.map(client => ({
+      label: client.name || 'Unknown Client',
+      value: String(client.id || client._id).trim(),
+    })),
+  ];
+
+  // Create assigned-to options from users (exclude clients by role)
+  const assignedToOptions = [
+    { label: 'All Users', value: 'all' },
+    ...users
+      .filter(userItem => {
+        const roleString = String(userItem.role || '').toLowerCase();
+        return roleString !== 'client';
+      })
+      .map(userItem => ({
+        label: userItem.name || userItem.email || 'Unknown',
+        value: String(userItem.id || userItem._id).trim(),
+      })),
+  ];
+
+  const stoneTypeOptions = [
+    { label: 'All Stone Types', value: 'all' },
+    { label: 'LabGrown', value: 'LabGrown' },
+    { label: 'CVDLabGrown', value: 'CVDLabGrown' },
+    { label: 'NaturalRegular', value: 'NaturalRegular' },
+    { label: 'NaturalLower', value: 'NaturalLower' },
+    { label: 'Synthetic', value: 'Synthetic' },
+    { label: 'LabTreatedDiamond', value: 'LabTreatedDiamond' },
+    { label: 'ColoredLabTreatedNat', value: 'ColoredLabTreatedNat' },
+  ];
+
+  const metalColorOptions = [
+    { label: 'All Colors', value: 'all' },
+    { label: 'White Gold', value: 'White Gold' },
+    { label: 'Rose Gold', value: 'Rose Gold' },
+    { label: 'Yellow Gold', value: 'Yellow Gold' },
+    { label: 'Two Tone Rose White Gold', value: 'Two Tone Rose White Gold' },
+    { label: 'Two Tone Yellow White Gold', value: 'Two Tone Yellow White Gold' },
+    { label: 'Three Tone Rose Yellow White Gold', value: 'Three Tone Rose Yellow White Gold' },
+  ];
+
+  const metalQualityOptions = [
+    { label: 'All Qualities', value: 'all' },
+    { label: '10K', value: '10K' },
+    { label: '14K', value: '14K' },
+    { label: '18K', value: '18K' },
+    { label: '22K', value: '22K' },
+    { label: 'Silver 925', value: 'Silver 925' },
+    { label: 'Platinum', value: 'Platinum' },
   ];
 
   const renderDropdown = (key, options, label) => {
@@ -299,11 +401,25 @@ const EnquiryFiltersModal = ({
 
 
 
-  // Count active filters for badge
+  // Count active filters for badge (exclude designer-hidden filters)
   const getActiveFiltersCount = () => {
     let count = 0;
-    if (localFilters.status !== 'all') count++;
-    if (localFilters.priority !== 'all') count++;
+    if (localFilters.status && localFilters.status !== 'all') count++;
+    if (localFilters.priority && localFilters.priority !== 'all') count++;
+    if (!isDesigner) {
+      if (localFilters.category && localFilters.category !== 'all') count++;
+      if (localFilters.clientId && localFilters.clientId !== 'all') count++;
+      if (localFilters.assignedTo && localFilters.assignedTo !== 'all') count++;
+      if (localFilters.stoneType && localFilters.stoneType !== 'all') count++;
+      if (localFilters.shippingDateFrom) count++;
+      if (localFilters.shippingDateTo) count++;
+    }
+    if (localFilters.metalColor && localFilters.metalColor !== 'all') count++;
+    if (localFilters.metalQuality && localFilters.metalQuality !== 'all') count++;
+    if (localFilters.assignedDateFrom) count++;
+    if (localFilters.assignedDateTo) count++;
+    if (localFilters.createdDateFrom) count++;
+    if (localFilters.createdDateTo) count++;
     return count;
   };
 
@@ -350,7 +466,34 @@ const EnquiryFiltersModal = ({
             </View>
             
             {renderDropdown('status', statusOptions, 'Status')}
+            {!isDesigner && renderDropdown('category', categoryOptions, 'Category')}
             {renderDropdown('priority', priorityOptions, 'Priority')}
+            {!isDesigner && renderDropdown('clientId', clientOptions, 'Client')}
+            {!isDesigner && renderDropdown('assignedTo', assignedToOptions, 'Assigned To')}
+            {!isDesigner && renderDropdown('stoneType', stoneTypeOptions, 'Stone Type')}
+          </View>
+
+          {/* Material Filters Card */}
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Icon name="diamond" size={20} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Material Filters</Text>
+            </View>
+            
+            {renderDropdown('metalColor', metalColorOptions, 'Metal Color')}
+            {renderDropdown('metalQuality', metalQualityOptions, 'Metal Quality')}
+          </View>
+
+          {/* Date Ranges Card */}
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Icon name="calendar-today" size={20} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Date Ranges</Text>
+            </View>
+            
+            {!isDesigner && renderDateRange('shippingDateFrom', 'shippingDateTo', 'Shipping Date')}
+            {renderDateRange('assignedDateFrom', 'assignedDateTo', 'Assigned Date')}
+            {renderDateRange('createdDateFrom', 'createdDateTo', 'Created Date')}
           </View>
         </ScrollView>
 

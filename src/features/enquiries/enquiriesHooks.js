@@ -64,19 +64,6 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
   const assignedTo = (isAdmin || isClient) ? undefined : userId; // Only filter by assignedTo for designers/workers
   const clientIdFilter = isClient ? clientIdForFilter : undefined; // Filter by clientId for client users
   
-  // Log filtering strategy for debugging
-  console.log('🔐 ========== ENQUIRY FILTERING STRATEGY ==========');
-  console.log('🔐 User Role:', role);
-  console.log('🔐 Is Admin:', isAdmin);
-  console.log('🔐 Is Client:', isClient);
-  console.log('🔐 User ID:', userId);
-  console.log('🔐 Client ID For Filter:', clientIdForFilter);
-  console.log('🔐 Client ID Filter (final):', clientIdFilter);
-  console.log('🔐 AssignedTo Filter:', assignedTo);
-  console.log('🔐 User Object:', { id: user?.id, email: user?.email, name: user?.name, role: user?.role, roleId: user?.roleId });
-  console.log('🔐 Clients Count:', clients.length);
-  console.log('🔐 ===============================================');
-  
   // For infinite scroll: always fetch page 1 initially, then load more pages as needed
   // When searching, fetch ALL enquiries (use large limit) to search across all pages
   // Otherwise use lazy loading with limit 10
@@ -97,9 +84,24 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
     ...(isClient && clientIdFilter ? { clientId: clientIdFilter } : {}),
   };
   
-  console.log('🔐 API Filters being sent:', apiFilters);
-  console.log('🔐 Will clientId be sent?', !!(isClient && clientIdFilter));
-  console.log('🔐 ClientId value:', clientIdFilter);
+  // Log filtering strategy only when key values change (not on every render)
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('🔐 ========== ENQUIRY FILTERING STRATEGY ==========');
+      console.log('🔐 User Role:', role);
+      console.log('🔐 Is Admin:', isAdmin);
+      console.log('🔐 Is Client:', isClient);
+      console.log('🔐 User ID:', userId);
+      console.log('🔐 Client ID For Filter:', clientIdForFilter);
+      console.log('🔐 Client ID Filter (final):', clientIdFilter);
+      console.log('🔐 AssignedTo Filter:', assignedTo);
+      console.log('🔐 API Filters being sent:', apiFilters);
+      console.log('🔐 Will clientId be sent?', !!(isClient && clientIdFilter));
+      console.log('🔐 ClientId value:', clientIdFilter);
+      console.log('🔐 ===============================================');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, isAdmin, isClient, userId, clientIdForFilter, clientIdFilter, assignedTo, filters.status, filters.priority, filters.clientId, sortBy, sortOrder]);
 
   const { data, isLoading, error, refetch } = useGetEnquiriesQuery(
     { 
@@ -139,37 +141,140 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
   useEffect(() => {
     setAccumulatedEnquiries([]);
     setLoadedPages(new Set());
-    // Reset to page 1 when filters change
+    // Reset to page 1 when filters change (only if not already on page 1)
     if (currentPage !== 1) {
       dispatch(setPage(1));
     }
-  }, [searchQuery, filters.status, filters.priority, sortBy, sortOrder, dispatch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, filters.status, filters.priority, sortBy, sortOrder]);
   
+  // Helper function to sort enquiries consistently
+  const sortEnquiries = useCallback((enquiriesToSort) => {
+    if (!enquiriesToSort || enquiriesToSort.length === 0) return enquiriesToSort;
+    
+    const sorted = [...enquiriesToSort];
+    sorted.sort((a, b) => {
+      let aValue, bValue;
+      
+      // Get values based on sortBy field
+      switch (sortBy) {
+        case 'title':
+          aValue = a.title || a.Name || a.name || '';
+          bValue = b.title || b.Name || b.name || '';
+          break;
+        case 'clientName':
+          aValue = a.clientName || a.ClientName || a.client || '';
+          bValue = b.clientName || b.ClientName || b.client || '';
+          break;
+        case 'budget':
+          aValue = a.budget || a.Budget || a.estimatedPrice || 0;
+          bValue = b.budget || b.Budget || b.estimatedPrice || 0;
+          break;
+        case 'status':
+          aValue = a.status || a.Status || a.CurrentStatus || '';
+          bValue = b.status || b.Status || b.CurrentStatus || '';
+          break;
+        case 'createdAt':
+          aValue = a.createdAt || a.CreatedDate || a.createdDate || a.CreatedAt || '';
+          bValue = b.createdAt || b.CreatedDate || b.createdDate || b.CreatedAt || '';
+          break;
+        case 'updatedAt':
+          aValue = a.updatedAt || a.UpdatedDate || a.updatedDate || a.UpdatedAt || '';
+          bValue = b.updatedAt || b.UpdatedDate || b.updatedDate || b.UpdatedAt || '';
+          break;
+        case 'assignedDate':
+          aValue = a.AssignedDate || a.assignedDate || a.updatedAt || a.createdAt || '';
+          bValue = b.AssignedDate || b.assignedDate || b.updatedAt || b.createdAt || '';
+          break;
+        default:
+          aValue = a[sortBy] || '';
+          bValue = b[sortBy] || '';
+      }
+      
+      // Handle null/undefined values
+      if (aValue == null) aValue = '';
+      if (bValue == null) bValue = '';
+      
+      // Handle date sorting
+      if (sortBy === 'createdAt' || sortBy === 'updatedAt' || sortBy === 'assignedDate') {
+        aValue = aValue ? new Date(aValue).getTime() : 0;
+        bValue = bValue ? new Date(bValue).getTime() : 0;
+      } 
+      // Handle number sorting
+      else if (sortBy === 'budget') {
+        aValue = parseFloat(aValue) || 0;
+        bValue = parseFloat(bValue) || 0;
+      }
+      // Handle string sorting
+      else if (typeof aValue === 'string') {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+      
+      // CRITICAL: Use proper comparison based on value type
+      let comparison = 0;
+      if (sortOrder === 'asc') {
+        if (typeof aValue === 'number') {
+          comparison = aValue - bValue;
+        } else if (typeof aValue === 'string') {
+          comparison = aValue.localeCompare(bValue);
+        } else {
+          if (aValue < bValue) comparison = -1;
+          else if (aValue > bValue) comparison = 1;
+        }
+      } else {
+        if (typeof aValue === 'number') {
+          comparison = bValue - aValue;
+        } else if (typeof aValue === 'string') {
+          comparison = bValue.localeCompare(aValue);
+        } else {
+          if (aValue > bValue) comparison = -1;
+          else if (aValue < bValue) comparison = 1;
+        }
+      }
+      
+      // CRITICAL: Always apply stable secondary sort by ID to prevent order changes
+      if (comparison === 0) {
+        const aId = String(a.id || a._id || '');
+        const bId = String(b.id || b._id || '');
+        return aId.localeCompare(bId);
+      }
+      
+      return comparison;
+    });
+    
+    return sorted;
+  }, [sortBy, sortOrder]);
+
   // Accumulate enquiries when new data arrives
   useEffect(() => {
     if (!searchQuery && enquiries.length > 0 && !isLoading) {
       if (currentPage === 1) {
-        // First page - replace accumulated data
-        setAccumulatedEnquiries(enquiries);
+        // First page - replace accumulated data and sort
+        const sorted = sortEnquiries(enquiries);
+        setAccumulatedEnquiries(sorted);
         setLoadedPages(new Set([1]));
-        setIsLoadingMore(false); // Reset loading state
+        setIsLoadingMore(false);
       } else if (!loadedPages.has(currentPage)) {
-        // New page - append to accumulated data
+        // New page - append to accumulated data, then sort entire list
         setAccumulatedEnquiries(prev => {
           // Avoid duplicates by checking IDs
           const existingIds = new Set(prev.map(e => e.id || e._id));
           const newEnquiries = enquiries.filter(e => !existingIds.has(e.id || e._id));
-          return [...prev, ...newEnquiries];
+          const combined = [...prev, ...newEnquiries];
+          // Sort the combined list to maintain consistent order
+          return sortEnquiries(combined);
         });
         setLoadedPages(prev => new Set([...prev, currentPage]));
-        setIsLoadingMore(false); // Reset loading state when new data arrives
+        setIsLoadingMore(false);
       }
     } else if (searchQuery) {
-      // When searching, use all enquiries directly
-      setAccumulatedEnquiries(enquiries);
+      // When searching, use all enquiries directly and sort
+      const sorted = sortEnquiries(enquiries);
+      setAccumulatedEnquiries(sorted);
       setIsLoadingMore(false);
     }
-  }, [enquiries, currentPage, searchQuery, isLoading, loadedPages]);
+  }, [enquiries, currentPage, searchQuery, isLoading, loadedPages, sortEnquiries]);
   
   // Set loading more state when page changes (for pages > 1)
   useEffect(() => {
@@ -382,16 +487,36 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
         bValue = bValue.toLowerCase();
       }
       
-      // Apply sort order
+      // CRITICAL: Use proper comparison based on value type
+      let comparison = 0;
       if (sortOrder === 'asc') {
-        if (aValue < bValue) return -1;
-        if (aValue > bValue) return 1;
-        return 0;
+        if (typeof aValue === 'number') {
+          comparison = aValue - bValue;
+        } else if (typeof aValue === 'string') {
+          comparison = aValue.localeCompare(bValue);
+        } else {
+          if (aValue < bValue) comparison = -1;
+          else if (aValue > bValue) comparison = 1;
+        }
       } else {
-        if (aValue > bValue) return -1;
-        if (aValue < bValue) return 1;
-        return 0;
+        if (typeof aValue === 'number') {
+          comparison = bValue - aValue;
+        } else if (typeof aValue === 'string') {
+          comparison = bValue.localeCompare(aValue);
+        } else {
+          if (aValue > bValue) comparison = -1;
+          else if (aValue < bValue) comparison = 1;
+        }
       }
+      
+      // CRITICAL: Always apply stable secondary sort by ID to prevent order changes
+      if (comparison === 0) {
+        const aId = String(a.id || a._id || '');
+        const bId = String(b.id || b._id || '');
+        return aId.localeCompare(bId);
+      }
+      
+      return comparison;
     });
     
     return filtered;

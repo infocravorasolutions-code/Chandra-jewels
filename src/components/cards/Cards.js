@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Image } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo, memo, useCallback } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Image, InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { spacing, responsivePadding, imageSizes } from '../../utils';
 import { formatCount } from '../../utils/helpers';
 import Icon from '../common/Icon';
-import { FILE_BASE_URL, API_BASE_URL } from '../../config/apiConfig';
+import { FILE_BASE_URL } from '../../config/apiConfig';
+import { getUserName } from '../../utils/userUtils';
 import { getCachedImage, cacheImage } from '../../utils/imageCache';
 import { getCachedImageData, cacheImageData } from '../../utils/imageMemoryCache';
-import { getUserName } from '../../utils/userUtils';
 
 export const Card = ({ children, style, onPress, ...props }) => {
   const CardComponent = onPress ? TouchableOpacity : View;
@@ -66,6 +66,7 @@ export const CompactEnquiryCard = ({
   // Hooks must be called at the top level, before any conditional returns
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [imageDataUri, setImageDataUri] = useState(null);
 
   // Safety checks to prevent undefined errors
   if (!enquiry) {
@@ -75,12 +76,15 @@ export const CompactEnquiryCard = ({
   const statusColor = getStatusColor ? getStatusColor(enquiry.status || 'pending') : colors.primary;
   const priorityColor = getPriorityColor ? getPriorityColor(enquiry.priority || 'medium') : colors.textSecondary;
   
+  // Check if user is a designer (coral or cad)
+  const isDesigner = userRole === 'coral' || userRole === 'cad';
+  
   // Extract metal color and quality
   const metalColor = enquiry.Metal?.Color || enquiry.metal?.color || enquiry.metalColor || 'Gold';
   const metalQuality = enquiry.Metal?.Quality || enquiry.metal?.quality || enquiry.metalQuality || '';
   const metalDisplay = metalQuality ? `${metalColor} ${metalQuality}` : metalColor;
   
-  // Get assigned to - resolve ID to name if needed
+  // Get assigned to - resolve ID to name if needed (only if not designer)
   const assignedToId = enquiry.AssignedTo || enquiry.assignedTo;
   const assignedToName = enquiry.assignedToName;
   // If we have an ID but no name, resolve it using getUserName utility
@@ -105,569 +109,243 @@ export const CompactEnquiryCard = ({
   const hasCAD = enquiry.Cad && Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0;
   const hasOrder = enquiry.status === 'completed';
 
-  // Get reference image - fetch latest from ReferenceImages array
-  const getReferenceImage = () => {
+  // Get latest reference image URL (last image in array)
+  const getLatestImageUrl = () => {
     let referenceImages = [];
     
-    // Priority 1: Check original data structure (before normalization) - most reliable
+    // Check ReferenceImages array
     if (enquiry?._originalData?.ReferenceImages && Array.isArray(enquiry._originalData.ReferenceImages)) {
       referenceImages = enquiry._originalData.ReferenceImages;
-    }
-    // Priority 2: Check direct ReferenceImages property
-    else if (enquiry?.ReferenceImages && Array.isArray(enquiry.ReferenceImages)) {
+    } else if (enquiry?.ReferenceImages && Array.isArray(enquiry.ReferenceImages)) {
       referenceImages = enquiry.ReferenceImages;
-    }
-    // Priority 3: Check normalized images (from API transform)
-    else if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
-      // Normalized images might be strings or objects
+    } else if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
       referenceImages = enquiry.images;
-    }
-    // Priority 4: Check Images property (fallback)
-    else if (enquiry?.Images && Array.isArray(enquiry.Images)) {
+    } else if (enquiry?.Images && Array.isArray(enquiry.Images)) {
       referenceImages = enquiry.Images;
     }
     
     if (referenceImages.length === 0) {
-      if (__DEV__) {
-        console.log('No ReferenceImages found for enquiry:', enquiry?.id, {
-          hasOriginalData: !!enquiry?._originalData,
-          hasReferenceImages: !!enquiry?.ReferenceImages,
-          hasImages: !!enquiry?.images,
-          enquiryKeys: enquiry ? Object.keys(enquiry).slice(0, 15) : [],
-        });
-      }
       return null;
     }
     
-    // Get the latest image (last item in array)
+    // Get the last image (latest)
     const latestImage = referenceImages[referenceImages.length - 1];
     
-    if (__DEV__) {
-      console.log('Found ReferenceImages for enquiry:', enquiry?.id, {
-        totalImages: referenceImages.length,
-        latestImage: latestImage,
-        imageType: typeof latestImage,
-      });
-    }
-    
-    // Handle object format (most common - has Key, Id, etc.)
+    // Extract URL from image object or string
     if (typeof latestImage === 'object' && latestImage !== null) {
-      // Priority 1: Use Key property (most reliable)
       const imageKey = latestImage.Key || latestImage.key || latestImage.KeyName || latestImage.keyName || '';
-      
       if (imageKey) {
-        // Construct URL from key: /api/enquiries/files/{key}
-        const encodedKey = encodeURIComponent(imageKey);
-        const url = `${FILE_BASE_URL}/api/enquiries/files/${encodedKey}`;
-        if (__DEV__) console.log('Constructed URL from Key:', url, 'Original Key:', imageKey);
-        return url;
+        return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(imageKey)}`;
       }
-      
-      // Priority 2: Use Id property as fallback
       const imageId = latestImage.Id || latestImage.id || latestImage._id || latestImage.FileId || latestImage.fileId || '';
       if (imageId) {
-        const url = `${FILE_BASE_URL}/api/enquiries/files/${imageId}`;
-        if (__DEV__) console.log('Constructed URL from Id:', url);
-        return url;
+        return `${FILE_BASE_URL}/api/enquiries/files/${imageId}`;
       }
-      
-      // Priority 3: Check for URL properties
-      const imageUrl = latestImage.Url || latestImage.url || latestImage.URI || latestImage.uri || 
-                      latestImage.Location || latestImage.location || latestImage.UrlPath || latestImage.urlPath || '';
+      const imageUrl = latestImage.Url || latestImage.url || latestImage.URI || latestImage.uri || '';
       if (imageUrl) {
         if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-          if (__DEV__) console.log('Using full URL from object:', imageUrl);
           return imageUrl;
         }
-        if (imageUrl.startsWith('/')) {
-          const url = `${FILE_BASE_URL}${imageUrl}`;
-          if (__DEV__) console.log('Constructed URL from object path:', url);
-          return url;
-        }
-        const url = `${FILE_BASE_URL}/${imageUrl}`;
-        if (__DEV__) console.log('Constructed URL from object relative path:', url);
-        return url;
-      }
-      
-      if (__DEV__) {
-        console.warn('Image object has no Key/Id/Url:', JSON.stringify(latestImage));
+        return imageUrl.startsWith('/') ? `${FILE_BASE_URL}${imageUrl}` : `${FILE_BASE_URL}/${imageUrl}`;
       }
       return null;
     }
     
-    // Handle string format
     if (typeof latestImage === 'string') {
-      // If it's already a full URL, use it directly
       if (latestImage.startsWith('http://') || latestImage.startsWith('https://')) {
-        if (__DEV__) console.log('Using full URL:', latestImage);
         return latestImage;
       }
-      // If it starts with /, it's a path - construct full URL
       if (latestImage.startsWith('/')) {
-        const url = `${FILE_BASE_URL}${latestImage}`;
-        if (__DEV__) console.log('Constructed URL from path:', url);
-        return url;
+        return `${FILE_BASE_URL}${latestImage}`;
       }
-      // Otherwise, treat as file key
-      const encodedKey = encodeURIComponent(latestImage);
-      const url = `${FILE_BASE_URL}/api/enquiries/files/${encodedKey}`;
-      if (__DEV__) console.log('Constructed URL from string key:', url);
-      return url;
+      return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(latestImage)}`;
     }
     
-    if (__DEV__) {
-      console.warn('Could not extract image URL from:', latestImage, 'Type:', typeof latestImage);
-    }
     return null;
   };
 
-  // Memoize the reference image URI to prevent unnecessary recalculations
-  const referenceImageUri = useMemo(() => getReferenceImage(), [
+  const imageUrl = useMemo(() => getLatestImageUrl(), [
     enquiry?._originalData?.ReferenceImages,
     enquiry?.ReferenceImages,
     enquiry?.images,
     enquiry?.Images,
   ]);
   
-  // Check memory cache first (instant, no async needed)
-  const memoryCachedImage = useMemo(() => {
-    return referenceImageUri ? getCachedImageData(referenceImageUri) : null;
-  }, [referenceImageUri]);
-  
-  const [imageDataUri, setImageDataUri] = useState(() => {
-    // Initialize with memory cache if available
-    return memoryCachedImage;
-  });
-  const fetchAbortController = useRef(null);
-  const hasLoadedRef = useRef(false);
-  
-  // Log when referenceImageUri changes
-  useEffect(() => {
-    if (__DEV__ && enquiry?.id) {
-      console.log('🔍 referenceImageUri changed:', {
-        enquiryId: enquiry.id,
-        referenceImageUri: referenceImageUri,
-        willFetch: !!referenceImageUri,
-      });
-    }
-  }, [referenceImageUri, enquiry?.id]);
-
-  // Debug logging in development
-  useEffect(() => {
-    if (__DEV__ && enquiry?.id) {
-      const originalRefImages = enquiry._originalData?.ReferenceImages;
-      const directRefImages = enquiry?.ReferenceImages;
+  // Optimized async base64 conversion (non-blocking, chunked processing)
+  const convertToBase64Async = useCallback(async (arrayBuffer) => {
+    const bytes = new Uint8Array(arrayBuffer);
+    const chunkSize = 16384; // Larger chunks for better performance
+    let binary = '';
+    
+    // Process in chunks with yields to prevent blocking
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      binary += String.fromCharCode.apply(null, chunk);
       
-      console.log('📸 CompactEnquiryCard - Image Debug:', {
-        enquiryId: enquiry.id,
-        hasOriginalData: !!enquiry._originalData,
-        originalRefImagesCount: originalRefImages?.length || 0,
-        originalRefImages: originalRefImages,
-        hasDirectRefImages: !!directRefImages,
-        directRefImagesCount: directRefImages?.length || 0,
-        directRefImages: directRefImages,
-        hasNormalizedImages: !!enquiry.images,
-        normalizedImagesCount: enquiry.images?.length || 0,
-        referenceImageUri: referenceImageUri,
-        imageDataUri: imageDataUri ? `data:... (${imageDataUri.length} chars)` : null,
-        imageError: imageError,
-        imageLoading: imageLoading,
-        latestImageFromOriginal: originalRefImages?.[originalRefImages?.length - 1],
-        latestImageFromDirect: directRefImages?.[directRefImages?.length - 1],
-      });
+      // Yield to main thread every few chunks to keep UI responsive
+      if (i > 0 && i % (chunkSize * 4) === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
     }
-  }, [enquiry?.id, referenceImageUri, imageDataUri, imageError, imageLoading]);
-
-  // Fetch image with authentication and convert to data URI (with caching)
-  useEffect(() => {
-    // Cleanup: abort any ongoing fetch when component unmounts or URI changes
-    return () => {
-      if (fetchAbortController.current) {
-        fetchAbortController.current.abort();
-        fetchAbortController.current = null;
-      }
-    };
-  }, [referenceImageUri]);
-
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('🔄 Image fetch useEffect triggered:', {
-        enquiryId: enquiry?.id,
-        referenceImageUri: referenceImageUri,
-        hasUri: !!referenceImageUri,
-        currentImageDataUri: imageDataUri ? 'exists' : 'null',
-      });
     }
-
-    if (!referenceImageUri) {
-      if (__DEV__) {
-        console.log('⏭️ No referenceImageUri, skipping image fetch');
+    
+    // Convert to base64
+    let base64;
+    try {
+      base64 = btoa(binary);
+    } catch (e) {
+      if (typeof Buffer !== 'undefined') {
+        base64 = Buffer.from(bytes).toString('base64');
+      } else {
+        throw e;
       }
+    }
+    
+    return base64;
+  }, []);
+
+  // Fetch and load image with caching and deferred loading
+  useEffect(() => {
+    if (!imageUrl) {
       setImageDataUri(null);
       setImageError(false);
       setImageLoading(false);
       return;
     }
 
-    // If it's already a data URI, use it directly
-    if (referenceImageUri.startsWith('data:')) {
-      if (imageDataUri !== referenceImageUri) {
-        setImageDataUri(referenceImageUri);
-        setImageLoading(false);
-        setImageError(false);
-      }
-      return;
-    }
+    let cancelled = false;
 
-    // Check memory cache FIRST before resetting state (prevents reload flash)
-    const memoryCached = getCachedImageData(referenceImageUri);
+    // Check cache synchronously first (fast path)
+    const memoryCached = getCachedImageData(imageUrl);
     if (memoryCached) {
-      if (__DEV__) {
-        console.log('✅ Using memory cached image (instant) for:', referenceImageUri.substring(0, 50));
-      }
-      // Only update if different to prevent unnecessary re-renders
-      if (imageDataUri !== memoryCached) {
         setImageDataUri(memoryCached);
         setImageLoading(false);
         setImageError(false);
-        hasLoadedRef.current = true;
-      }
-      return; // Exit early, no fetch needed
-    }
-
-    // If we already have this image loaded, don't reload it
-    if (imageDataUri) {
-      const currentCached = getCachedImageData(referenceImageUri);
-      // If the current imageDataUri matches what's cached for this URI, skip reload
-      if (currentCached === imageDataUri || (hasLoadedRef.current && imageDataUri)) {
-        if (__DEV__) {
-          console.log('⏭️ Image already loaded, skipping reload for:', referenceImageUri.substring(0, 50));
-        }
         return;
       }
-    }
 
-    // Abort previous fetch if any
-    if (fetchAbortController.current) {
-      fetchAbortController.current.abort();
-    }
+    // Defer async operations to avoid blocking scroll
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
 
-    // Create new AbortController for this fetch
-    fetchAbortController.current = new AbortController();
-    const signal = fetchAbortController.current.signal;
-
-    // Only reset loading state if we don't have the image
-    if (!imageDataUri) {
-      setImageError(false);
+      const loadImage = async () => {
+        try {
       setImageLoading(true);
-    }
+          setImageError(false);
 
-    // Check cache first
-    const checkCacheAndFetch = async () => {
-      try {
-        // Check persistent cache (async)
-        const cachedImage = await getCachedImage(referenceImageUri);
-        
-        if (cachedImage) {
-          if (__DEV__) {
-            console.log('✅ Using persistent cached image for:', referenceImageUri.substring(0, 50));
-          }
-          // Store in memory cache for faster access
-          cacheImageData(referenceImageUri, cachedImage);
-          setImageDataUri(cachedImage);
+          // Step 1: Check persistent cache (AsyncStorage)
+          const persistentCached = await getCachedImage(imageUrl);
+          if (persistentCached) {
+            // Validate cached data is a base64 data URI, not an API endpoint
+            if (persistentCached.startsWith('data:image/')) {
+              // Store in memory cache for faster access next time
+              cacheImageData(imageUrl, persistentCached);
+              if (!cancelled) {
+                setImageDataUri(persistentCached);
           setImageLoading(false);
           setImageError(false);
-          hasLoadedRef.current = true;
-          return;
         }
-
-        // Cache miss - proceed with fetch
+              return;
+            } else {
+              // Invalid cache entry (API endpoint URL), clear it
         if (__DEV__) {
-          console.log('🔄 Cache miss, fetching image:', referenceImageUri);
+                console.warn('Invalid cache entry detected, clearing...');
+              }
+            }
         }
 
-        // Fetch image with authentication
-        const fetchImageWithAuth = async () => {
-          try {
+          // Step 2: Fetch from network (not in cache)
             const token = await AsyncStorage.getItem('token');
             if (!token) {
-              if (__DEV__) console.warn('No token available for image fetch');
               setImageError(true);
               setImageLoading(false);
               return;
             }
 
-            if (__DEV__) {
-              console.log('🔄 Fetching card image with auth:', referenceImageUri);
-            }
-
-            const response = await fetch(referenceImageUri, {
+          // Fetch from API endpoint
+          const response = await fetch(imageUrl, {
               method: 'GET',
               headers: {
                 'Authorization': `Bearer ${token}`,
               },
-              signal: signal, // Add abort signal
             });
 
-            if (response.ok) {
-              const contentType = response.headers.get('content-type') || '';
-              
-              if (__DEV__) {
-                console.log('✅ Image fetch OK, content-type:', contentType);
-              }
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
 
-              // Check if response is JSON (API returns a URL object)
+              const contentType = response.headers.get('content-type') || '';
+
+          // Handle JSON response (contains S3 URL)
               if (contentType.includes('application/json')) {
-            if (__DEV__) {
-              console.log('📄 API returned JSON, parsing response...');
+            const jsonData = await response.json();
+            const s3Url = jsonData.url || jsonData.imageUrl || jsonData.Url || jsonData.Location;
+            
+            if (!s3Url) {
+              throw new Error('No URL in JSON response');
             }
             
-            let jsonData;
-            try {
-              const responseText = await response.text();
-              if (__DEV__) {
-                console.log('📄 Raw JSON response text:', responseText.substring(0, 500));
-              }
-              jsonData = JSON.parse(responseText);
-            } catch (parseError) {
-              if (__DEV__) {
-                console.error('❌ Failed to parse JSON:', parseError);
-              }
-              setImageError(true);
-              setImageLoading(false);
-              return;
-            }
-            
-            if (__DEV__) {
-              console.log('📄 JSON response:', JSON.stringify(jsonData, null, 2));
-              console.log('📄 JSON keys:', Object.keys(jsonData));
-            }
-            
-            // Try multiple possible URL fields - check nested structures too
-            let actualImageUrl = null;
-            
-            // Check top-level fields
-            actualImageUrl = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location || 
-                           jsonData.Url || jsonData.Location || jsonData.fileUrl || jsonData.fileURL ||
-                           jsonData.image || jsonData.Image || jsonData.file || jsonData.File;
-            
-            // Check nested data object
-            if (!actualImageUrl && jsonData.data) {
-              actualImageUrl = jsonData.data.url || jsonData.data.imageUrl || jsonData.data.src || 
-                             jsonData.data.location || jsonData.data.Url || jsonData.data.Location ||
-                             jsonData.data.fileUrl || jsonData.data.fileURL;
-            }
-            
-            // Check if it's an array with URL objects
-            if (!actualImageUrl && Array.isArray(jsonData) && jsonData.length > 0) {
-              const firstItem = jsonData[0];
-              actualImageUrl = firstItem.url || firstItem.imageUrl || firstItem.src || firstItem.location ||
-                             firstItem.Url || firstItem.Location || firstItem.fileUrl || firstItem.fileURL;
-            }
-            
-            // Check if response has a message/error
-            if (!actualImageUrl && jsonData.message) {
-              if (__DEV__) {
-                console.warn('⚠️ API returned message instead of URL:', jsonData.message);
-              }
-            }
-            
-            if (!actualImageUrl) {
-              if (__DEV__) {
-                console.error('❌ No image URL found in JSON response. Available keys:', Object.keys(jsonData));
-              }
-              setImageError(true);
-              setImageLoading(false);
-              return;
-            }
-            
-            if (__DEV__) {
-              console.log('🖼️ Found image URL in JSON:', actualImageUrl);
-            }
-            
-            // If it's an S3 URL or public URL, use it directly (no need to convert to base64)
-            // React Native Image component can handle HTTP/HTTPS URLs directly
-            if (actualImageUrl.includes('amazonaws.com') || actualImageUrl.includes('s3.') || 
-                actualImageUrl.startsWith('http://') || actualImageUrl.startsWith('https://')) {
-              
-              if (__DEV__) {
-                console.log('✅ Using S3/public URL directly (no base64 conversion needed)');
-              }
-              
-              // Cache the URL (both persistent and memory)
-              await cacheImage(referenceImageUri, actualImageUrl);
-              cacheImageData(referenceImageUri, actualImageUrl);
-              
-              // Use the URL directly - React Native Image can handle it
-              setImageDataUri(actualImageUrl);
-              setImageLoading(false);
-              setImageError(false);
-              hasLoadedRef.current = true;
-              
-              if (__DEV__) {
-                console.log('✅ Image URL set, should render now');
-              }
-              return;
-            }
-            
-            // For non-public URLs, fetch and convert to base64
-            if (__DEV__) {
-              console.log('🔄 Fetching image for base64 conversion...');
-            }
-            
-            const imageResponse = await fetch(actualImageUrl, {
+            // Fetch image from S3
+            const imageResponse = await fetch(s3Url, {
               method: 'GET',
-              headers: {
+              headers: s3Url.includes('amazonaws.com') ? {} : {
                 'Authorization': `Bearer ${token}`,
               },
             });
             
             if (!imageResponse.ok) {
-              if (__DEV__) {
-                console.error('❌ Failed to fetch actual image:', imageResponse.status, imageResponse.statusText);
-              }
-              setImageError(true);
-              setImageLoading(false);
-              return;
+              throw new Error(`Failed to fetch image: ${imageResponse.status}`);
             }
-            
-            const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
-            
-            if (__DEV__) {
-              console.log('✅ Actual image fetched, converting to base64. Content-type:', imageContentType);
-            }
-            
-            // Convert to base64
+
+            // Convert to base64 asynchronously (non-blocking)
             const arrayBuffer = await imageResponse.arrayBuffer();
-            const bytes = new Uint8Array(arrayBuffer);
-            let binary = '';
-            const chunkSize = 8192;
-            
-            for (let i = 0; i < bytes.length; i += chunkSize) {
-              const chunk = bytes.subarray(i, i + chunkSize);
-              binary += String.fromCharCode.apply(null, chunk);
-            }
-            
-            let base64;
-            try {
-              base64 = btoa(binary);
-            } catch (e) {
-              if (typeof Buffer !== 'undefined') {
-                base64 = Buffer.from(bytes).toString('base64');
-              } else {
-                if (__DEV__) {
-                  console.error('❌ Error converting to base64:', e);
-                }
-                throw e;
-              }
-            }
-            
+            const base64 = await convertToBase64Async(arrayBuffer);
+            const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
             
-            if (__DEV__) {
-              console.log('✅ Image converted to data URI');
-              console.log('   - Content type:', imageContentType);
-              console.log('   - Base64 length:', base64.length);
-              console.log('   - Data URI length:', dataUri.length);
-            }
+            // Cache the image (both memory and persistent)
+            cacheImageData(imageUrl, dataUri);
+            cacheImage(imageUrl, dataUri);
             
-            // Cache the data URI (both persistent and memory)
-            await cacheImage(referenceImageUri, dataUri);
-            cacheImageData(referenceImageUri, dataUri);
-            
-            // Set the image data URI
+            if (!cancelled) {
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
-            hasLoadedRef.current = true;
-            
-            if (__DEV__) {
-              console.log('✅ Image state updated, should render now');
             }
           } else {
-            // Direct image response - convert to base64
+            // Direct image response - convert to base64 asynchronously
             const arrayBuffer = await response.arrayBuffer();
-            const bytes = new Uint8Array(arrayBuffer);
-            let binary = '';
-            const chunkSize = 8192;
-            
-            for (let i = 0; i < bytes.length; i += chunkSize) {
-              const chunk = bytes.subarray(i, i + chunkSize);
-              binary += String.fromCharCode.apply(null, chunk);
-            }
-            
-            let base64;
-            try {
-              base64 = btoa(binary);
-            } catch (e) {
-              if (typeof Buffer !== 'undefined') {
-                base64 = Buffer.from(bytes).toString('base64');
-              } else {
-                throw e;
-              }
-            }
-            
+            const base64 = await convertToBase64Async(arrayBuffer);
             const dataUri = `data:${contentType || 'image/jpeg'};base64,${base64}`;
             
-            if (__DEV__) {
-              console.log('✅ Direct image converted to data URI');
-              console.log('   - Content type:', contentType);
-              console.log('   - Base64 length:', base64.length);
-              console.log('   - Data URI length:', dataUri.length);
-            }
+            // Cache the image (both memory and persistent)
+            cacheImageData(imageUrl, dataUri);
+            cacheImage(imageUrl, dataUri);
             
-            // Cache the data URI (both persistent and memory)
-            await cacheImage(referenceImageUri, dataUri);
-            cacheImageData(referenceImageUri, dataUri);
-            
+            if (!cancelled) {
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
-            hasLoadedRef.current = true;
-          }
-        } else {
-          if (__DEV__) {
-            console.warn('Image fetch failed:', response.status, response.statusText);
-          }
-          setImageError(true);
-          setImageLoading(false);
+            }
         }
       } catch (error) {
-        // Don't set error if fetch was aborted
-        if (error.name === 'AbortError') {
+          if (!cancelled) {
           if (__DEV__) {
-            console.log('⏹️ Image fetch aborted for:', enquiry?.id);
-          }
-          return;
-        }
-        
-        if (__DEV__) {
-          console.error('Error fetching image:', error);
+              console.error('Error loading image:', error);
         }
             setImageError(true);
             setImageLoading(false);
           }
+        }
         };
 
-        fetchImageWithAuth();
-      } catch (error) {
-        if (__DEV__) {
-          console.error('Error in checkCacheAndFetch:', error);
-        }
-        setImageError(true);
-        setImageLoading(false);
-      }
-    };
-
-    checkCacheAndFetch();
+      loadImage();
+    });
     
-    // Cleanup function
     return () => {
-      if (fetchAbortController.current) {
-        fetchAbortController.current.abort();
-      }
+      cancelled = true;
+      handle.cancel();
     };
-  }, [referenceImageUri, enquiry?.id]);
+  }, [imageUrl, convertToBase64Async]);
 
   return (
     <Card style={styles.compactEnquiryCard} onPress={onPress}>
@@ -678,32 +356,24 @@ export const CompactEnquiryCard = ({
             source={{ uri: imageDataUri }}
             style={styles.compactImage}
             resizeMode="cover"
-            onLoad={() => {
-              if (__DEV__) {
-                console.log('✅ Image loaded successfully in Image component');
-              }
-            }}
-            onError={(error) => {
-              if (__DEV__) {
-                console.error('❌ Image component error:', error);
-                console.error('❌ Failed imageDataUri length:', imageDataUri?.length);
-                console.error('❌ Failed imageDataUri preview:', imageDataUri?.substring(0, 100));
-              }
+            onError={() => {
               setImageError(true);
             }}
+            // Performance optimizations
+            fadeDuration={150}
+            progressiveRenderingEnabled={true}
+            // Reduce memory footprint for list items
+            defaultSource={null}
           />
         ) : (
           <View style={styles.compactImagePlaceholder}>
             <Icon name="image" size={32} color={colors.textLight} />
-            <Text style={styles.compactImagePlaceholderText}>No image available</Text>
-            {__DEV__ && (
-              <Text style={[styles.compactImagePlaceholderText, { fontSize: 6, marginTop: 2 }]}>
-                {referenceImageUri ? 'Loading...' : 'No image'}
+            <Text style={styles.compactImagePlaceholderText}>
+              {imageLoading ? 'Loading...' : 'No image available'}
               </Text>
-            )}
           </View>
         )}
-        {imageLoading && referenceImageUri && !imageError && (
+        {imageLoading && imageUrl && !imageError && (
           <View style={styles.compactImageLoading}>
             <Icon name="sync" size={20} color={colors.textLight} />
           </View>
@@ -732,13 +402,31 @@ export const CompactEnquiryCard = ({
           </View>
         </View>
 
-        {/* Row 3: Created Date */}
+        {/* Row 3: Client Name (replacing Created Date position) */}
         <View style={styles.compactRow3}>
           <View style={styles.compactFieldGroup}>
-            <Text style={styles.compactLabelText}>Created</Text>
-            <Text style={styles.compactValueText}>{createdDate}</Text>
+            <Text style={styles.compactLabelText}>Client</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>
+              {enquiry.clientName || enquiry.ClientName || enquiry.client || 'Unknown Client'}
+            </Text>
           </View>
         </View>
+
+        {/* Row 4: Assigned To and Shipping (hidden for designers) */}
+        {!isDesigner && (
+          <View style={styles.compactRow4}>
+            <View style={styles.compactFieldGroup}>
+              <Text style={styles.compactLabelText}>Assigned to</Text>
+              <Text style={styles.compactValueText} numberOfLines={1}>{assignedTo}</Text>
+            </View>
+            <View style={styles.compactFieldGroup}>
+              <Text style={styles.compactLabelText}>Shipping</Text>
+              <Text style={styles.compactValueText} numberOfLines={1}>
+                {shippingDate !== 'N/A' ? shippingDate : 'N/A'}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Row 5: Metal, Category, Stone type */}
         <View style={styles.compactRow5}>
@@ -756,7 +444,15 @@ export const CompactEnquiryCard = ({
           </View>
         </View>
 
-        {/* Row 6: Price (only for client) */}
+        {/* Row 6: Created Date (moved down) */}
+        <View style={styles.compactRow3}>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Created</Text>
+            <Text style={styles.compactValueText}>{createdDate}</Text>
+          </View>
+        </View>
+
+        {/* Row 7: Price (only for client) */}
         {showPrice && (
           <View style={styles.compactRow6}>
             <Text style={styles.compactPriceLabel}>Price</Text>
@@ -781,16 +477,37 @@ export const CompactEnquiryCard = ({
   );
 };
 
-// Memoize the component to prevent unnecessary re-renders on scroll
+// Optimized memoization - only re-render when essential data changes
 export const CompactEnquiryCardMemo = memo(CompactEnquiryCard, (prevProps, nextProps) => {
-  // Only re-render if enquiry data actually changed
-  return (
-    prevProps.enquiry?.id === nextProps.enquiry?.id &&
-    prevProps.enquiry?.status === nextProps.enquiry?.status &&
-    prevProps.enquiry?.priority === nextProps.enquiry?.priority &&
-    JSON.stringify(prevProps.enquiry?.ReferenceImages) === JSON.stringify(nextProps.enquiry?.ReferenceImages) &&
-    JSON.stringify(prevProps.enquiry?._originalData?.ReferenceImages) === JSON.stringify(nextProps.enquiry?._originalData?.ReferenceImages)
-  );
+  // Fast path: same reference means no change
+  if (prevProps.enquiry === nextProps.enquiry) {
+    return true;
+  }
+
+  // Check essential fields only (avoid expensive JSON.stringify)
+  const prevId = prevProps.enquiry?.id || prevProps.enquiry?._id;
+  const nextId = nextProps.enquiry?.id || nextProps.enquiry?._id;
+  
+  if (prevId !== nextId) return false;
+  if (prevProps.enquiry?.status !== nextProps.enquiry?.status) return false;
+  if (prevProps.enquiry?.priority !== nextProps.enquiry?.priority) return false;
+  
+  // Check ReferenceImages length (cheaper than full comparison)
+  const prevImages = prevProps.enquiry?._originalData?.ReferenceImages || prevProps.enquiry?.ReferenceImages || [];
+  const nextImages = nextProps.enquiry?._originalData?.ReferenceImages || nextProps.enquiry?.ReferenceImages || [];
+  
+  if (prevImages.length !== nextImages.length) return false;
+  
+  // Only compare last image (the one we display)
+  if (prevImages.length > 0 && nextImages.length > 0) {
+    const prevLast = prevImages[prevImages.length - 1];
+    const nextLast = nextImages[nextImages.length - 1];
+    const prevKey = prevLast?.Key || prevLast?.key || prevLast?.Id || prevLast?.id || '';
+    const nextKey = nextLast?.Key || nextLast?.key || nextLast?.Id || nextLast?.id || '';
+    if (prevKey !== nextKey) return false;
+  }
+  
+  return true;
 });
 
 export const EnquiryCard = ({
@@ -1322,11 +1039,11 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: colors.textSecondary,
   },
-  // Row 4: Shipping
+  // Row 4: Assigned To and Shipping
   compactRow4: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginBottom: 6,
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
   // Row 5: Metal, Category, Stone type
   compactRow5: {

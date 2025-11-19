@@ -5,6 +5,7 @@
 import 'react-native-gesture-handler';
 import * as Sentry from '@sentry/react-native';
 import { AppRegistry } from 'react-native';
+import messaging from '@react-native-firebase/messaging';
 import App from './App';
 import { name as appName } from './app.json';
 
@@ -23,5 +24,9 @@ try {
   // If Sentry fails to initialize, log but don't crash the app
   console.warn('Sentry initialization failed (app will continue without error tracking):', error?.message || error);
 }
+
+messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+  console.log('📩 Push message handled in the background:', remoteMessage?.messageId || 'unknown');
+});
 
 AppRegistry.registerComponent(appName, () => App);

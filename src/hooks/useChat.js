@@ -11,11 +11,39 @@ import { API_BASE_URL } from '../config/apiConfig';
  * @param {string} enquiryId - The enquiry ID
  * @param {string} chatType - 'admin-client' or 'admin-designer'
  * @param {string} chatId - Optional: Direct chat ID to use (if available, skips search)
+ * @param {object} initialChat - Optional: Initial chat object (e.g., routeChat) to use immediately
  * @returns {object} Chat state and methods
  */
-export const useChat = (enquiryId, chatType, chatId = null) => {
+export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) => {
   const { user } = useAuth();
-  const [chat, setChat] = useState(null);
+  // Initialize chat state with initialChat or chatId if provided (for immediate message loading)
+  const [chat, setChat] = useState(() => {
+    // If we have initialChat with an ID, use it immediately
+    if (initialChat && (initialChat._id || initialChat.id)) {
+      const chatIdValue = initialChat._id || initialChat.id;
+      if (__DEV__) {
+        console.log('✅ Using initialChat:', chatIdValue);
+      }
+      return {
+        ...initialChat,
+        _id: chatIdValue,
+        id: chatIdValue,
+      };
+    }
+    // Otherwise, create minimal chat object with chatId if provided
+    if (chatId) {
+      if (__DEV__) {
+        console.log('✅ Initializing chat with chatId:', chatId);
+      }
+      return {
+        _id: chatId,
+        id: chatId,
+        EnquiryId: enquiryId,
+        Type: chatType,
+      };
+    }
+    return null;
+  });
   const [messages, setMessages] = useState([]);
   const [isLoadingChat, setIsLoadingChat] = useState(true);
   const [chatError, setChatError] = useState(null);
@@ -50,9 +78,25 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
 
   // Fetch chat by enquiry ID
   const fetchChat = useCallback(async () => {
-    if (!enquiryId || !user) return;
-    const type = getChatType();
-    if (!type) return;
+    if (!enquiryId || !user) {
+      if (__DEV__) {
+        console.log('⚠️ fetchChat skipped - missing enquiryId or user:', { enquiryId, hasUser: !!user });
+      }
+      return;
+    }
+    
+    // Use getChatType() to determine type if chatType is not provided
+    const type = chatType || getChatType();
+    if (!type) {
+      if (__DEV__) {
+        console.warn('⚠️ fetchChat skipped - could not determine chat type');
+      }
+      return;
+    }
+
+    if (__DEV__) {
+      console.log('🔍 fetchChat called:', { enquiryId, chatId, chatType, resolvedType: type });
+    }
 
     setIsLoadingChat(true);
     setChatError(null);
@@ -63,6 +107,9 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       // If we have a direct chatId, fetch that specific chat first
       if (chatId) {
         try {
+          if (__DEV__) {
+            console.log('🔍 Fetching chat by ID:', chatId);
+          }
           const chatResponse = await fetch(`${API_BASE_URL}/api/chats/${chatId}`, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -75,12 +122,22 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
             const foundChat = chatData.Data || chatData.data || chatData;
             
             if (foundChat && (foundChat._id || foundChat.id)) {
+              const chatIdValue = foundChat._id || foundChat.id;
               if (__DEV__) {
-                console.log('✅ Chat found by ID:', foundChat);
+                console.log('✅ Chat found by ID:', { chatId: chatIdValue, chat: foundChat });
               }
-              setChat(foundChat);
+              // Ensure _id is set
+              setChat({ ...foundChat, _id: chatIdValue, id: chatIdValue });
               setIsLoadingChat(false);
               return;
+            } else {
+              if (__DEV__) {
+                console.warn('⚠️ Chat response OK but no _id found:', foundChat);
+              }
+            }
+          } else {
+            if (__DEV__) {
+              console.warn('⚠️ Chat fetch by ID failed:', chatResponse.status, chatResponse.statusText);
             }
           }
         } catch (chatIdError) {
@@ -97,6 +154,10 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
         limit: '50',
       });
 
+      if (__DEV__) {
+        console.log('🔍 Searching chats by enquiry ID:', { type, enquiryId });
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/chats?${searchParams.toString()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -108,6 +169,13 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
         const result = await response.json();
         const chats = result.Data || result.data || result;
         
+        if (__DEV__) {
+          console.log('📋 Chats search result:', { 
+            chatsCount: Array.isArray(chats) ? chats.length : 'not array',
+            chats: Array.isArray(chats) ? chats.map(c => ({ id: c._id || c.id, type: c.Type || c.type })) : chats
+          });
+        }
+        
         let foundChat = null;
         
         // Try to find by chatId first
@@ -116,65 +184,120 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
             const cId = chat._id || chat.id;
             return String(cId).trim() === String(chatId).trim();
           });
+          if (foundChat && __DEV__) {
+            console.log('✅ Found chat by chatId in search results');
+          }
         }
         
         // Fallback to finding by enquiryId
         if (!foundChat && Array.isArray(chats)) {
           foundChat = chats.find(chat => {
             const chatEnquiryId = chat.EnquiryId || chat.enquiryId;
+            const chatTypeValue = chat.Type || chat.type;
             return String(chatEnquiryId).trim() === String(enquiryId).trim() &&
-                   (chat.Type || chat.type) === type;
+                   String(chatTypeValue).trim() === String(type).trim();
           });
+          if (foundChat && __DEV__) {
+            console.log('✅ Found chat by enquiryId and type in search results');
+          }
         }
 
         if (foundChat) {
+          const chatIdValue = foundChat._id || foundChat.id;
           if (__DEV__) {
-            console.log('✅ Chat found by enquiry ID:', foundChat);
+            console.log('✅ Chat found by enquiry ID:', { chatId: chatIdValue, chat: foundChat });
           }
-          setChat(foundChat);
+          // Ensure _id is set
+          setChat({ ...foundChat, _id: chatIdValue, id: chatIdValue });
           setIsLoadingChat(false);
           return;
+        } else {
+          if (__DEV__) {
+            console.warn('⚠️ No chat found in search results');
+          }
+        }
+      } else {
+        if (__DEV__) {
+          console.warn('⚠️ Chat search failed:', response.status, response.statusText);
         }
       }
 
-      // Create virtual chat if not found
-      const virtualChat = {
-        _id: chatId || null,
-        EnquiryId: enquiryId,
-        EnquiryName: 'New Chat',
-        Type: type,
-        CreatedAt: new Date().toISOString(),
-      };
-      setChat(virtualChat);
-      setChatError(null);
+      // Create virtual chat if not found (but only if we have a chatId)
+      // Without a real chatId, we can't load messages anyway
+      if (chatId) {
+        if (__DEV__) {
+          console.log('📝 Creating virtual chat with chatId:', chatId);
+        }
+        const virtualChat = {
+          _id: chatId,
+          id: chatId,
+          EnquiryId: enquiryId,
+          EnquiryName: 'New Chat',
+          Type: type,
+          CreatedAt: new Date().toISOString(),
+        };
+        setChat(virtualChat);
+        setChatError(null);
+      } else {
+        if (__DEV__) {
+          console.warn('⚠️ Cannot create virtual chat - no chatId provided');
+        }
+        setChat(null);
+        setChatError('Chat not found and no chatId provided');
+      }
       
     } catch (error) {
       if (__DEV__) {
         console.error('❌ Error fetching chat:', error);
       }
-      const fallbackChat = {
-        _id: chatId || null,
-        EnquiryId: enquiryId,
-        EnquiryName: 'Chat',
-        Type: getChatType(),
-        CreatedAt: new Date().toISOString(),
-      };
-      setChat(fallbackChat);
-      setChatError(null);
+      // Only create fallback if we have a chatId
+      if (chatId) {
+        const fallbackChat = {
+          _id: chatId,
+          id: chatId,
+          EnquiryId: enquiryId,
+          EnquiryName: 'Chat',
+          Type: type,
+          CreatedAt: new Date().toISOString(),
+        };
+        setChat(fallbackChat);
+      } else {
+        setChat(null);
+      }
+      setChatError(error.message || 'Failed to fetch chat');
     } finally {
       setIsLoadingChat(false);
     }
-  }, [enquiryId, user, getChatType, chatId]);
+  }, [enquiryId, user, chatId, chatType, getChatType]);
 
   // Load messages from API - RTK Query handles caching automatically
+  // Use both _id and id to handle different response formats
+  // Also use chatId parameter directly if chat state isn't ready yet (for immediate loading)
+  const chatIdForQuery = chat?._id || chat?.id || chatId || (initialChat?._id || initialChat?.id);
   const { data: apiMessages, isLoading: messagesLoading, refetch: refetchMessages, error: messagesError } = useGetChatMessagesQuery(
-    { chatId: chat?._id, limit: 20 },
+    { chatId: chatIdForQuery, limit: 20 },
     {
-      skip: !chat?._id,
+      skip: !chatIdForQuery,
       refetchOnFocus: true, // Refetch when screen is focused
       refetchOnMountOrArgChange: true, // Refetch when chatId changes
     }
   );
+
+  // Debug logging for messages query
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('📨 Messages Query State:', {
+        chatId: chatIdForQuery,
+        chatIdForQuery,
+        chatHasId: !!chat?._id,
+        chatHasIdAlt: !!chat?.id,
+        skip: !chatIdForQuery,
+        isLoading: messagesLoading,
+        messagesCount: apiMessages?.length || 0,
+        error: messagesError ? { message: messagesError.message, data: messagesError.data } : null,
+      });
+    }
+  }, [chatIdForQuery, messagesLoading, apiMessages?.length, messagesError]);
 
   const refetchMessagesRef = useRef(refetchMessages);
   useEffect(() => {
@@ -190,7 +313,8 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     // Debug logging
       if (__DEV__) {
       console.log('🔍 Message Effect Trigger:', {
-        chatId: chat?._id,
+        chatId: chatIdForQuery,
+        chatIdForQuery,
         apiMessagesType: typeof apiMessages,
         apiMessagesIsArray: Array.isArray(apiMessages),
         apiMessagesLength: apiMessages?.length || 0,
@@ -201,7 +325,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       });
     }
 
-    if (!chat?._id) {
+    if (!chatIdForQuery) {
       if (messages.length > 0) {
         setMessages([]);
       }
@@ -211,12 +335,12 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     }
 
     // Track chat changes
-    const chatChanged = lastChatIdRef.current !== chat._id;
+    const chatChanged = lastChatIdRef.current !== chatIdForQuery;
     if (chatChanged) {
-      lastChatIdRef.current = chat._id;
+      lastChatIdRef.current = chatIdForQuery;
       lastApiMessagesRef.current = null; // Always reset on chat change
       if (__DEV__) {
-        console.log('🔄 Chat changed:', chat._id);
+        console.log('🔄 Chat changed:', chatIdForQuery);
       }
     }
 
@@ -304,17 +428,17 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
         setNextCursor(null);
       }
     }
-  }, [apiMessages, chat?._id]);
+  }, [apiMessages, chatIdForQuery]);
 
   // Socket connection and event handlers
   useEffect(() => {
-    if (!chat?._id || !user) return;
+    if (!chatIdForQuery || !user) return;
 
     const setupSocket = async () => {
     if (!socketService.isConnected()) {
       try {
           if (__DEV__) {
-            console.log('🔌 Connecting to socket for chat:', chat._id);
+            console.log('🔌 Connecting to socket for chat:', chatIdForQuery);
           }
           await socketService.connect(user.id);
           if (__DEV__) {
@@ -327,11 +451,11 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       }
     }
 
-      if (socketService.isConnected() && chat._id) {
+      if (socketService.isConnected() && chatIdForQuery) {
         if (__DEV__) {
-          console.log('🚪 Joining chat room:', chat._id);
+          console.log('🚪 Joining chat room:', chatIdForQuery);
         }
-    socketService.joinChat(chat._id, user.id);
+    socketService.joinChat(chatIdForQuery, user.id);
       }
     };
 
@@ -343,7 +467,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       }
       
       const messageChatId = String(message.ChatId || message.chatId || message.EnquiryId || message.enquiryId || '').trim();
-      const currentChatId = String(chat._id || '').trim();
+      const currentChatId = String(chatIdForQuery || '').trim();
       
       if (messageChatId !== currentChatId) {
       if (__DEV__) {
@@ -443,7 +567,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     };
 
     const handleMessagesRead = (data) => {
-      if (data.chatId === chat._id) {
+      if (data.chatId === chatIdForQuery) {
         setMessages(prev => prev.map(msg => {
           if (data.userIds && data.userIds.includes(msg.SenderId || msg.senderId)) {
             return { ...msg, IsRead: true, isRead: true };
@@ -454,7 +578,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     };
 
     const handleUserTyping = (data) => {
-      if (data.userId !== user.id && data.chatId === chat._id) {
+      if (data.userId !== user.id && data.chatId === chatIdForQuery) {
         setIsTyping(data.isTyping);
         if (typingTimeoutRef.current) {
           clearTimeout(typingTimeoutRef.current);
@@ -473,7 +597,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     socketService.on('userTyping', handleUserTyping);
     
     if (__DEV__) {
-      console.log('✅ Registered WebSocket listeners for chat:', chat._id);
+      console.log('✅ Registered WebSocket listeners for chat:', chatIdForQuery);
     }
 
     // Cleanup
@@ -482,11 +606,11 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       socketService.off('messagesRead', handleMessagesRead);
       socketService.off('userTyping', handleUserTyping);
       
-      if (chat?._id) {
-        socketService.leaveChat(chat._id, user.id);
+      if (chatIdForQuery) {
+        socketService.leaveChat(chatIdForQuery, user.id);
       }
     };
-  }, [chat?._id, user]);
+  }, [chatIdForQuery, user]);
 
   // Send message
   const sendMessage = useCallback(async (messageText, replyTo = null) => {
@@ -494,13 +618,13 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       return false;
     }
 
-    let actualChatId = chat._id;
+    let actualChatId = chatIdForQuery;
     
     // If chat doesn't exist yet, try to find/create it
     if (!actualChatId) {
       try {
         const token = await AsyncStorage.getItem('token');
-        const type = getChatType();
+        const type = chatType;
         const searchParams = new URLSearchParams({
           type: type,
           search: enquiryId,
@@ -604,11 +728,11 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     }, 2000);
 
     return true;
-  }, [chat, user, enquiryId, getChatType]);
+  }, [chat, chatIdForQuery, user, enquiryId, chatType]);
 
   // Send media
   const sendMedia = useCallback(async (file) => {
-    if (!file || !chat?._id || !user) {
+    if (!file || !chatIdForQuery || !user) {
       return false;
     }
 
@@ -633,7 +757,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       const mediaKey = uploadResult.key || uploadResult.Key || mediaUrl;
 
       const sent = socketService.sendMessage({
-        chatId: chat._id,
+        chatId: chatIdForQuery,
         userId: user.id,
         message: mediaName,
         messageType: messageType,
@@ -667,17 +791,17 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       }
       return false;
     }
-  }, [chat?._id, user, uploadChatMedia]);
+  }, [chatIdForQuery, user, uploadChatMedia]);
 
   // Send typing indicator
   const sendTyping = useCallback((isTyping) => {
-    if (!chat?._id || !user) return;
-    socketService.sendTyping(chat._id, user.id, isTyping);
-  }, [chat?._id, user]);
+    if (!chatIdForQuery || !user) return;
+    socketService.sendTyping(chatIdForQuery, user.id, isTyping);
+  }, [chatIdForQuery, user]);
 
   // Load more messages (pagination)
   const loadMoreMessages = useCallback(async () => {
-    if (!chat?._id || !nextCursor || isLoadingMore || messagesLoading) {
+    if (!chatIdForQuery || !nextCursor || isLoadingMore || messagesLoading) {
       return false;
     }
 
@@ -686,7 +810,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
     try {
       const token = await AsyncStorage.getItem('token');
       const response = await fetch(
-        `${API_BASE_URL}/api/message/${chat._id}/messages?before=${nextCursor}&limit=20`,
+        `${API_BASE_URL}/api/message/${chatIdForQuery}/messages?before=${nextCursor}&limit=20`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -742,7 +866,41 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       setIsLoadingMore(false);
       return false;
     }
-  }, [chat?._id, nextCursor, isLoadingMore, messagesLoading]);
+  }, [chatIdForQuery, nextCursor, isLoadingMore, messagesLoading]);
+
+  // Update chat when chatId or initialChat changes (e.g., when navigating with routeChat)
+  useEffect(() => {
+    // If initialChat is provided and different from current chat, use it
+    if (initialChat && (initialChat._id || initialChat.id)) {
+      const initialChatId = initialChat._id || initialChat.id;
+      if (!chat?._id || chat._id !== initialChatId) {
+        if (__DEV__) {
+          console.log('🔄 initialChat changed, updating chat state:', initialChatId);
+        }
+        setChat({
+          ...initialChat,
+          _id: initialChatId,
+          id: initialChatId,
+        });
+        return;
+      }
+    }
+    
+    // Otherwise, update chat with chatId if it changed
+    if (chatId && (!chat?._id || chat._id !== chatId)) {
+      if (__DEV__) {
+        console.log('🔄 chatId changed, updating chat state:', chatId);
+      }
+      // Update chat with chatId immediately so messages can load
+      setChat(prev => ({
+        ...prev,
+        _id: chatId,
+        id: chatId,
+        EnquiryId: enquiryId || prev?.EnquiryId,
+        Type: chatType || prev?.Type,
+      }));
+    }
+  }, [chatId, initialChat, enquiryId, chatType, chat?._id]);
 
   // Load chat on mount
   useEffect(() => {
@@ -754,19 +912,19 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
   // Force refetch when chat is loaded and messages are empty (remount scenario)
   const forceRefetchDoneRef = useRef(null);
   useEffect(() => {
-    if (!chat?._id) return;
+    if (!chatIdForQuery) return;
     
     // Reset ref when chat changes
-    if (forceRefetchDoneRef.current !== chat._id && forceRefetchDoneRef.current !== null) {
+    if (forceRefetchDoneRef.current !== chatIdForQuery && forceRefetchDoneRef.current !== null) {
       forceRefetchDoneRef.current = null;
     }
     
     // Force refetch if messages are empty and query is not loading
     // This handles the remount scenario where component remounts with empty state
-    if (messages.length === 0 && !messagesLoading && forceRefetchDoneRef.current !== chat._id) {
+    if (messages.length === 0 && !messagesLoading && forceRefetchDoneRef.current !== chatIdForQuery) {
       if (__DEV__) {
         console.log('🔄 Force refetch triggered - empty messages detected:', {
-          chatId: chat._id,
+          chatId: chatIdForQuery,
           messagesLoading,
           apiMessages: apiMessages?.length || 0,
         });
@@ -778,7 +936,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
           const refetchFn = refetchMessagesRef.current;
           if (refetchFn && typeof refetchFn === 'function') {
             if (__DEV__) {
-              console.log('🔄 Executing force refetch for chat:', chat._id);
+              console.log('🔄 Executing force refetch for chat:', chatIdForQuery);
             }
             refetchFn().then(() => {
               if (__DEV__) {
@@ -789,7 +947,7 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
                 console.warn('⚠️ Force refetch failed:', err.message);
               }
             });
-            forceRefetchDoneRef.current = chat._id; // Mark as done for this chat
+            forceRefetchDoneRef.current = chatIdForQuery; // Mark as done for this chat
           } else {
             if (__DEV__) {
               console.warn('⚠️ Refetch function not available');
@@ -803,20 +961,20 @@ export const useChat = (enquiryId, chatType, chatId = null) => {
       }, 500); // Increased delay to ensure query is initialized
       return () => clearTimeout(timer);
     }
-  }, [chat?._id, messages.length, messagesLoading, apiMessages]);
+  }, [chatIdForQuery, messages.length, messagesLoading, apiMessages]);
 
   // Debug: Log messages state changes
   useEffect(() => {
     if (__DEV__) {
       console.log('📊 MESSAGES STATE:', {
         count: messages.length,
-        chatId: chat?._id,
+        chatId: chatIdForQuery,
         apiMessagesCount: apiMessages?.length || 0,
         messagesLoading,
         sample: messages.length > 0 ? messages[0] : null,
       });
     }
-  }, [messages.length, chat?._id, apiMessages?.length, messagesLoading]);
+  }, [messages.length, chatIdForQuery, apiMessages?.length, messagesLoading]);
 
   return {
     chat,

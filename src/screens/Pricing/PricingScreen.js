@@ -237,6 +237,9 @@ const PricingScreen = ({ route, navigation }) => {
   // Save pricing mutation
   const [savePricing, { isLoading: isSaving }] = useSavePricingMutation();
   
+  // Sync client pricing loading state
+  const [isSyncing, setIsSyncing] = useState(false);
+  
   // Determine metal type from enquiry (default to gold)
   const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
   const metalType = metalColor.toLowerCase().includes('gold') ? 'gold' 
@@ -1308,9 +1311,177 @@ const PricingScreen = ({ route, navigation }) => {
     }
   };
 
-  const handleSyncClientPricing = () => {
-    // TODO: Implement sync functionality
-    Alert.alert('Info', 'Sync Client Pricing functionality will be implemented');
+  const handleSyncClientPricing = async () => {
+    setIsSyncing(true);
+    try {
+      // Get clientId from multiple possible sources
+      const clientId = enquiry?.clientId || 
+                       enquiry?.ClientId || 
+                       originalData?.clientId || 
+                       originalData?.ClientId ||
+                       null;
+
+      if (!clientId) {
+        Alert.alert(
+          'Missing Client ID',
+          'Client ID is required for syncing client pricing. Please ensure the enquiry has a valid client assigned.'
+        );
+        return;
+      }
+
+      // Get metal details from enquiry
+      const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
+      const metalQuality = originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '24K';
+      const metalWeight = parseFloat(formData.metalWeight) || 0;
+
+      // Format stones array according to API specification
+      const formattedStones = stones.map(stone => ({
+        Type: stone.Type || '',
+        Color: stone.Color || '',
+        Shape: stone.Shape || '',
+        MmSize: stone.MM || '0',
+        SieveSize: stone.Sieve || '0',
+        CtWeight: parseFloat(stone.CaratWeight) || 0,
+        Weight: parseFloat(stone.Weight) || 0,
+        Pcs: parseInt(stone.Pieces) || 0,
+        Price: parseFloat(stone.Price) || 0,
+      })).filter(stone => stone.Type); // Only include stones with Type
+
+      // Build payload according to API specification
+      const payload = {
+        clientId: clientId,
+        details: {
+          Metal: {
+            Weight: metalWeight,
+            Quality: metalQuality,
+          },
+          Stones: formattedStones,
+          Loss: parseFloat(formData.lossPercent) || 0,
+          Labour: parseFloat(formData.labour) || 0,
+          ExtraCharges: parseFloat(formData.extraCharges) || 0,
+          Duties: parseFloat(formData.duties) || 0,
+          Quantity: parseInt(formData.totalPieces) || 1,
+        },
+      };
+
+      if (__DEV__) {
+        console.log('🔄 ========== SYNC CLIENT PRICING ==========');
+        console.log('Client ID:', clientId);
+        console.log('Payload:', JSON.stringify(payload, null, 2));
+        console.log('===========================================');
+      }
+
+      // Call API to sync client pricing
+      const response = await calculatePricing(payload).unwrap();
+
+      if (__DEV__) {
+        console.log('✅ Sync Client Pricing Response:', response);
+      }
+
+      // Update form data with response
+      if (response) {
+        // Update metal price
+        if (response.MetalPrice !== undefined) {
+          setFormData(prev => ({
+            ...prev,
+            metalPrice: response.MetalPrice.toString(),
+          }));
+        }
+
+        // Update diamonds price
+        if (response.DiamondsPrice !== undefined) {
+          setFormData(prev => ({
+            ...prev,
+            diamondPrice: response.DiamondsPrice.toString(),
+          }));
+        }
+
+        // Update total price
+        if (response.TotalPrice !== undefined) {
+          setFormData(prev => ({
+            ...prev,
+            totalPrice: response.TotalPrice.toString(),
+          }));
+        }
+
+        // Update metal weight and rate if provided
+        if (response.Metal) {
+          if (response.Metal.Weight !== undefined) {
+            setFormData(prev => ({
+              ...prev,
+              metalWeight: response.Metal.Weight.toString(),
+            }));
+          }
+          if (response.Metal.Rate !== undefined) {
+            setMetalRateConsidered(parseFloat(response.Metal.Rate) || 0);
+          }
+        }
+
+        // Update diamond weight
+        if (response.DiamondWeight !== undefined) {
+          setFormData(prev => ({
+            ...prev,
+            diamondWeight: response.DiamondWeight.toString(),
+          }));
+        }
+
+        // Update client-specific charges if provided
+        if (response.Client) {
+          if (response.Client.Loss !== undefined) {
+            setFormData(prev => ({
+              ...prev,
+              lossPercent: response.Client.Loss.toString(),
+            }));
+          }
+          if (response.Client.Labour !== undefined) {
+            setFormData(prev => ({
+              ...prev,
+              labour: response.Client.Labour.toString(),
+            }));
+          }
+          if (response.Client.ExtraCharges !== undefined) {
+            setFormData(prev => ({
+              ...prev,
+              extraCharges: response.Client.ExtraCharges.toString(),
+            }));
+          }
+          if (response.Client.Duties !== undefined) {
+            setFormData(prev => ({
+              ...prev,
+              duties: response.Client.Duties.toString(),
+            }));
+          }
+        }
+
+        // Update stones if provided
+        if (response.Stones && Array.isArray(response.Stones) && response.Stones.length > 0) {
+          const normalizedStones = normalizeStones(response.Stones);
+          setStones(normalizedStones);
+        }
+
+        Alert.alert(
+          'Success',
+          'Client pricing synced successfully. The form has been updated with client-specific pricing.'
+        );
+      } else {
+        Alert.alert('Warning', 'No pricing data received from server.');
+      }
+    } catch (error) {
+      console.error('❌ Error syncing client pricing:', error);
+      
+      let errorMessage = 'Failed to sync client pricing. Please try again.';
+      if (error?.data?.message) {
+        errorMessage = error.data.message;
+      } else if (error?.data?.error) {
+        errorMessage = error.data.error;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      Alert.alert('Sync Failed', errorMessage);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   return (
@@ -1710,12 +1881,15 @@ const PricingScreen = ({ route, navigation }) => {
 
             <TouchableOpacity
               onPress={handleSyncClientPricing}
-              style={[styles.actionBtn, styles.syncBtn]}
+              disabled={isSyncing}
+              style={[styles.actionBtn, styles.syncBtn, isSyncing && styles.btnDisabled]}
               activeOpacity={0.8}
             >
               <View style={styles.btnContent}>
                 <Icon name="sync" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>Sync Client Pricing</Text>
+                <Text style={styles.btnText}>
+                  {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
+                </Text>
             </View>
             </TouchableOpacity>
 

@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import StackNavigator from './StackNavigator';
 import { AnimatedLogoLoader } from '../components/common';
+import { navigationRef } from './navigationRef';
 
 const AppNavigator = () => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -14,7 +15,7 @@ const AppNavigator = () => {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <StackNavigator isAuthenticated={isAuthenticated} />
     </NavigationContainer>
   );

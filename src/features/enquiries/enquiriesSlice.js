@@ -4,6 +4,18 @@ const initialState = {
   filters: {
     status: 'all',
     priority: 'all',
+    category: 'all',
+    clientId: 'all',
+    assignedTo: 'all',
+    stoneType: 'all',
+    metalColor: 'all',
+    metalQuality: 'all',
+    shippingDateFrom: '',
+    shippingDateTo: '',
+    assignedDateFrom: '',
+    assignedDateTo: '',
+    createdDateFrom: '',
+    createdDateTo: '',
   },
   searchQuery: '',
   sortBy: 'createdAt',
@@ -48,6 +60,18 @@ const enquiriesSlice = createSlice({
       state.filters = {
         status: 'all',
         priority: 'all',
+        category: 'all',
+        clientId: 'all',
+        assignedTo: 'all',
+        stoneType: 'all',
+        metalColor: 'all',
+        metalQuality: 'all',
+        shippingDateFrom: '',
+        shippingDateTo: '',
+        assignedDateFrom: '',
+        assignedDateTo: '',
+        createdDateFrom: '',
+        createdDateTo: '',
       };
       state.searchQuery = '';
       state.selectedStatus = 'All';

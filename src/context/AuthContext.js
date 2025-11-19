@@ -3,6 +3,8 @@ import { useSelector, useDispatch } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decodeJWT } from '../utils/helpers';
 import { checkAuthState, logoutUser } from '../features/auth/authThunks';
+import { useRemovePushTokenMutation } from '../store/api';
+import { getStoredPushToken, clearStoredPushToken } from '../services/pushNotificationService';
 
 const AuthContext = createContext();
 
@@ -16,6 +18,7 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const dispatch = useDispatch();
+  const [removePushToken] = useRemovePushTokenMutation();
   // Get auth state from Redux (single source of truth)
   const { user: reduxUser, token: reduxToken, isAuthenticated: reduxIsAuthenticated, isLoading: reduxIsLoading } = useSelector((state) => state.auth);
   
@@ -77,9 +80,23 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await dispatch(logoutUser()).unwrap();
-    } catch (error) {
-      console.error('Logout error:', error);
+      const storedPushToken = await getStoredPushToken();
+      if (storedPushToken) {
+        try {
+          await removePushToken({ token: storedPushToken }).unwrap();
+        } catch (error) {
+          console.warn('Failed to unregister push token:', error?.message || error);
+        }
+      }
+      await clearStoredPushToken();
+    } catch (err) {
+      console.warn('Error cleaning up push token on logout:', err?.message || err);
+    } finally {
+      try {
+        await dispatch(logoutUser()).unwrap();
+      } catch (error) {
+        console.error('Logout error:', error);
+      }
     }
   };
 

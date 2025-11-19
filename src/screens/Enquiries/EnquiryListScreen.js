@@ -179,12 +179,6 @@ const EnquiryListScreen = ({ navigation }) => {
               
               if (clientName) {
                 finalClientName = clientName;
-                if (__DEV__ && enquiries.indexOf(enquiry) === 0) {
-                  console.log('Enriched enquiry with client name:', {
-                    clientId: enquiry.clientId,
-                    clientName: finalClientName
-                  });
-                }
               }
             }
             return { ...enquiry, clientName: finalClientName };
@@ -213,7 +207,89 @@ const EnquiryListScreen = ({ navigation }) => {
         return Array.isArray(filteredEnquiries) ? filteredEnquiries : [];
       }
 
+      // Start with a copy and ensure consistent initial order
       let filtered = [...enrichedEnquiries];
+      
+      // IMPORTANT: Sort FIRST before filtering to ensure consistent order
+      // This ensures that even if API returns data in different order, we always start with sorted data
+      filtered.sort((a, b) => {
+        let aValue, bValue;
+        
+        switch (sortBy) {
+          case 'title':
+            aValue = a.title || a.Name || a.name || '';
+            bValue = b.title || b.Name || b.name || '';
+            break;
+          case 'clientName':
+            aValue = a.clientName || a.ClientName || a.client || '';
+            bValue = b.clientName || b.ClientName || b.client || '';
+            break;
+          case 'budget':
+            aValue = a.budget || a.Budget || a.estimatedPrice || 0;
+            bValue = b.budget || b.Budget || b.estimatedPrice || 0;
+            break;
+          case 'status':
+            aValue = a.status || a.Status || a.CurrentStatus || '';
+            bValue = b.status || b.Status || b.CurrentStatus || '';
+            break;
+          case 'createdAt':
+            aValue = a.createdAt || a.CreatedDate || a.createdDate || a.CreatedAt || '';
+            bValue = b.createdAt || b.CreatedDate || b.createdDate || b.CreatedAt || '';
+            break;
+          case 'updatedAt':
+            aValue = a.updatedAt || a.UpdatedDate || a.updatedDate || a.UpdatedAt || '';
+            bValue = b.updatedAt || b.UpdatedDate || b.updatedDate || b.UpdatedAt || '';
+            break;
+          default:
+            aValue = a[sortBy] || '';
+            bValue = b[sortBy] || '';
+        }
+        
+        if (aValue == null) aValue = '';
+        if (bValue == null) bValue = '';
+        
+        if (sortBy === 'createdAt' || sortBy === 'updatedAt') {
+          aValue = aValue ? new Date(aValue).getTime() : 0;
+          bValue = bValue ? new Date(bValue).getTime() : 0;
+        } else if (sortBy === 'budget') {
+          aValue = parseFloat(aValue) || 0;
+          bValue = parseFloat(bValue) || 0;
+        } else if (typeof aValue === 'string') {
+          aValue = aValue.toLowerCase();
+          bValue = bValue.toLowerCase();
+        }
+        
+        // CRITICAL: Use proper comparison based on value type
+        let comparison = 0;
+        if (sortOrder === 'asc') {
+          if (typeof aValue === 'number') {
+            comparison = aValue - bValue;
+          } else if (typeof aValue === 'string') {
+            comparison = aValue.localeCompare(bValue);
+          } else {
+            if (aValue < bValue) comparison = -1;
+            else if (aValue > bValue) comparison = 1;
+          }
+        } else {
+          if (typeof aValue === 'number') {
+            comparison = bValue - aValue;
+          } else if (typeof aValue === 'string') {
+            comparison = bValue.localeCompare(aValue);
+          } else {
+            if (aValue > bValue) comparison = -1;
+            else if (aValue < bValue) comparison = 1;
+          }
+        }
+        
+        // CRITICAL: Always apply stable secondary sort by ID to prevent order changes
+        if (comparison === 0) {
+          const aId = String(a.id || a._id || '');
+          const bId = String(b.id || b._id || '');
+          return aId.localeCompare(bId);
+        }
+        
+        return comparison;
+      });
     
     // Apply status filter
     if (filters.status && filters.status !== 'all') {
@@ -393,6 +469,107 @@ const EnquiryListScreen = ({ navigation }) => {
       });
     }
     
+    // Apply category filter
+    if (filters.category && filters.category !== 'all') {
+      filtered = filtered.filter(e => {
+        const enquiryCategory = e.category || e.Category || '';
+        return String(enquiryCategory).trim() === String(filters.category).trim();
+      });
+    }
+    
+    // Apply assignedTo filter
+    if (filters.assignedTo && filters.assignedTo !== 'all') {
+      filtered = filtered.filter(e => {
+        const enquiryAssignedTo = e.assignedTo || e.AssignedTo || '';
+        return String(enquiryAssignedTo).trim() === String(filters.assignedTo).trim();
+      });
+    }
+    
+    // Apply stoneType filter
+    if (filters.stoneType && filters.stoneType !== 'all') {
+      filtered = filtered.filter(e => {
+        const enquiryStoneType = e.stoneType || e.StoneType || '';
+        return String(enquiryStoneType).trim() === String(filters.stoneType).trim();
+      });
+    }
+    
+    // Apply metalColor filter
+    if (filters.metalColor && filters.metalColor !== 'all') {
+      filtered = filtered.filter(e => {
+        const metalColor = e.Metal?.Color || e.metal?.color || '';
+        return String(metalColor).trim() === String(filters.metalColor).trim();
+      });
+    }
+    
+    // Apply metalQuality filter
+    if (filters.metalQuality && filters.metalQuality !== 'all') {
+      filtered = filtered.filter(e => {
+        const metalQuality = e.Metal?.Quality || e.metal?.quality || '';
+        return String(metalQuality).trim() === String(filters.metalQuality).trim();
+      });
+    }
+    
+    // Apply date range filters
+    if (filters.shippingDateFrom || filters.shippingDateTo) {
+      filtered = filtered.filter(e => {
+        const shippingDate = e.ShippingDate || e.shippingDate || e.deadline || '';
+        if (!shippingDate) return false;
+        const date = new Date(shippingDate);
+        if (isNaN(date.getTime())) return false;
+        
+        if (filters.shippingDateFrom) {
+          const fromDate = new Date(filters.shippingDateFrom);
+          if (date < fromDate) return false;
+        }
+        if (filters.shippingDateTo) {
+          const toDate = new Date(filters.shippingDateTo);
+          toDate.setHours(23, 59, 59, 999); // Include entire end date
+          if (date > toDate) return false;
+        }
+        return true;
+      });
+    }
+    
+    if (filters.assignedDateFrom || filters.assignedDateTo) {
+      filtered = filtered.filter(e => {
+        const assignedDate = e.AssignedDate || e.assignedDate || '';
+        if (!assignedDate) return false;
+        const date = new Date(assignedDate);
+        if (isNaN(date.getTime())) return false;
+        
+        if (filters.assignedDateFrom) {
+          const fromDate = new Date(filters.assignedDateFrom);
+          if (date < fromDate) return false;
+        }
+        if (filters.assignedDateTo) {
+          const toDate = new Date(filters.assignedDateTo);
+          toDate.setHours(23, 59, 59, 999);
+          if (date > toDate) return false;
+        }
+        return true;
+      });
+    }
+    
+    if (filters.createdDateFrom || filters.createdDateTo) {
+      filtered = filtered.filter(e => {
+        const createdDate = e.createdAt || e.CreatedDate || e.CreatedAt || '';
+        if (!createdDate) return false;
+        const date = new Date(createdDate);
+        if (isNaN(date.getTime())) return false;
+        
+        if (filters.createdDateFrom) {
+          const fromDate = new Date(filters.createdDateFrom);
+          if (date < fromDate) return false;
+        }
+        if (filters.createdDateTo) {
+          const toDate = new Date(filters.createdDateTo);
+          toDate.setHours(23, 59, 59, 999);
+          if (date > toDate) return false;
+        }
+        return true;
+      });
+    }
+    
     // Apply search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -403,74 +580,8 @@ const EnquiryListScreen = ({ navigation }) => {
       );
     }
     
-    // Apply sorting - handle field name variations
-    filtered.sort((a, b) => {
-      let aValue, bValue;
-      
-      // Get values based on sortBy field, handling multiple possible field names
-      switch (sortBy) {
-        case 'title':
-          aValue = a.title || a.Name || a.name || '';
-          bValue = b.title || b.Name || b.name || '';
-          break;
-        case 'clientName':
-          aValue = a.clientName || a.ClientName || a.client || '';
-          bValue = b.clientName || b.ClientName || b.client || '';
-          break;
-        case 'budget':
-          aValue = a.budget || a.Budget || a.estimatedPrice || 0;
-          bValue = b.budget || b.Budget || b.estimatedPrice || 0;
-          break;
-        case 'status':
-          aValue = a.status || a.Status || a.CurrentStatus || '';
-          bValue = b.status || b.Status || b.CurrentStatus || '';
-          break;
-        case 'createdAt':
-          aValue = a.createdAt || a.CreatedDate || a.createdDate || a.CreatedAt || '';
-          bValue = b.createdAt || b.CreatedDate || b.createdDate || b.CreatedAt || '';
-          break;
-        case 'updatedAt':
-          aValue = a.updatedAt || a.UpdatedDate || a.updatedDate || a.UpdatedAt || '';
-          bValue = b.updatedAt || b.UpdatedDate || b.updatedDate || b.UpdatedAt || '';
-          break;
-        default:
-          // Fallback to direct property access
-          aValue = a[sortBy] || '';
-          bValue = b[sortBy] || '';
-      }
-      
-      // Handle null/undefined values
-      if (aValue == null) aValue = '';
-      if (bValue == null) bValue = '';
-      
-      // Handle date sorting
-      if (sortBy === 'createdAt' || sortBy === 'updatedAt') {
-        aValue = aValue ? new Date(aValue).getTime() : 0;
-        bValue = bValue ? new Date(bValue).getTime() : 0;
-      } 
-      // Handle number sorting
-      else if (sortBy === 'budget') {
-        aValue = parseFloat(aValue) || 0;
-        bValue = parseFloat(bValue) || 0;
-      } 
-      // Handle string sorting
-      else if (typeof aValue === 'string') {
-        aValue = aValue.toLowerCase();
-        bValue = bValue.toLowerCase();
-      }
-      
-      // Apply sort order
-      if (sortOrder === 'asc') {
-        if (aValue < bValue) return -1;
-        if (aValue > bValue) return 1;
-        return 0;
-      } else {
-        if (aValue > bValue) return -1;
-        if (aValue < bValue) return 1;
-        return 0;
-      }
-    });
-    
+    // No need to sort again - we already sorted before filtering
+    // Filtering preserves order, so the sorted order is maintained
       return filtered;
     } catch (error) {
       if (__DEV__) {
@@ -479,37 +590,57 @@ const EnquiryListScreen = ({ navigation }) => {
       // Return empty array on error to prevent crash
       return [];
     }
-  }, [enrichedEnquiries, filters, searchQuery, sortBy, sortOrder, filteredEnquiries]);
+  }, [
+    enrichedEnquiries, 
+    filters.status, 
+    filters.priority, 
+    filters.clientId,
+    filters.category,
+    filters.assignedTo,
+    filters.stoneType,
+    filters.metalColor,
+    filters.metalQuality,
+    filters.shippingDateFrom,
+    filters.shippingDateTo,
+    filters.assignedDateFrom,
+    filters.assignedDateTo,
+    filters.createdDateFrom,
+    filters.createdDateTo,
+    searchQuery, 
+    sortBy, 
+    sortOrder, 
+    filteredEnquiries
+  ]);
 
-  // Get unique client list from enriched enquiries
+  // Get all clients from API (not just from current enquiries)
+  // Store both name and ID to prevent duplicates and enable proper key generation
   const clientList = useMemo(() => {
-    if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
+    // Use clients from API instead of deriving from enquiries
+    // This ensures all clients are shown, not just those with enquiries in current list
+    if (!clients || clients.length === 0) {
       return [];
     }
     
-    const clients = Array.from(
-      new Set(
-        enrichedEnquiries
-          .map(e => e.clientName)
-          .filter(name => name && name.trim() !== '' && name !== 'Unknown Client')
-      )
-    ).sort();
-    
-    if (__DEV__) {
-      console.log('Client List Generated:', clients);
-      console.log('Total Enquiries:', enrichedEnquiries.length);
-      console.log('Unique Clients Found:', clients.length);
-      console.log('Client Name Map Size:', clientNameMap.size);
-      console.log('Total Clients from API:', clients?.length || 0);
-      console.log('Sample enriched enquiry:', enrichedEnquiries[0]);
-      if (enrichedEnquiries.length > 0) {
-        const sampleClientIds = enrichedEnquiries.slice(0, 5).map(e => e.clientId);
-        console.log('Sample Client IDs from enquiries:', sampleClientIds);
+    // Create a map to deduplicate by ID (in case of duplicate names)
+    const clientMap = new Map();
+    clients.forEach(client => {
+      const clientId = client.id || client._id;
+      const clientName = client.name || client.Name;
+      
+      if (clientId && clientName && clientName.trim() !== '' && clientName !== 'Unknown Client') {
+        // Use ID as key to prevent duplicates
+        if (!clientMap.has(clientId)) {
+          clientMap.set(clientId, { id: clientId, name: clientName });
+        }
       }
-    }
+    });
     
-    return clients;
-  }, [enrichedEnquiries, clientNameMap]);
+    // Convert to array and sort by name
+    const clientList = Array.from(clientMap.values())
+      .sort((a, b) => a.name.localeCompare(b.name));
+    
+    return clientList;
+  }, [clients]);
 
   // Update filter when route params change
   useEffect(() => {
@@ -517,16 +648,21 @@ const EnquiryListScreen = ({ navigation }) => {
       // Map status filter values from Dashboard to filter format
       // Handle various status name formats from aggregate API
       const statusFilter = route.params.filter.toLowerCase();
+      const isDesigner = user?.role === 'coral' || user?.role === 'cad';
       let mappedStatus = 'all';
       
       if (__DEV__) {
         console.log('🔍 ========== ROUTE PARAMS FILTER ==========');
         console.log('🔍 Route params filter:', route.params.filter);
         console.log('🔍 Status filter (lowercase):', statusFilter);
+        console.log('🔍 Is Designer:', isDesigner);
       }
       
       // Map common status filter values
-      if (statusFilter === 'pending' || statusFilter === 'enquiry created' || 
+      // For designers, 'pending' should map to 'Design Approval Pending'
+      if (statusFilter === 'pending') {
+        mappedStatus = isDesigner ? 'Design Approval Pending' : 'Enquiry Created';
+      } else if (statusFilter === 'enquiry created' || 
           (statusFilter.includes('pending') && !statusFilter.includes('approval') && !statusFilter.includes('cam'))) {
         mappedStatus = 'Enquiry Created';
       } else if (statusFilter === 'approval_pending' || statusFilter === 'design approval pending' || 
@@ -618,9 +754,33 @@ const EnquiryListScreen = ({ navigation }) => {
   }, [route.params?.filterType, route.params?.filter, clients]);
   
   // Reset to page 1 when filters or search change
+  // Use a ref to track previous filter values to prevent unnecessary resets
+  const prevFiltersRef = React.useRef({ category: '', priority: '', clientId: '', stoneType: '', searchQuery: '' });
   useEffect(() => {
-    if (currentPage !== 1) {
+    const currentFilters = {
+      category: filters.category || '',
+      priority: filters.priority || '',
+      clientId: filters.clientId || '',
+      stoneType: filters.stoneType || '',
+      searchQuery: searchQuery || '',
+    };
+    
+    // Check if any filter actually changed
+    const hasChanged = 
+      prevFiltersRef.current.category !== currentFilters.category ||
+      prevFiltersRef.current.priority !== currentFilters.priority ||
+      prevFiltersRef.current.clientId !== currentFilters.clientId ||
+      prevFiltersRef.current.stoneType !== currentFilters.stoneType ||
+      prevFiltersRef.current.searchQuery !== currentFilters.searchQuery;
+    
+    // Only reset page if filters changed and we're not already on page 1
+    if (hasChanged && currentPage !== 1) {
       dispatch(setPage(1));
+    }
+    
+    // Update ref with current values (only if filters changed)
+    if (hasChanged) {
+      prevFiltersRef.current = currentFilters;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.category, filters.priority, filters.clientId, filters.stoneType, searchQuery]);
@@ -660,9 +820,9 @@ const EnquiryListScreen = ({ navigation }) => {
     }
   }, [loading, isLoadingMoreLocal]);
   
-  // Debug: Log loading states
+  // Debug: Log loading states (only on significant changes, not every render)
   useEffect(() => {
-    if (__DEV__) {
+    if (__DEV__ && (loading || isLoadingMore)) {
       console.log('📊 Loading States:', {
         isLoadingMore,
         isLoadingMoreLocal,
@@ -673,7 +833,7 @@ const EnquiryListScreen = ({ navigation }) => {
         enrichedCount: enrichedFilteredEnquiries.length,
       });
     }
-  }, [isLoadingMore, isLoadingMoreLocal, loading, hasMore, currentPage, totalPages, enrichedFilteredEnquiries.length]);
+  }, [isLoadingMore, isLoadingMoreLocal, loading, hasMore, currentPage, totalPages]);
   
   // Render enquiry card item for FlatList
   const renderEnquiryItem = ({ item: enquiry }) => {
@@ -951,10 +1111,10 @@ const EnquiryListScreen = ({ navigation }) => {
 
   const getClientOptions = () => {
     // Use the same clientList logic to ensure consistency
-    const clients = clientList; // Use the already filtered and sorted clientList
+    // clientList now contains objects with {id, name}
     return [
       { label: 'All Clients', value: 'all' },
-      ...clients.map(client => ({ label: client, value: client })),
+      ...clientList.map(client => ({ label: client.name, value: client.id })),
     ];
   };
 
@@ -1102,17 +1262,19 @@ const EnquiryListScreen = ({ navigation }) => {
   };
 
   const renderClientChips = () => {
-    if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
-      return null;
-    }
-    
+    // Show client chips even if no enquiries (clients might not have enquiries yet)
     if (!clientList || clientList.length === 0) {
       return null;
     }
     
-    // Filter out the selected client from available options
-    const allClients = ["All", ...clientList];
-    const availableClients = allClients.filter(client => client !== selectedClient);
+    // Always include "All" in the list, and filter out only non-"All" selected clients
+    const allClients = [{ id: 'all', name: 'All' }, ...clientList];
+    const availableClients = allClients.filter(client => {
+      // Always show "All" option
+      if (client.id === 'all') return true;
+      // Filter out the selected client only if it's not "All"
+      return client.name !== selectedClient;
+    });
     
     return (
       <View style={styles.compactFilterRow}>
@@ -1123,7 +1285,7 @@ const EnquiryListScreen = ({ navigation }) => {
           style={styles.compactChipsScroll}
           contentContainerStyle={styles.compactChipsContent}
         >
-          {/* Show selected client first with X button */}
+          {/* Show selected client first with X button (only if not "All") */}
           {selectedClient && selectedClient !== 'All' && (
             <View style={styles.compactSelectedChip}>
               <Text style={styles.compactSelectedChipText}>{selectedClient}</Text>
@@ -1140,36 +1302,42 @@ const EnquiryListScreen = ({ navigation }) => {
             </View>
           )}
           
-          {/* Show available client options (excluding selected) */}
-          {availableClients.map(client => (
-            <TouchableOpacity
-              key={client}
-              style={styles.compactChip}
-              onPress={() => {
-                dispatch(setSelectedClient(client));
-                // Find client ID from clients array
-                const clientObj = clients.find(c => c.name === client);
-                const clientId = clientObj?.id || clientObj?._id;
-                
-                if (client === 'All') {
-                  dispatch(setFilters({ clientId: 'all', client: 'all' }));
-                } else if (clientId) {
-                  dispatch(setFilters({ 
-                    clientId: String(clientId).trim(),
-                    client: client 
-                  }));
-                } else {
-                  // Fallback: try to find by name match
-                  dispatch(setFilters({ 
-                    client: client 
-                  }));
-                }
-                dispatch(setPage(1)); // Reset to first page when filter changes
-              }}
-            >
-              <Text style={styles.compactChipText}>{client}</Text>
-            </TouchableOpacity>
-          ))}
+          {/* Show available client options (including "All" always) */}
+          {availableClients.map((client, index) => {
+            // Use client ID + index for guaranteed unique key
+            const uniqueKey = `client-${client.id}-${index}`;
+            const clientName = client.name;
+            
+            return (
+              <TouchableOpacity
+                key={uniqueKey}
+                style={[
+                  styles.compactChip,
+                  selectedClient === clientName && styles.compactSelectedChip
+                ]}
+                onPress={() => {
+                  dispatch(setSelectedClient(clientName));
+                  
+                  if (client.id === 'all') {
+                    dispatch(setFilters({ clientId: 'all', client: 'all' }));
+                  } else {
+                    dispatch(setFilters({ 
+                      clientId: String(client.id).trim(),
+                      client: clientName 
+                    }));
+                  }
+                  dispatch(setPage(1)); // Reset to first page when filter changes
+                }}
+              >
+                <Text style={[
+                  styles.compactChipText,
+                  selectedClient === clientName && styles.compactSelectedChipText
+                ]}>
+                  {clientName}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
     );

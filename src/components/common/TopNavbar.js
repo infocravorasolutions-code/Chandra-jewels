@@ -14,12 +14,14 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { images } from '../../constants/images';
 import Icon from './Icon';
+import { useGetUnreadNotificationsCountQuery } from '../../store/api';
 
 const TopNavbar = ({ navigation }) => {
   const { user, logout } = useAuth();
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [buttonPressed, setButtonPressed] = useState('');
+  const { data: unreadCount = 0 } = useGetUnreadNotificationsCountQuery(undefined, { skip: !user });
 
   // Safety check - don't render if user is not loaded
   if (!user) {
@@ -83,11 +85,17 @@ const TopNavbar = ({ navigation }) => {
             onPress={handleNotificationPress}
             activeOpacity={0.7}>
             <Icon name="notification" size={24} color={colors.textWhite} />
-            <View style={styles.notificationBadge}>
-              <Text style={[styles.badgeText, { color: colors.textWhite, fontSize: 10, fontFamily: fonts.bold }]}>
-                3
-              </Text>
-            </View>
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text
+                  style={[
+                    styles.badgeText,
+                    { color: colors.textWhite, fontSize: 10, fontFamily: fonts.bold },
+                  ]}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity

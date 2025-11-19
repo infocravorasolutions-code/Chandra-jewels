@@ -16,6 +16,7 @@ import SplashScreen from './src/screens/VideoSplashScreen';
 import { AnimatedLogoLoader } from './src/components/common';
 import { AlertProvider } from './src/context/AlertContext';
 import UsersProvider from './src/components/providers/UsersProvider';
+import PushNotificationsInitializer from './src/components/providers/PushNotificationsInitializer';
 
 const AppContent = () => {
   const isDarkMode = useColorScheme() === 'dark';
@@ -40,6 +41,7 @@ const AppContent = () => {
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
       <UsersProvider>
         <AlertProvider>
+          <PushNotificationsInitializer />
           <AppNavigator />
         </AlertProvider>
       </UsersProvider>
