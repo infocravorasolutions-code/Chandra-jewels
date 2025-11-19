@@ -413,6 +413,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
           onPress={onToggle}
         >
           <View style={styles.dropdownModal}>
+            <ScrollView showsVerticalScrollIndicator={false}  style={{height: '100%'}}   >
             {options.map((option) => (
               <TouchableOpacity
                 key={option.value}
@@ -438,6 +439,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
                 )}
               </TouchableOpacity>
             ))}
+            </ScrollView>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -961,7 +963,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   dropdownOptionSelected: {
-    backgroundColor: colors.primary + '20',
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 10,
+    margin: 10,
+   borderBottomColor: colors.primary,
+   borderBottomWidth: 2,
+   borderRadius: 10,
+   shadowColor: colors.shadow || colors.textPrimary,
   },
   dropdownOptionText: {
     fontSize: fonts.base,

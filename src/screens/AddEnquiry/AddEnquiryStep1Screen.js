@@ -7,6 +7,7 @@ import {
   Alert,
   Modal,
   Text,
+  Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Input, Button } from '../../components/common';
@@ -170,9 +171,11 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           onPress={onToggle}
         >
           <View style={styles.dropdownModal}>
+            <ScrollView showsVerticalScrollIndicator={false}  style={{height: '100%'}}   >
             {options.map((option) => (
               <TouchableOpacity
                 key={option.value}
+                activeOpacity={0.7}
                 style={[
                   styles.dropdownOption,
                   value === option.value && styles.dropdownOptionSelected,
@@ -182,6 +185,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
                   onToggle();
                 }}
               >
+                {/* <Image source={} /> */}
                 <Text
                   style={[
                     styles.dropdownOptionText,
@@ -195,6 +199,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
                 )}
               </TouchableOpacity>
             ))}
+              </ScrollView>
+            
           </View>
         </TouchableOpacity>
       </Modal>
@@ -638,13 +644,19 @@ const styles = StyleSheet.create({
   dropdownModal: {
     backgroundColor: colors.background,
     borderRadius: 12,
-    minWidth: 200,
+    // padding: 10,
+    minWidth: 300,
     maxWidth: '80%',
+    height: '50%',
+    overflow: 'scroll',
     shadowColor: colors.shadow || colors.textPrimary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 10 },
+    
   },
   dropdownOption: {
     flexDirection: 'row',
@@ -656,11 +668,18 @@ const styles = StyleSheet.create({
   },
   dropdownOptionSelected: {
     backgroundColor: colors.backgroundSecondary,
+    borderRadius: 10,
+    margin: 10,
+   borderBottomColor: colors.primary,
+   borderBottomWidth: 2,
+   borderRadius: 10,
+   shadowColor: colors.shadow || colors.textPrimary,
   },
   dropdownOptionText: {
     fontSize: fonts.sm,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
+    marginLeft: 10,
   },
   dropdownOptionTextSelected: {
     fontFamily: fonts.bold,
