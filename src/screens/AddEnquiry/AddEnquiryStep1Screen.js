@@ -8,19 +8,23 @@ import {
   Modal,
   Text,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Input, Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
-import { useGetUsersQuery } from '../../store/api';
+import { useGetUsersQuery, useCreateEnquiryMutation } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
 import { useStatusOptions } from '../../features/statuses/statusesHooks';
+import { useAuth } from '../../context/AuthContext';
 
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // This screen is only for creating new enquiries
   const isEditMode = false;
+  const { user } = useAuth();
+  const [createEnquiry, { isLoading: isCreatingEnquiry }] = useCreateEnquiryMutation();
   
   // Initialize form data for new enquiry
   const getInitialFormData = () => {
@@ -214,28 +218,112 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     </View>
   );
 
-  const handleNext = () => {
-    if (validateForm()) {
-      console.log('📝 Form Data:', JSON.stringify(formData, null, 2));
-      console.log('📝 Form Data Summary:', {
-        'Title': formData.title,
-        'ClientId': formData.clientId,
-        'ClientName': formData.clientName,
-        'Priority': formData.priority,
-        'Category': formData.category,
-        'StoneType': formData.stoneType,
-        'Metal Color': formData.metalColor,
-        'Metal Quality': formData.metalQuality,
-        'Quantity': formData.quantity,
-        'Status': formData.status,
-        'AssignedTo': formData.assignedTo,
-      });
+  const handleNext = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
+    if (!user?.id) {
+      Alert.alert('Error', 'User not found. Please login again.');
+      return;
+    }
+
+    try {
+      // Map Priority from form values to API format
+      const priorityMap = {
+        'low': 'Low',
+        'medium': 'Medium',
+        'normal': 'Normal',
+        'high': 'High',
+        'super high': 'Super High',
+        'urgent': 'Urgent',
+        'Low': 'Low',
+        'Medium': 'Medium',
+        'Normal': 'Normal',
+        'High': 'High',
+        'Super High': 'Super High',
+        'Urgent': 'Urgent',
+      };
       
+      const mappedPriority = priorityMap[formData.priority?.toLowerCase()] || priorityMap[formData.priority] || formData.priority || 'Normal';
+
+      // Prepare enquiry data according to API structure (without images)
+      const enquiryData = {
+        Name: formData.title || '',
+        ClientId: formData.clientId || user.id,
+        AssignedTo: formData.assignedTo || null,
+        Status: formData.status || 'Enquiry Created',
+        Priority: mappedPriority,
+        Quantity: parseInt(formData.quantity) || 1,
+        Metal: {
+          Color: formData.metalColor || 'White Gold',
+          Quality: formData.metalQuality || '10K',
+        },
+        StyleNumber: null,
+        GatiOrderNumber: null,
+        StoneType: formData.stoneType || 'NaturalRegular',
+        MetalWeight: {
+          From: null,
+          To: null,
+          Exact: null,
+        },
+        DiamondWeight: {
+          From: null,
+          To: null,
+          Exact: null,
+        },
+        Stamping: formData.stamping || null,
+        Remarks: formData.description || '',
+        ShippingDate: null,
+        CoralCode: null,
+        CadCode: null,
+        Category: formData.category || 'Ring',
+        // Do NOT include ReferenceImages here - they will be uploaded in Step 2
+      };
+
+      console.log('📤 Creating enquiry (Step 1):', JSON.stringify(enquiryData, null, 2));
+
+      // Create enquiry first - show loading spinner
+      const createResult = await createEnquiry(enquiryData).unwrap();
+      
+      // Get enquiry ID from response
+      // The API can return either:
+      // 1. Just the ID as a string: "6920d151d1b48a5c0c082d52"
+      // 2. An object with id/_id: { id: "...", ... }
+      let enquiryId = null;
+      
+      if (typeof createResult === 'string') {
+        // Response is directly the ID string
+        enquiryId = createResult;
+      } else if (createResult?.id) {
+        enquiryId = createResult.id;
+      } else if (createResult?._id) {
+        enquiryId = createResult._id;
+      }
+      
+      if (!enquiryId) {
+        console.error('❌ Failed to extract enquiry ID from response:', createResult);
+        Alert.alert('Error', 'Failed to create enquiry. Enquiry ID not returned.');
+        return;
+      }
+
+      console.log('✅ Enquiry created successfully:', {
+        'Enquiry ID': enquiryId,
+        'Name': createResult?.Name || createResult?.name || enquiryData.Name,
+      });
+
+      // Navigate to Step 2 with enquiry ID and form data
       navigation.navigate('AddEnquiryStep2', { 
         formData,
+        enquiryId, // Pass the enquiry ID to Step 2
         isEditMode: false,
       });
-    } else {
+    } catch (error) {
+      console.error('❌ Error creating enquiry:', error);
+      Alert.alert(
+        'Error',
+        error?.data?.message || error?.data?.error || 'Failed to create enquiry. Please try again.'
+      );
     }
   };
 
@@ -477,11 +565,21 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
         <TouchableOpacity
           onPress={handleNext}
-          style={[styles.adminActionButton, styles.adminActionButtonPrimary]}
+          style={[styles.adminActionButton, styles.adminActionButtonPrimary, isCreatingEnquiry && styles.disabledButton]}
           activeOpacity={0.85}
+          disabled={isCreatingEnquiry}
         >
-          <IconComponent name="save" size={18} color={colors.textWhite} />
-          <Text style={styles.adminActionText}>Save</Text>
+          {isCreatingEnquiry ? (
+            <>
+              <ActivityIndicator size="small" color={colors.textWhite} style={{ marginRight: 8 }} />
+              <Text style={styles.adminActionText}>Creating Enquiry...</Text>
+            </>
+          ) : (
+            <>
+              <IconComponent name="save" size={18} color={colors.textWhite} />
+              <Text style={styles.adminActionText}>Next</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -585,6 +683,9 @@ const styles = StyleSheet.create({
   },
   adminActionButtonPrimary: {
     backgroundColor: colors.primary,
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
   adminActionText: {
     color: colors.textWhite,

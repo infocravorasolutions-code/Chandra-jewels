@@ -56,12 +56,15 @@ const ClientsListScreen = ({ navigation }) => {
   };
 
   const handleClientPress = (client) => {
-    const lastOrderDate = client.lastOrder ? formatDate(client.lastOrder) : 'No orders yet';
-    Alert.alert(
-      'Client Details',
-      `Name: ${client.name || 'N/A'}\nEmail: ${client.email || 'N/A'}\nPhone: ${client.phone || 'N/A'}\nLast Order: ${lastOrderDate}`,
-      [{ text: 'OK' }]
-    );
+    const clientId = client.id || client._id;
+    if (clientId) {
+      navigation.navigate('ClientPricing', {
+        clientId,
+        clientName: client.name,
+      });
+    } else {
+      Alert.alert('Error', 'Client ID not found');
+    }
   };
 
   const handleAddClient = () => {

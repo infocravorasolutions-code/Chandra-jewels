@@ -16,6 +16,7 @@ import ChatGroupsScreen from '../screens/Chats/ChatGroupsScreen';
 import MetalPricesScreen from '../screens/Admin/MetalPricesScreen';
 import ClientsListScreen from '../screens/Admin/ClientsListScreen';
 import CreateClientScreen from '../screens/Admin/CreateClientScreen';
+import ClientPricingScreen from '../screens/Admin/ClientPricingScreen';
 import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
 import DesignViewerScreen from '../screens/DesignViewer/DesignViewerScreen';
 import PricingScreen from '../screens/Pricing/PricingScreen';
@@ -120,6 +121,13 @@ const StackNavigator = ({ isAuthenticated }) => {
             options={{
               title: 'Create Client',
             }}
+          />
+          <Stack.Screen
+            name="ClientPricing"
+            component={ClientPricingScreen}
+            options={({ route }) => ({
+              title: `Pricing - ${route.params?.clientName || 'Client'}`,
+            })}
           />
           <Stack.Screen
             name="DesignViewer"

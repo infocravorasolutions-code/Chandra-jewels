@@ -948,6 +948,26 @@ export const api = createApi({
       },
     }),
 
+    getClientById: builder.query({
+      query: (clientId) => `/api/clients/${clientId}`,
+      providesTags: (result, error, clientId) => [{ type: 'Client', id: clientId }],
+    }),
+
+    updateClientPricing: builder.mutation({
+      query: ({ clientId, ...data }) => ({
+        url: `/api/clients/${clientId}`,
+        method: 'PUT',
+        body: {
+          Id: clientId,
+          ...data,
+        },
+      }),
+      invalidatesTags: (result, error, { clientId }) => [
+        { type: 'Client', id: clientId },
+        'Client',
+      ],
+    }),
+
     // ==================== STATUS STATISTICS ====================
     getStatusStatistics: builder.query({
       queryFn: async (arg, { dispatch }, extraOptions, baseQuery) => {
@@ -1713,6 +1733,80 @@ export const api = createApi({
           error: response.data?.message || response.data?.error || 'Failed to delete version',
         };
       },
+    }),
+
+    // Upload reference images to an enquiry
+    uploadReferenceImages: builder.mutation({
+      queryFn: async ({ enquiryId, images }, { dispatch }, extraOptions, baseQuery) => {
+        try {
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            return {
+              error: {
+                status: 'CUSTOM_ERROR',
+                data: 'Authentication token not found',
+              },
+            };
+          }
+
+          // Create FormData
+          const formData = new FormData();
+          
+          // Add images as files - use 'images' field name as per client requirement
+          if (images && images.length > 0) {
+            images.forEach((image, index) => {
+              formData.append('images', {
+                uri: image.uri,
+                type: image.type || 'image/jpeg',
+                name: image.name || `image_${index}_${Date.now()}.jpg`,
+              });
+            });
+          }
+
+          const endpoint = `/api/enquiries/${enquiryId}/upload/reference`;
+          
+          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              // Don't set Content-Type - let fetch set it with boundary for FormData
+            },
+            body: formData,
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            return { data };
+          } else {
+            let errorData;
+            try {
+              const errorText = await response.text();
+              errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
+            } catch (parseError) {
+              errorData = { message: `Upload failed with status ${response.status}` };
+            }
+            
+            return {
+              error: {
+                status: response.status,
+                data: errorData,
+              },
+            };
+          }
+        } catch (error) {
+          return {
+            error: {
+              status: 'CUSTOM_ERROR',
+              data: error.message || 'Failed to upload reference images',
+            },
+          };
+        }
+      },
+      invalidatesTags: (result, error, { enquiryId }) => [
+        { type: 'Enquiry', id: enquiryId },
+        'Enquiry',
+        'Dashboard',
+      ],
     }),
 
     uploadImage: builder.mutation({
@@ -2740,7 +2834,9 @@ export const {
   
   // Clients
   useGetClientsQuery,
+  useGetClientByIdQuery,
   useCreateClientMutation,
+  useUpdateClientPricingMutation,
   
   // Dashboard
   useGetDashboardDataQuery,
@@ -2760,6 +2856,7 @@ export const {
   
   // File Upload
   useUploadImageMutation,
+  useUploadReferenceImagesMutation,
   useUploadDesignMutation,
   useUpdateAssetDescriptionMutation,
   useApproveDesignVersionMutation,

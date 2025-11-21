@@ -15,13 +15,13 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
-import { useUploadImageMutation, useCreateEnquiryMutation, useUpdateEnquiryMutation } from '../../store/api';
+import { useUploadReferenceImagesMutation, useUpdateEnquiryMutation } from '../../store/api';
 import { useAuth } from '../../context/AuthContext';
 import { useUsers } from '../../features/users/usersHooks';
 import { getUserName } from '../../utils/userUtils';
 
 const AddEnquiryStep2Screen = ({ route, navigation }) => {
-  const { formData, enquiry: enquiryToEdit, isEditMode } = route.params;
+  const { formData, enquiry: enquiryToEdit, isEditMode, enquiryId } = route.params;
   const { user } = useAuth();
   const [selectedImages, setSelectedImages] = useState([]);
   
@@ -31,21 +31,22 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   // Log when Step 2 screen loads
   useEffect(() => {
     console.log('📋 Received Form Data from Step 1:', JSON.stringify(formData, null, 2));
+    console.log('📋 Enquiry ID from Step 1:', enquiryId);
     console.log('📋 Form Data Summary:', {
       'Title': formData?.title,
       'ClientId': formData?.clientId,
       'Priority': formData?.priority,
       'Category': formData?.category,
       'StoneType': formData?.stoneType,
+      'EnquiryId': enquiryId,
     });
   }, []);
   
   // Redux mutations
-  const [uploadImage, { isLoading: isUploading }] = useUploadImageMutation();
-  const [createEnquiry, { isLoading: isCreating }] = useCreateEnquiryMutation();
+  const [uploadReferenceImages, { isLoading: isUploading }] = useUploadReferenceImagesMutation();
   const [updateEnquiry, { isLoading: isUpdating }] = useUpdateEnquiryMutation();
   
-  const loading = isUploading || isCreating || isUpdating;
+  const loading = isUploading || isUpdating;
 
   // Request camera permission for Android
   const requestCameraPermission = async () => {
@@ -219,64 +220,70 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         'Mapped Priority': mappedPriority,
       });
       
-      // Upload images first if any are selected
-      let uploadedImages = [];
-      console.log('📸 Image Upload Check:', {
-        'Selected Images Count': selectedImages.length,
-        'Has Images': selectedImages.length > 0,
-      });
-      
-      if (selectedImages.length > 0) {
+      // For new enquiries: Upload reference images and then show success
+      if (!isEditMode && enquiryId) {
+        // Upload images if any are selected
+        if (selectedImages.length > 0) {
+          console.log('📤 Uploading reference images to enquiry:', enquiryId);
+          try {
+            await uploadReferenceImages({
+              enquiryId,
+              images: selectedImages,
+            }).unwrap();
+            console.log('✅ Reference images uploaded successfully');
+          } catch (uploadError) {
+            console.error('❌ Error uploading reference images:', uploadError);
+            Alert.alert(
+              'Image Upload Failed',
+              uploadError?.data?.message || uploadError?.data?.error || 'Failed to upload images. The enquiry was created but images could not be uploaded.',
+              [
+                {
+                  text: 'Continue Anyway',
+                  onPress: () => {
+                    navigation.navigate('MainTabs', { screen: 'Enquiries' });
+                  },
+                },
+              ]
+            );
+            return;
+          }
+        } else {
+          console.log('ℹ️ No reference images selected - enquiry created without images');
+        }
+
+        // Success - enquiry was already created in Step 1, images uploaded (if any) in Step 2
+        Alert.alert(
+          'Enquiry Created',
+          'Your enquiry has been created successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Navigate back to enquiries list
+                navigation.navigate('MainTabs', { screen: 'Enquiries' });
+              },
+            },
+          ],
+          { cancelable: false }
+        );
+        return;
+      }
+
+      // For edit mode: Upload new images if any are selected
+      if (isEditMode && enquiryToEdit?.id && selectedImages.length > 0) {
         try {
-          console.log('📤 Selected images details:', selectedImages.map((img, idx) => ({
-            index: idx,
-            uri: img.uri?.substring(0, 50) + '...',
-            type: img.type,
-            name: img.name,
-          })));
-          
-          // Upload each image
-          for (let i = 0; i < selectedImages.length; i++) {
-            const image = selectedImages[i];
-            try {
-              
-              
-              const uploadedImage = await uploadImage(image).unwrap();
-              if (uploadedImage) {
-                uploadedImages.push(uploadedImage);
-                
-              }
-            } catch (imageError) {
-              // Continue with other images even if one fails
-              
-            }
-          }
-          
-          console.log('✅ Image Upload Summary:', {
-            'Total Selected': selectedImages.length,
-            'Successfully Uploaded': uploadedImages.length,
-            'Failed': selectedImages.length - uploadedImages.length,
-            'Uploaded Image Keys': uploadedImages.map(img => img.key || img.Key || img),
-          });
-          
-          if (uploadedImages.length > 0) {
-            console.log('📦 Uploaded images data:', JSON.stringify(uploadedImages, null, 2));
-          }
-          
-          // Warn user if some images failed
-          if (uploadedImages.length < selectedImages.length) {
-            
-            // Don't show alert for partial failures - just log it
-            // The enquiry will be created with the successfully uploaded images
-          }
+          await uploadReferenceImages({
+            enquiryId: enquiryToEdit.id,
+            images: selectedImages,
+          }).unwrap();
+          console.log('✅ Reference images uploaded successfully for edit');
         } catch (uploadError) {
-          // Continue with enquiry creation even if image upload fails
-          // Don't show alert - images are optional, enquiry creation should proceed
-          
+          console.error('❌ Error uploading reference images:', uploadError);
+          // Continue with update even if image upload fails
         }
       }
       
-      // Prepare enquiry data according to API structure
+      // Prepare enquiry data according to API structure (only for edit mode)
       
       enquiryData = {
         // Only include Id for updates, not for new enquiries
@@ -336,12 +343,8 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         Category: formData.category || 'Ring',
       };
       
-      // Only include ReferenceImages if we have uploaded images
-      // If updating, we might want to preserve existing images, so only add if new images were uploaded
-      if (uploadedImages.length > 0) {
-        enquiryData.ReferenceImages = uploadedImages;
-      } else {
-      }
+      // Note: ReferenceImages are now uploaded separately via uploadReferenceImages endpoint
+      // No need to include them in enquiryData
 
       console.log('📤 Final Enquiry Data to be sent:', JSON.stringify(enquiryData, null, 2));
       console.log('📊 Enquiry Data Summary:', {
@@ -353,12 +356,11 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         'Quantity': enquiryData.Quantity,
         'Metal Color': enquiryData.Metal?.Color,
         'Metal Quality': enquiryData.Metal?.Quality,
-        'Has Reference Images': !!enquiryData.ReferenceImages,
-        'Reference Images Count': enquiryData.ReferenceImages?.length || 0,
         'Has Metal Weight': !!(enquiryData.MetalWeight?.From || enquiryData.MetalWeight?.To || enquiryData.MetalWeight?.Exact),
         'Has Diamond Weight': !!(enquiryData.DiamondWeight?.From || enquiryData.DiamondWeight?.To || enquiryData.DiamondWeight?.Exact),
       });
 
+      // Only proceed with update if in edit mode
       if (isEditMode && enquiryToEdit?.id) {
         const updateResult = await updateEnquiry({ id: enquiryToEdit.id, ...enquiryData }).unwrap();
         
@@ -436,35 +438,11 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           { cancelable: false }
         );
       } else {
-        console.log('🌐 API Request Details:', {
-          'Endpoint': '/api/enquiries',
-          'Method': 'POST',
-          'Payload Size': JSON.stringify(enquiryData).length,
-          'Has Images': !!enquiryData.ReferenceImages,
-        });
-        
-        const createResult = await createEnquiry(enquiryData).unwrap();
-        
-        console.log('📥 API Response:', JSON.stringify(createResult, null, 2));
-        console.log('📋 Created Enquiry Details:', {
-          'Enquiry ID': createResult?.id || createResult?._id || 'Not returned',
-          'Name': createResult?.Name || createResult?.name || enquiryData.Name,
-          'Status': createResult?.Status || createResult?.status || enquiryData.Status,
-        });
-        
+        // This should not happen - new enquiries should return early above
+        console.error('⚠️ Unexpected: Reached else block for new enquiry');
         Alert.alert(
-          'Enquiry Created',
-          'Your enquiry has been submitted successfully!',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                // Navigate back to enquiries list
-                navigation.navigate('MainTabs', { screen: 'Enquiries' });
-              },
-            },
-          ],
-          { cancelable: false }
+          'Error',
+          'Unexpected error occurred. Please try again.'
         );
       }
     } catch (error) {
