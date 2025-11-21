@@ -7,9 +7,18 @@ import { Provider } from 'react-redux';
 import EnquiryListScreen from '../../screens/Enquiries/EnquiryListScreen';
 import { createTestStore, createMockNavigation, mockUsers, mockEnquiry } from '../utils/testUtils';
 
-// Mock hooks
-jest.mock('../../features/enquiries/enquiriesHooks', () => ({
-  useFilteredEnquiries: jest.fn(),
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn().mockResolvedValue('test-token'),
+}));
+
+jest.mock('../../features/statuses/statusesHooks', () => ({
+  useStatusOptions: () => [{ label: 'All', value: 'all' }],
+}));
+
+jest.mock('@react-native-firebase/messaging', () => () => ({
+  onMessage: jest.fn(),
+  requestPermission: jest.fn().mockResolvedValue(true),
+  getToken: jest.fn().mockResolvedValue('push-token'),
 }));
 
 jest.mock('../../store/api', () => {
@@ -20,11 +29,65 @@ jest.mock('../../store/api', () => {
   };
 });
 
+const nodeTimers = require('timers');
+
+jest.mock('../../components/cards/Cards', () => {
+  const React = require('react');
+  const { Text, TouchableOpacity } = require('react-native');
+
+  const MockCard = ({ children, onPress }) => (
+    <TouchableOpacity onPress={onPress}>{children}</TouchableOpacity>
+  );
+
+  const CompactEnquiryCard = ({ enquiry, onPress }) => (
+    <TouchableOpacity testID={`integration-enquiry-${enquiry.id}`} onPress={onPress}>
+      <Text>{enquiry.Name || enquiry.name || enquiry.title || 'Enquiry'}</Text>
+    </TouchableOpacity>
+  );
+
+  return {
+    EnquiryCard: MockCard,
+    Card: MockCard,
+    CompactEnquiryCard,
+    CompactEnquiryCardMemo: CompactEnquiryCard,
+  };
+});
+
+jest.mock('../../components/common/TopNavbar', () => 'TopNavbar');
+
+if (!global.globalObj) {
+  global.globalObj = global;
+}
+if (typeof global.globalObj.setTimeout !== 'function') {
+  global.globalObj.setTimeout = nodeTimers.setTimeout;
+  global.globalObj.clearTimeout = nodeTimers.clearTimeout;
+}
+if (typeof global.setTimeout !== 'function') {
+  global.setTimeout = nodeTimers.setTimeout;
+  global.clearTimeout = nodeTimers.clearTimeout;
+}
+
 describe('Enquiry Management Flow Integration', () => {
   let store;
-  let mockNavigation;
-  const { useFilteredEnquiries } = require('../../features/enquiries/enquiriesHooks');
+  let navigation;
   const { useGetClientsQuery } = require('../../store/api');
+  const apiResponse = {
+    data: [{ ...mockEnquiry, id: '99', Name: 'Integration Enquiry' }],
+    total: 1,
+    page: 1,
+    limit: 10,
+  };
+
+  const renderScreen = (customStore = store) => {
+    const { AuthProvider } = require('../../context/AuthContext');
+    return render(
+      <Provider store={customStore}>
+        <AuthProvider>
+          <EnquiryListScreen navigation={navigation} />
+        </AuthProvider>
+      </Provider>
+    );
+  };
 
   beforeEach(() => {
     store = createTestStore({
@@ -34,32 +97,13 @@ describe('Enquiry Management Flow Integration', () => {
         isAuthenticated: true,
         isLoading: false,
       },
-      enquiries: {
-        filters: {},
-        searchQuery: '',
-        sortBy: 'createdAt',
-        sortOrder: 'desc',
-        selectedStatus: 'All',
-        selectedClient: null,
-        pagination: {
-          currentPage: 1,
-          totalPages: 1,
-          total: 1,
-        },
-      },
     });
-    mockNavigation = createMockNavigation();
 
-    useFilteredEnquiries.mockReturnValue({
-      enquiries: [mockEnquiry],
-      allEnquiries: [mockEnquiry],
-      isLoading: false,
-      refetch: jest.fn(),
-      pagination: {
-        currentPage: 1,
-        totalPages: 1,
-        total: 1,
-      },
+    navigation = createMockNavigation();
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => apiResponse,
     });
 
     useGetClientsQuery.mockReturnValue({
@@ -67,130 +111,55 @@ describe('Enquiry Management Flow Integration', () => {
       isLoading: false,
       error: null,
     });
+  });
 
+  afterEach(() => {
     jest.clearAllMocks();
+    global.fetch = undefined;
   });
 
-  const renderWithProviders = (component) => {
-    const { AuthProvider } = require('../../context/AuthContext');
-    return render(
-      <Provider store={store}>
-        <AuthProvider>
-          {component}
-        </AuthProvider>
-      </Provider>
-    );
-  };
+  it('opens filter modal when filter button is pressed', async () => {
+    const { getAllByText, findByText } = renderScreen();
 
-  it('should display enquiry list and navigate to detail', async () => {
-    const { queryByText, getAllByText } = renderWithProviders(
-      <EnquiryListScreen navigation={mockNavigation} />
-    );
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
 
-    await waitFor(() => {
-      expect(queryByText(/ENQ/i)).toBeTruthy();
-    });
-
-    // Navigate to enquiry detail
-    const enquiryCards = getAllByText(/ENQ/i);
-    if (enquiryCards.length > 0) {
-      fireEvent.press(enquiryCards[0]);
-      expect(mockNavigation.navigate).toHaveBeenCalled();
-    }
-  });
-
-  it('should filter enquiries by status', async () => {
-    const { getAllByText } = renderWithProviders(
-      <EnquiryListScreen navigation={mockNavigation} />
-    );
-
-    const statusButtons = getAllByText(/pending|completed|progress/i);
-    if (statusButtons.length > 0) {
-      fireEvent.press(statusButtons[0]);
-      
-      await waitFor(() => {
-        // Filter should be applied
-        expect(getAllByText).toBeDefined();
-      });
-    }
-  });
-
-  it('should search enquiries', async () => {
-    const { getByPlaceholderText } = renderWithProviders(
-      <EnquiryListScreen navigation={mockNavigation} />
-    );
-
-    const searchInput = getByPlaceholderText(/search/i);
-    fireEvent.changeText(searchInput, 'test query');
-
-    await waitFor(() => {
-      expect(searchInput.props.value).toBe('test query');
-    });
-  });
-
-  it('should open and apply filters', async () => {
-    const { getAllByText, getByText } = renderWithProviders(
-      <EnquiryListScreen navigation={mockNavigation} />
-    );
-
-    // Open filters modal
     const filterButtons = getAllByText(/filter/i);
-    if (filterButtons.length > 0) {
-      fireEvent.press(filterButtons[0]);
+    fireEvent.press(filterButtons[0]);
 
-      await waitFor(() => {
-        // Filters modal should be visible
-        const applyButton = getByText(/apply/i);
-        if (applyButton) {
-          fireEvent.press(applyButton);
-          // Filters should be applied
-          expect(getByText).toBeDefined();
-        }
-      });
-    }
+    expect(await findByText(/apply filters/i)).toBeTruthy();
   });
 
-  it('should handle role-based filtering for non-admin users', () => {
-    store = createTestStore({
+  it('includes clientId in query params for client users', async () => {
+    const clientStore = createTestStore({
       auth: {
         user: mockUsers.client,
         token: 'mock-token',
         isAuthenticated: true,
         isLoading: false,
       },
-      enquiries: {
-        filters: {},
-        searchQuery: '',
-        sortBy: 'createdAt',
-        sortOrder: 'desc',
-        selectedStatus: 'All',
-        selectedClient: null,
-        pagination: {
-          currentPage: 1,
-          totalPages: 1,
-          total: 0,
-        },
+    });
+
+    renderScreen(clientStore);
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toContain(`clientId=${mockUsers.client.id}`);
+  });
+
+  it('includes assignedTo in query params for designer users', async () => {
+    const designerStore = createTestStore({
+      auth: {
+        user: mockUsers.coral,
+        token: 'mock-token',
+        isAuthenticated: true,
+        isLoading: false,
       },
     });
 
-    useFilteredEnquiries.mockReturnValue({
-      enquiries: [mockEnquiry],
-      allEnquiries: [mockEnquiry],
-      isLoading: false,
-      refetch: jest.fn(),
-      pagination: {
-        currentPage: 1,
-        totalPages: 1,
-        total: 1,
-      },
-    });
+    renderScreen(designerStore);
 
-    const { queryByText } = renderWithProviders(
-      <EnquiryListScreen navigation={mockNavigation} />
-    );
-
-    // Client should only see their own enquiries
-    expect(queryByText).toBeDefined();
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toContain(`assignedTo=${mockUsers.coral.id}`);
   });
 });
-
