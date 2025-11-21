@@ -70,16 +70,12 @@ const LoginScreen = ({ navigation }) => {
       
       if (result.success) {
         // Console log the login token
-        console.log('========== LOGIN TOKEN ==========');
-        console.log('Token:', result.token);
-        console.log('Token Length:', result.token?.length);
         console.log('Token Preview:', result.token?.substring(0, 50) + '...');
         console.log('Full Login Result:', {
           success: result.success,
           token: result.token,
           user: result.user,
         });
-        console.log('==================================');
         
         // Fetch user details from API to get the actual name from database
         let userDetails = null;
@@ -97,12 +93,9 @@ const LoginScreen = ({ navigation }) => {
             if (userResponse.ok) {
               const userDataResponse = await userResponse.json();
               userDetails = userDataResponse.user || userDataResponse;
-              console.log('Fetched user details from API:', userDetails);
             } else {
-              console.warn('Failed to fetch user details, status:', userResponse.status);
             }
           } catch (error) {
-            console.warn('Error fetching user details:', error);
             // Continue with login even if user details fetch fails
           }
         }
@@ -137,7 +130,6 @@ const LoginScreen = ({ navigation }) => {
           }),
         };
         
-        console.log('Final user data with name:', userData);
         
         // Store in AsyncStorage
         await AsyncStorage.setItem('user', JSON.stringify(userData));
@@ -158,12 +150,7 @@ const LoginScreen = ({ navigation }) => {
         Alert.alert('Login Failed', result.error || 'Invalid credentials');
       }
     } catch (error) {
-      console.error('========== LOGIN ERROR ==========');
-      console.error('Error object:', error);
-      console.error('Error message:', error.message);
-      console.error('Error data:', error.data);
       console.error('Full error:', JSON.stringify(error, null, 2));
-      console.error('==================================');
       
       const errorMessage = error.data?.error || error.message || 'Invalid credentials. Please try again.';
       Alert.alert(

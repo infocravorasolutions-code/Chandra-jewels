@@ -42,7 +42,6 @@ export const formatChatDate = (dateString) => {
 
   const date = new Date(dateString);
   const now = new Date();
-console.log('date', date);
   // Create simple date values without time
   const d = date.toDateString();
   const n = now.toDateString();
@@ -203,7 +202,6 @@ export const decodeJWT = (token) => {
     
     return JSON.parse(jsonPayload);
   } catch (error) {
-    console.error('Error decoding JWT:', error);
     return null;
   }
 };
@@ -226,9 +224,7 @@ const FALLBACK_ROLE_MAP = {
  */
 export const setRolesCache = (roles) => {
   if (!Array.isArray(roles) || roles.length === 0) {
-    if (__DEV__) {
-      console.warn('⚠️ setRolesCache: Invalid roles array provided');
-    }
+    
     return;
   }
 
@@ -271,23 +267,17 @@ export const setRolesCache = (roles) => {
 export const mapRoleNumberToString = (roleNumber) => {
   // First try dynamic cache from API
   if (rolesMapCache[roleNumber]) {
-    if (__DEV__) {
-      console.log('✅ Using dynamic role from API cache:', rolesMapCache[roleNumber]);
-    }
+    
     return rolesMapCache[roleNumber];
   }
   
   // Fallback to hardcoded map
   if (FALLBACK_ROLE_MAP[roleNumber]) {
-    if (__DEV__) {
-      console.log('⚠️ Using fallback role map:', FALLBACK_ROLE_MAP[roleNumber]);
-    }
+    
     return FALLBACK_ROLE_MAP[roleNumber];
   }
   
-  if (__DEV__) {
-    console.warn('⚠️ Unknown role number:', roleNumber);
-  }
+  
   return null;
 };
 

@@ -26,7 +26,6 @@ import FontTest from '../components/FontTest';
 const Stack = createStackNavigator();
 
 const StackNavigator = ({ isAuthenticated }) => {
-  console.log('StackNavigator - isAuthenticated:', isAuthenticated);
   
   return (
     <Stack.Navigator

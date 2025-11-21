@@ -37,9 +37,7 @@ const CreateClientScreen = ({ navigation }) => {
 
   // Debug modal state
   useEffect(() => {
-    if (__DEV__) {
-      console.log('Modal state changed:', showImagePickerModal);
-    }
+    
   }, [showImagePickerModal]);
 
   const handleInputChange = (field, value) => {
@@ -66,7 +64,6 @@ const CreateClientScreen = ({ navigation }) => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
         return false;
       }
     }
@@ -93,7 +90,6 @@ const CreateClientScreen = ({ navigation }) => {
         });
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
         return false;
       }
     }
@@ -115,25 +111,17 @@ const CreateClientScreen = ({ navigation }) => {
         saveToPhotos: true, // Save to photos on iOS
       };
 
-      if (__DEV__) {
-        console.log('Opening camera with options:', options);
-      }
+      
 
       launchCamera(options, (response) => {
-        if (__DEV__) {
-          console.log('Camera response:', response);
-        }
+        
         
         if (response.didCancel) {
-          console.log('User cancelled camera');
         } else if (response.errorCode) {
-          console.error('Camera error:', response.errorCode, response.errorMessage);
           Alert.alert('Error', `Camera Error: ${response.errorMessage || response.errorCode}`);
         } else if (response.assets && response.assets.length > 0) {
           const asset = response.assets[0];
-          if (__DEV__) {
-            console.log('Selected asset:', asset);
-          }
+          
           
           const imageData = {
             uri: asset.uri || '',
@@ -154,11 +142,9 @@ const CreateClientScreen = ({ navigation }) => {
             setErrors(prev => ({ ...prev, ImageUrl: null }));
           }
         } else {
-          console.warn('No assets in camera response:', response);
         }
       });
     } catch (error) {
-      console.error('Error opening camera:', error);
       Alert.alert('Error', 'Failed to open camera. Please try again.');
     }
   };
@@ -178,25 +164,17 @@ const CreateClientScreen = ({ navigation }) => {
         includeBase64: true, // Enable base64 for data URI
       };
 
-      if (__DEV__) {
-        console.log('Opening image library with options:', options);
-      }
+      
 
       launchImageLibrary(options, (response) => {
-        if (__DEV__) {
-          console.log('Image library response:', response);
-        }
+        
         
         if (response.didCancel) {
-          console.log('User cancelled image picker');
         } else if (response.errorCode) {
-          console.error('Image picker error:', response.errorCode, response.errorMessage);
           Alert.alert('Error', `Image Picker Error: ${response.errorMessage || response.errorCode}`);
         } else if (response.assets && response.assets.length > 0) {
           const asset = response.assets[0];
-          if (__DEV__) {
-            console.log('Selected asset:', asset);
-          }
+          
           
           const imageData = {
             uri: asset.uri || '',
@@ -217,24 +195,17 @@ const CreateClientScreen = ({ navigation }) => {
             setErrors(prev => ({ ...prev, ImageUrl: null }));
           }
         } else {
-          console.warn('No assets in image library response:', response);
         }
       });
     } catch (error) {
-      console.error('Error opening image library:', error);
       Alert.alert('Error', 'Failed to open image library. Please try again.');
     }
   };
 
   const handleImagePicker = () => {
-    if (__DEV__) {
-      console.log('Image picker button pressed');
-    }
-    console.log('Setting showImagePickerModal to true');
+    
     setShowImagePickerModal(true);
-    if (__DEV__) {
-      console.log('Modal state should be true now');
-    }
+    
   };
 
   const handleCameraPress = () => {
@@ -279,17 +250,12 @@ const CreateClientScreen = ({ navigation }) => {
       // If image is selected from camera/gallery, upload it first (same pattern as enquiries)
       if (!imageUrl && selectedImage) {
         try {
-          if (__DEV__) {
-            console.log('📤 Uploading client image first...');
-            console.log('Selected image:', selectedImage);
-          }
+          
           
           // Upload image using the same pattern as enquiries
           const uploadedImage = await uploadImage(selectedImage).unwrap();
           
-          if (__DEV__) {
-            console.log('✅ Image uploaded successfully:', uploadedImage);
-          }
+          
           
           // Extract URL from upload response (same pattern as enquiries)
           if (uploadedImage) {
@@ -309,12 +275,9 @@ const CreateClientScreen = ({ navigation }) => {
               imageUrl = key;
             }
             
-            if (__DEV__) {
-              console.log('📎 Extracted image URL:', imageUrl);
-            }
+            
           }
         } catch (uploadError) {
-          console.error('Error uploading image:', uploadError);
           Alert.alert(
             'Image Upload Failed',
             'Failed to upload image. Would you like to create the client without an image?',
@@ -382,7 +345,6 @@ const CreateClientScreen = ({ navigation }) => {
   };
 
   const handleSubmitError = (error) => {
-    console.error('Error creating client:', error);
     console.error('Full error object:', JSON.stringify(error, null, 2));
     
     // Extract error message from different possible error formats
@@ -509,7 +471,6 @@ const CreateClientScreen = ({ navigation }) => {
         transparent={true}
         animationType="fade"
         onRequestClose={() => {
-          console.log('Modal onRequestClose called');
           setShowImagePickerModal(false);
         }}
       >
@@ -518,7 +479,6 @@ const CreateClientScreen = ({ navigation }) => {
             style={styles.modalOverlayTouchable}
             activeOpacity={1}
             onPress={() => {
-              console.log('Modal overlay pressed');
               setShowImagePickerModal(false);
             }}
           />
@@ -527,7 +487,6 @@ const CreateClientScreen = ({ navigation }) => {
               <Text style={styles.modalTitle}>Select Image Source</Text>
               <TouchableOpacity
                 onPress={() => {
-                  console.log('Modal close button pressed');
                   setShowImagePickerModal(false);
                 }}
                 style={styles.modalCloseButton}
@@ -539,7 +498,6 @@ const CreateClientScreen = ({ navigation }) => {
             <TouchableOpacity
               style={styles.modalOption}
               onPress={() => {
-                console.log('Camera option pressed');
                 handleCameraPress();
               }}
               activeOpacity={0.7}
@@ -551,7 +509,6 @@ const CreateClientScreen = ({ navigation }) => {
             <TouchableOpacity
               style={styles.modalOption}
               onPress={() => {
-                console.log('Gallery option pressed');
                 handleGalleryPress();
               }}
               activeOpacity={0.7}

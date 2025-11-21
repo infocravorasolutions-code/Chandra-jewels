@@ -69,23 +69,19 @@ const VideoSplashScreen = ({ onAnimationFinish }) => {
   };
 
   const onVideoEnd = () => {
-    console.log('Video ended');
     finishSplashScreen();
   };
 
   const onVideoError = (error) => {
-    console.log('Video error:', error);
     setVideoError(true);
     // Continue with splash screen even if video fails
   };
 
   const onVideoLoad = () => {
-    console.log('Video loaded');
     setVideoLoaded(true);
   };
 
   const onVideoLoadStart = () => {
-    console.log('Video load started');
   };
 
   // Video source configuration

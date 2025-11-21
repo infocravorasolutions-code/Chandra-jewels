@@ -80,7 +80,6 @@ const UploadDesignScreen = ({ route, navigation }) => {
         });
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
         return true;
       }
     }
@@ -117,7 +116,6 @@ const UploadDesignScreen = ({ route, navigation }) => {
         setSelectedImages(prev => [...prev, ...newImages]);
       }
     } catch (error) {
-      console.error('Error selecting images:', error);
       Alert.alert('Error', 'Failed to select images');
     }
   };
@@ -157,7 +155,6 @@ const UploadDesignScreen = ({ route, navigation }) => {
       if (DocumentPicker && DocumentPicker.isCancel && DocumentPicker.isCancel(error)) {
         return;
       }
-      console.error('Error selecting Excel file:', error);
       Alert.alert('Error', 'Failed to select Excel file');
     }
   };
@@ -214,7 +211,6 @@ const UploadDesignScreen = ({ route, navigation }) => {
         ]
       );
     } catch (error) {
-      console.error('Error uploading design:', error);
       const errorMessage = error?.data?.message || error?.data || error?.message || 'Failed to upload design. Please try again.';
       Alert.alert('Upload Failed', errorMessage);
     }

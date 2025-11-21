@@ -16,6 +16,7 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { useClients } from '../../features/clients/clientsHooks';
 import { useGetUsersQuery } from '../../store/api';
+import { useStatusOptions } from '../../features/statuses/statusesHooks';
 
 const EnquiryFiltersModal = ({
   visible,
@@ -89,27 +90,8 @@ const EnquiryFiltersModal = ({
     onClose();
   };
 
-  // Status options - limited for designers
-  // Designers (coral and cad) only see: All, Design Approval Pending, Coral
-  const statusOptions = isDesigner
-    ? [
-        { label: 'All Status', value: 'all' },
-        { label: 'Design Approval Pending', value: 'Design Approval Pending' },
-        { label: 'Coral', value: 'Coral' },
-      ]
-    : [
-        { label: 'All Status', value: 'all' },
-        { label: 'Enquiry Created', value: 'Enquiry Created' },
-        { label: 'Design Approval Pending', value: 'Design Approval Pending' },
-        { label: 'CAD', value: 'CAD' },
-        { label: 'Coral', value: 'Coral' },
-        { label: 'Approved Cad', value: 'Approved Cad' },
-        { label: 'Order Placement', value: 'Order Placement' },
-        { label: 'CAM Pending', value: 'CAM Pending' },
-        { label: 'Production', value: 'Production' },
-        { label: 'Completed', value: 'Completed' },
-        { label: 'Rejected', value: 'Rejected' },
-      ];
+  // Get status options from API (cached) - already includes "All Status" and role-based filtering
+  const statusOptions = useStatusOptions();
 
   const priorityOptions = [
     { label: 'All Priority', value: 'all' },

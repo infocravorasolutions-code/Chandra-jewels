@@ -21,9 +21,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     // If we have initialChat with an ID, use it immediately
     if (initialChat && (initialChat._id || initialChat.id)) {
       const chatIdValue = initialChat._id || initialChat.id;
-      if (__DEV__) {
-        console.log('✅ Using initialChat:', chatIdValue);
-      }
+      
       return {
         ...initialChat,
         _id: chatIdValue,
@@ -32,9 +30,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     }
     // Otherwise, create minimal chat object with chatId if provided
     if (chatId) {
-      if (__DEV__) {
-        console.log('✅ Initializing chat with chatId:', chatId);
-      }
+      
       return {
         _id: chatId,
         id: chatId,
@@ -79,24 +75,18 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
   // Fetch chat by enquiry ID
   const fetchChat = useCallback(async () => {
     if (!enquiryId || !user) {
-      if (__DEV__) {
-        console.log('⚠️ fetchChat skipped - missing enquiryId or user:', { enquiryId, hasUser: !!user });
-      }
+      
       return;
     }
     
     // Use getChatType() to determine type if chatType is not provided
     const type = chatType || getChatType();
     if (!type) {
-      if (__DEV__) {
-        console.warn('⚠️ fetchChat skipped - could not determine chat type');
-      }
+      
       return;
     }
 
-    if (__DEV__) {
-      console.log('🔍 fetchChat called:', { enquiryId, chatId, chatType, resolvedType: type });
-    }
+    
 
     setIsLoadingChat(true);
     setChatError(null);
@@ -107,9 +97,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       // If we have a direct chatId, fetch that specific chat first
       if (chatId) {
         try {
-          if (__DEV__) {
-            console.log('🔍 Fetching chat by ID:', chatId);
-          }
+          
           const chatResponse = await fetch(`${API_BASE_URL}/api/chats/${chatId}`, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -123,27 +111,19 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             
             if (foundChat && (foundChat._id || foundChat.id)) {
               const chatIdValue = foundChat._id || foundChat.id;
-              if (__DEV__) {
-                console.log('✅ Chat found by ID:', { chatId: chatIdValue, chat: foundChat });
-              }
+              
               // Ensure _id is set
               setChat({ ...foundChat, _id: chatIdValue, id: chatIdValue });
               setIsLoadingChat(false);
               return;
             } else {
-              if (__DEV__) {
-                console.warn('⚠️ Chat response OK but no _id found:', foundChat);
-              }
+              
             }
           } else {
-            if (__DEV__) {
-              console.warn('⚠️ Chat fetch by ID failed:', chatResponse.status, chatResponse.statusText);
-            }
+            
           }
         } catch (chatIdError) {
-          if (__DEV__) {
-            console.warn('⚠️ Error fetching chat by ID:', chatIdError.message);
-          }
+          
         }
       }
 
@@ -154,9 +134,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         limit: '50',
       });
 
-      if (__DEV__) {
-        console.log('🔍 Searching chats by enquiry ID:', { type, enquiryId });
-      }
+      
 
       const response = await fetch(`${API_BASE_URL}/api/chats?${searchParams.toString()}`, {
         headers: {
@@ -185,7 +163,6 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             return String(cId).trim() === String(chatId).trim();
           });
           if (foundChat && __DEV__) {
-            console.log('✅ Found chat by chatId in search results');
           }
         }
         
@@ -198,36 +175,27 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                    String(chatTypeValue).trim() === String(type).trim();
           });
           if (foundChat && __DEV__) {
-            console.log('✅ Found chat by enquiryId and type in search results');
           }
         }
 
         if (foundChat) {
           const chatIdValue = foundChat._id || foundChat.id;
-          if (__DEV__) {
-            console.log('✅ Chat found by enquiry ID:', { chatId: chatIdValue, chat: foundChat });
-          }
+          
           // Ensure _id is set
           setChat({ ...foundChat, _id: chatIdValue, id: chatIdValue });
           setIsLoadingChat(false);
           return;
         } else {
-          if (__DEV__) {
-            console.warn('⚠️ No chat found in search results');
-          }
+          
         }
       } else {
-        if (__DEV__) {
-          console.warn('⚠️ Chat search failed:', response.status, response.statusText);
-        }
+        
       }
 
       // Create virtual chat if not found (but only if we have a chatId)
       // Without a real chatId, we can't load messages anyway
       if (chatId) {
-        if (__DEV__) {
-          console.log('📝 Creating virtual chat with chatId:', chatId);
-        }
+        
         const virtualChat = {
           _id: chatId,
           id: chatId,
@@ -239,17 +207,13 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         setChat(virtualChat);
         setChatError(null);
       } else {
-        if (__DEV__) {
-          console.warn('⚠️ Cannot create virtual chat - no chatId provided');
-        }
+        
         setChat(null);
         setChatError('Chat not found and no chatId provided');
       }
       
     } catch (error) {
-      if (__DEV__) {
-        console.error('❌ Error fetching chat:', error);
-      }
+      
       // Only create fallback if we have a chatId
       if (chatId) {
         const fallbackChat = {
@@ -339,9 +303,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     if (chatChanged) {
       lastChatIdRef.current = chatIdForQuery;
       lastApiMessagesRef.current = null; // Always reset on chat change
-      if (__DEV__) {
-        console.log('🔄 Chat changed:', chatIdForQuery);
-      }
+      
     }
 
     // Process API messages - SIMPLIFIED LOGIC
@@ -393,9 +355,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             return timeA - timeB;
           });
           
-          if (__DEV__) {
-            console.log('✅ Messages set:', merged.length, 'messages');
-          }
+          
           
           return merged;
         });
@@ -413,9 +373,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           setNextCursor(null);
         }
       } else {
-        if (__DEV__) {
-          console.log('⏭️ Skipping - no change needed');
-        }
+        
       }
     } else if (Array.isArray(apiMessages) && apiMessages.length === 0) {
       // Empty response - only clear temp messages
@@ -437,24 +395,16 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     const setupSocket = async () => {
     if (!socketService.isConnected()) {
       try {
-          if (__DEV__) {
-            console.log('🔌 Connecting to socket for chat:', chatIdForQuery);
-          }
+          
           await socketService.connect(user.id);
-          if (__DEV__) {
-            console.log('✅ Socket connected');
-          }
+          
       } catch (err) {
-        if (__DEV__) {
-            console.warn('⚠️ Socket connection failed:', err.message);
-        }
+        
       }
     }
 
       if (socketService.isConnected() && chatIdForQuery) {
-        if (__DEV__) {
-          console.log('🚪 Joining chat room:', chatIdForQuery);
-        }
+        
     socketService.joinChat(chatIdForQuery, user.id);
       }
     };
@@ -462,17 +412,13 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     setupSocket();
 
     const handleNewMessage = (message) => {
-      if (__DEV__) {
-        console.log('📨 WebSocket message received:', message);
-      }
+      
       
       const messageChatId = String(message.ChatId || message.chatId || message.EnquiryId || message.enquiryId || '').trim();
       const currentChatId = String(chatIdForQuery || '').trim();
       
       if (messageChatId !== currentChatId) {
-      if (__DEV__) {
-          console.log('⚠️ Message ignored - chatId mismatch:', messageChatId, 'vs', currentChatId);
-        }
+      
         return;
       }
 
@@ -559,9 +505,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             refetchFn();
           }
         } catch (error) {
-        if (__DEV__) {
-            console.warn('⚠️ Could not refetch after WebSocket message:', error.message);
-        }
+        
       }
       }, 500);
     };
@@ -596,9 +540,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     socketService.on('messagesRead', handleMessagesRead);
     socketService.on('userTyping', handleUserTyping);
     
-    if (__DEV__) {
-      console.log('✅ Registered WebSocket listeners for chat:', chatIdForQuery);
-    }
+    
 
     // Cleanup
     return () => {
@@ -655,15 +597,11 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           }
         }
       } catch (error) {
-        if (__DEV__) {
-          console.error('❌ Error fetching chat:', error);
-        }
+        
       }
 
       if (!actualChatId) {
-        if (__DEV__) {
-          console.error('❌ Cannot send message: chat not found');
-        }
+        
         return false;
       }
     }
@@ -721,9 +659,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           refetchFn();
         }
       } catch (error) {
-        if (__DEV__) {
-          console.warn('⚠️ Could not refetch after sending:', error.message);
-        }
+        
       }
     }, 2000);
 
@@ -777,18 +713,14 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
               refetchFn();
             }
           } catch (error) {
-        if (__DEV__) {
-              console.warn('⚠️ Could not refetch after sending media:', error.message);
-        }
+        
       }
       }, 1500);
       }
 
       return sent;
     } catch (error) {
-      if (__DEV__) {
-        console.error('❌ Error sending media:', error);
-      }
+      
       return false;
     }
   }, [chatIdForQuery, user, uploadChatMedia]);
@@ -860,9 +792,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         setIsLoadingMore(false);
         return false;
     } catch (error) {
-      if (__DEV__) {
-        console.error('❌ Error loading more messages:', error);
-      }
+      
       setIsLoadingMore(false);
       return false;
     }
@@ -874,9 +804,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     if (initialChat && (initialChat._id || initialChat.id)) {
       const initialChatId = initialChat._id || initialChat.id;
       if (!chat?._id || chat._id !== initialChatId) {
-        if (__DEV__) {
-          console.log('🔄 initialChat changed, updating chat state:', initialChatId);
-        }
+        
         setChat({
           ...initialChat,
           _id: initialChatId,
@@ -888,9 +816,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     
     // Otherwise, update chat with chatId if it changed
     if (chatId && (!chat?._id || chat._id !== chatId)) {
-      if (__DEV__) {
-        console.log('🔄 chatId changed, updating chat state:', chatId);
-      }
+      
       // Update chat with chatId immediately so messages can load
       setChat(prev => ({
         ...prev,
@@ -935,28 +861,18 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         try {
           const refetchFn = refetchMessagesRef.current;
           if (refetchFn && typeof refetchFn === 'function') {
-            if (__DEV__) {
-              console.log('🔄 Executing force refetch for chat:', chatIdForQuery);
-            }
+            
             refetchFn().then(() => {
-              if (__DEV__) {
-                console.log('✅ Force refetch completed');
-              }
+              
             }).catch(err => {
-              if (__DEV__) {
-                console.warn('⚠️ Force refetch failed:', err.message);
-              }
+              
             });
             forceRefetchDoneRef.current = chatIdForQuery; // Mark as done for this chat
           } else {
-            if (__DEV__) {
-              console.warn('⚠️ Refetch function not available');
-            }
+            
           }
         } catch (error) {
-          if (__DEV__) {
-            console.warn('⚠️ Could not force refetch:', error.message);
-          }
+          
         }
       }, 500); // Increased delay to ensure query is initialized
       return () => clearTimeout(timer);

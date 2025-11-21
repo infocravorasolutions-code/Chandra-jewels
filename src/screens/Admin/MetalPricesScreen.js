@@ -60,9 +60,7 @@ const MetalPricesScreen = () => {
     await refetch();
   };
   
-  if (__DEV__) {
-    console.log('Loaded metal prices:', metalPrices);
-  }
+  
 
   // Initialize editing dates with today's date by default
   useEffect(() => {
@@ -175,7 +173,6 @@ const MetalPricesScreen = () => {
       
       setIsEditing(false);
     } catch (error) {
-      console.error('Error saving metal prices:', error);
       Alert.alert(
         'Error',
         error.message || 'Failed to update metal prices. Please try again.'
@@ -204,7 +201,6 @@ const MetalPricesScreen = () => {
               // Reload prices to get updated data (Redux will refetch automatically)
               await refetch();
             } catch (error) {
-              console.error('Error deleting metal price:', error);
               Alert.alert(
                 'Error',
                 error.message || 'Failed to delete metal price. Please try again.'
@@ -222,7 +218,6 @@ const MetalPricesScreen = () => {
     const today = new Date();
     const todayString = today.toISOString().split('T')[0];
     
-    console.log('handleStartEditing - Setting dates to:', todayString);
     
     const resetDates = {};
     ['gold', 'silver', 'platinum'].forEach(metal => {
@@ -287,7 +282,6 @@ const MetalPricesScreen = () => {
       // Reload prices to get the new data (Redux will refetch automatically)
       await refetch();
     } catch (error) {
-      console.error('Error adding metal price:', error);
       Alert.alert(
         'Error',
         error.message || 'Failed to add metal price. Please try again.'

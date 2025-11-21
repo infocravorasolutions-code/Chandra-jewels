@@ -29,7 +29,6 @@ export const registerForRemoteMessages = async () => {
     await messaging().registerDeviceForRemoteMessages();
     return true;
   } catch (error) {
-    console.warn('Failed to register device for remote messages', error);
     return false;
   }
 };
@@ -43,7 +42,6 @@ export const clearStoredPushToken = async () => {
   try {
     await messaging().deleteToken();
   } catch (error) {
-    console.warn('Failed to delete FCM token locally', error);
   }
   await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
 };

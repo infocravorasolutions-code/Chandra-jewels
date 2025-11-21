@@ -70,33 +70,13 @@ const PricingScreen = ({ route, navigation }) => {
   // Debug logging when enquiry data changes
   useEffect(() => {
     if (__DEV__ && enquiry) {
-      console.log('🔄 ========== PRICING SCREEN DATA UPDATE ==========');
-      console.log('🔄 Enquiry ID:', enquiry?.id || enquiry?._id);
-      console.log('🔄 Has fetchedEnquiry:', !!fetchedEnquiry);
-      console.log('🔄 Design Type:', designType);
-      console.log('🔄 Enquiry has Coral:', !!enquiry?.Coral, 'Length:', enquiry?.Coral?.length || 0);
-      console.log('🔄 Enquiry has Cad:', !!enquiry?.Cad, 'Length:', enquiry?.Cad?.length || 0);
-      console.log('🔄 OriginalData has Coral:', !!originalData?.Coral, 'Length:', originalData?.Coral?.length || 0);
-      console.log('🔄 OriginalData has Cad:', !!originalData?.Cad, 'Length:', originalData?.Cad?.length || 0);
-      console.log('🔄 Design Data Length:', designData?.length || 0);
-      console.log('🔄 Latest Design:', latestDesign ? 'Found' : 'Not Found');
       if (latestDesign) {
-        console.log('🔄 Latest Design Version:', latestDesign?.Version || latestDesign?.version);
-        console.log('🔄 Latest Design has Pricing:', !!latestDesign?.Pricing || !!latestDesign?.pricing);
         console.log('🔄 Latest Design Pricing Type:', Array.isArray(latestDesign?.Pricing || latestDesign?.pricing) ? 'Array' : typeof (latestDesign?.Pricing || latestDesign?.pricing));
       }
       console.log('🔄 Raw Pricing Type:', Array.isArray(rawPricing) ? 'Array' : typeof rawPricing);
-      console.log('🔄 Raw Pricing:', rawPricing);
-      console.log('🔄 Existing Pricing:', existingPricing);
       if (existingPricing && typeof existingPricing === 'object') {
         console.log('🔄 Pricing Keys:', Object.keys(existingPricing));
-        console.log('🔄 MetalPrice:', existingPricing?.MetalPrice);
-        console.log('🔄 DiamondsPrice:', existingPricing?.DiamondsPrice);
-        console.log('🔄 TotalPrice:', existingPricing?.TotalPrice);
-        console.log('🔄 Metal Weight:', existingPricing?.Metal?.Weight);
-        console.log('🔄 Stones Count:', existingPricing?.Stones?.length || 0);
       }
-      console.log('🔄 ================================================');
     }
   }, [enquiry, fetchedEnquiry, designType, designData, latestDesign, rawPricing, existingPricing, originalData]);
 
@@ -143,9 +123,7 @@ const PricingScreen = ({ route, navigation }) => {
   useFocusEffect(
     React.useCallback(() => {
       if (finalEnquiryId) {
-        if (__DEV__) {
-          console.log('🔄 PricingScreen focused - refetching enquiry:', finalEnquiryId);
-        }
+        
         // Refetch enquiry data to get latest pricing
         refetchEnquiry();
       }
@@ -155,13 +133,7 @@ const PricingScreen = ({ route, navigation }) => {
   // Update form data when pricing data changes
   useEffect(() => {
     if (existingPricing && typeof existingPricing === 'object' && Object.keys(existingPricing).length > 0) {
-      if (__DEV__) {
-        console.log('📝 ========== UPDATING FORM DATA ==========');
-        console.log('📝 Existing Pricing:', existingPricing);
-        console.log('📝 MetalPrice:', existingPricing?.MetalPrice);
-        console.log('📝 DiamondsPrice:', existingPricing?.DiamondsPrice);
-        console.log('📝 TotalPrice:', existingPricing?.TotalPrice);
-      }
+      
       
         const updatedFormData = {
         metalPrice: (existingPricing?.MetalPrice || existingPricing?.metalPrice || 0).toString(),
@@ -178,9 +150,7 @@ const PricingScreen = ({ route, navigation }) => {
         clientPricingMessage: existingPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
         };
       
-      if (__DEV__) {
-        console.log('📝 Updated Form Data:', updatedFormData);
-      }
+      
         
         setFormData(prevFormData => {
         // Always update to ensure latest data is shown
@@ -188,9 +158,7 @@ const PricingScreen = ({ route, navigation }) => {
             key => updatedFormData[key] !== prevFormData[key]
           );
         
-        if (__DEV__ && hasChanges) {
-          console.log('📝 Form data has changes, updating...');
-        }
+        
           
           return hasChanges ? updatedFormData : prevFormData;
         });
@@ -201,9 +169,7 @@ const PricingScreen = ({ route, navigation }) => {
         if (updatedStones.length > 0) {
           setStones(prevStones => {
           const stonesChanged = JSON.stringify(updatedStones) !== JSON.stringify(prevStones);
-          if (__DEV__ && stonesChanged) {
-            console.log('📝 Stones updated:', updatedStones.length, 'stones');
-            }
+          
           return stonesChanged ? updatedStones : prevStones;
           });
         }
@@ -212,18 +178,10 @@ const PricingScreen = ({ route, navigation }) => {
       const hasUndercut = !!(existingPricing?.UndercutPrice || existingPricing?.undercutPrice);
       setUndercutEnabled(prev => {
         if (hasUndercut !== prev && __DEV__) {
-          console.log('📝 Undercut enabled changed:', prev, '→', hasUndercut);
-      }
+          // Debug log if needed
+        }
         return hasUndercut;
       });
-      
-      if (__DEV__) {
-        console.log('📝 ==========================================');
-      }
-    } else if (__DEV__) {
-      console.log('⚠️ No pricing data found to update form');
-      console.log('⚠️ existingPricing:', existingPricing);
-      console.log('⚠️ latestDesign:', latestDesign);
     }
   }, [existingPricing, latestDesign]);
 
@@ -284,25 +242,9 @@ const PricingScreen = ({ route, navigation }) => {
         ? rawPricing[rawPricing.length - 1]
         : rawPricing;
       
-      console.log('========== PRICING SCREEN DEBUG ==========');
-      console.log('Design Type:', designType);
-      console.log('Latest Design:', latestDesign ? 'Found' : 'Not Found');
       console.log('Raw Pricing Type:', Array.isArray(rawPricing) ? 'Array' : 'Object');
-      console.log('Existing Pricing:', pricingObj);
       console.log('Pricing Keys:', Object.keys(pricingObj || {}));
-      console.log('MetalPrice:', pricingObj?.MetalPrice);
-      console.log('DiamondPrice:', pricingObj?.DiamondPrice);
-      console.log('DiamondsPrice:', pricingObj?.DiamondsPrice);
-      console.log('TotalPrice:', pricingObj?.TotalPrice);
-      console.log('MetalWeight:', pricingObj?.MetalWeight);
-      console.log('DiamondWeight:', pricingObj?.DiamondWeight);
-      console.log('TotalPieces:', pricingObj?.TotalPieces);
-      console.log('Loss:', pricingObj?.Loss);
-      console.log('Labour:', pricingObj?.Labour);
-      console.log('Duties:', pricingObj?.Duties);
-      console.log('Stones:', pricingObj?.Stones?.length || 0);
       console.log('Full Pricing Object:', JSON.stringify(pricingObj, null, 2));
-      console.log('==========================================');
     }
   }, [latestDesign, designType]);
 
@@ -334,9 +276,7 @@ const PricingScreen = ({ route, navigation }) => {
       const transformedStones = stones.map((stone, index) => {
         // Validate stone type is provided
         if (!stone.Type || stone.Type.trim() === '') {
-          if (__DEV__) {
-            console.warn(`Stone at index ${index} is missing Type, skipping`);
-          }
+          
           return null;
         }
         
@@ -348,9 +288,7 @@ const PricingScreen = ({ route, navigation }) => {
         ];
         const stoneType = stone.Type.trim();
         if (!validStoneTypes.some(valid => stoneType.toLowerCase().includes(valid.toLowerCase()))) {
-          if (__DEV__) {
-            console.warn(`Stone ${index} has unusual Type: ${stoneType}. Backend may reject it.`);
-          }
+          
         }
         
         // Parse and validate numeric fields
@@ -361,24 +299,16 @@ const PricingScreen = ({ route, navigation }) => {
         
         // Validate numeric values are valid numbers
         if (isNaN(ctWeight) || ctWeight < 0) {
-          if (__DEV__) {
-            console.warn(`Stone ${index} has invalid CaratWeight: ${stone.CaratWeight}`);
-          }
+          
         }
         if (isNaN(weight) || weight < 0) {
-          if (__DEV__) {
-            console.warn(`Stone ${index} has invalid Weight: ${stone.Weight}`);
-          }
+          
         }
         if (isNaN(pcs) || pcs < 0) {
-          if (__DEV__) {
-            console.warn(`Stone ${index} has invalid Pieces: ${stone.Pieces}`);
-          }
+          
         }
         if (isNaN(price) || price < 0) {
-          if (__DEV__) {
-            console.warn(`Stone ${index} has invalid Price: ${stone.Price}`);
-          }
+          
         }
         
         // Build transformed stone object - only include fields that have valid values
@@ -423,15 +353,9 @@ const PricingScreen = ({ route, navigation }) => {
 
       // Debug: Log enquiry structure to find clientId
       if (__DEV__ && !clientId) {
-        console.warn('========== CLIENT ID DEBUG ==========');
         console.warn('Enquiry object keys:', Object.keys(enquiry || {}));
         console.warn('Original data keys:', Object.keys(originalData || {}));
-        console.warn('enquiry.clientId:', enquiry?.clientId);
-        console.warn('enquiry.ClientId:', enquiry?.ClientId);
-        console.warn('originalData.clientId:', originalData?.clientId);
-        console.warn('originalData.ClientId:', originalData?.ClientId);
         console.warn('Full enquiry object:', JSON.stringify(enquiry, null, 2).substring(0, 500));
-        console.warn('=====================================');
       }
 
       // Validate required fields before sending
@@ -455,11 +379,7 @@ const PricingScreen = ({ route, navigation }) => {
 
       // Additional validation: Log client ID for debugging
       if (__DEV__) {
-        console.log('========== PRICING CALCULATION - CLIENT VALIDATION ==========');
-        console.log('Client ID being used:', clientId);
         console.log('Client ID format valid:', /^[0-9a-fA-F]{24}$/.test(clientId));
-        console.log('Note: Backend must have this client in database with Pricing configuration');
-        console.log('============================================================');
       }
 
       if (metalWeight <= 0 && transformedStones.length === 0) {
@@ -502,9 +422,7 @@ const PricingScreen = ({ route, navigation }) => {
       // Validate metal quality format (should be like "10K", "14K", "18K", "22K", "24K", etc.)
       const qualityMatch = metalQuality.match(/^(\d+)K$/i);
       if (!qualityMatch) {
-        if (__DEV__) {
-          console.warn(`Metal quality format may be invalid: ${metalQuality}`);
-        }
+        
       }
 
       // Prepare payload with validated data
@@ -569,9 +487,7 @@ const PricingScreen = ({ route, navigation }) => {
       // Call API
       const response = await calculatePricing(payload).unwrap();
 
-      if (__DEV__) {
-        console.log('Pricing Calculate Response:', response);
-      }
+      
 
       // Update form data with calculated values from response
       // Backend returns: { MetalPrice, DiamondsPrice, TotalPrice, Metal, DiamondWeight, Client, Stones }
@@ -652,8 +568,6 @@ const PricingScreen = ({ route, navigation }) => {
         }
 
         if (__DEV__) {
-          console.log('✅ Pricing calculated successfully');
-          console.log('Updated form data:', updates);
           console.log('Response summary:', {
             MetalPrice: response.MetalPrice,
             DiamondsPrice: response.DiamondsPrice,
@@ -667,14 +581,8 @@ const PricingScreen = ({ route, navigation }) => {
         Alert.alert('Success', 'Calculation completed');
       }
     } catch (error) {
-      console.error('========== PRICING CALCULATION ERROR ==========');
-      console.error('Error object:', error);
-      console.error('Error status:', error.status);
-      console.error('Error data:', error.data);
-      console.error('Error message:', error.message);
       console.error('Full error:', JSON.stringify(error, null, 2));
       console.error('Payload that was sent:', JSON.stringify(payload, null, 2));
-      console.error('===============================================');
       
       // Provide more detailed error message with actionable suggestions
       let errorMessage = 'Failed to calculate pricing.';
@@ -993,9 +901,6 @@ const PricingScreen = ({ route, navigation }) => {
       const pricingArray = [pricingObject];
 
       if (__DEV__) {
-        console.log('💾 ========== SAVE PRICING ==========');
-        console.log('Enquiry ID:', enquiryId);
-        console.log('Design Type:', designType);
         console.log('Version (formatted):', version);
         console.log('Version (raw from design):', latestDesign?.Version || latestDesign?.version);
         console.log('Metal Details:', {
@@ -1013,7 +918,6 @@ const PricingScreen = ({ route, navigation }) => {
           StonesCount: pricingObject.Stones?.length || 0,
         });
         console.log('Full Pricing Data:', JSON.stringify(pricingArray, null, 2));
-        console.log('===================================');
       }
 
       // Call API to save pricing
@@ -1043,7 +947,6 @@ const PricingScreen = ({ route, navigation }) => {
         ]
       );
     } catch (error) {
-      console.error('❌ Error saving pricing:', error);
       
       let errorMessage = 'Failed to save pricing. Please try again.';
       if (error?.data?.message) {
@@ -1066,9 +969,7 @@ const PricingScreen = ({ route, navigation }) => {
     // TODO: Implement Excel download
     const excelUrl = `${API_BASE_URL}/api/enquiries/files/${designCode}.xlsx?download=true`;
     Alert.alert('Info', 'Download Excel functionality will be implemented');
-    if (__DEV__) {
-      console.log('Excel URL:', excelUrl);
-    }
+    
   };
 
   const handleDownloadPricing = async () => {
@@ -1156,7 +1057,6 @@ const PricingScreen = ({ route, navigation }) => {
         await saveExcelFile(arrayBuffer, excelFilename);
       }
     } catch (error) {
-      console.warn('Backend Excel generation failed, using client-side Excel generation:', error.message);
       // Fallback to client-side Excel generation
       await generateExcelFile();
     }
@@ -1306,7 +1206,6 @@ const PricingScreen = ({ route, navigation }) => {
         }
       }
     } catch (error) {
-      console.error('Error generating Excel file:', error);
       Alert.alert('Error', `Failed to generate Excel file: ${error.message}`);
     }
   };
@@ -1365,18 +1264,13 @@ const PricingScreen = ({ route, navigation }) => {
       };
 
       if (__DEV__) {
-        console.log('🔄 ========== SYNC CLIENT PRICING ==========');
-        console.log('Client ID:', clientId);
         console.log('Payload:', JSON.stringify(payload, null, 2));
-        console.log('===========================================');
       }
 
       // Call API to sync client pricing
       const response = await calculatePricing(payload).unwrap();
 
-      if (__DEV__) {
-        console.log('✅ Sync Client Pricing Response:', response);
-      }
+      
 
       // Update form data with response
       if (response) {
@@ -1467,7 +1361,6 @@ const PricingScreen = ({ route, navigation }) => {
         Alert.alert('Warning', 'No pricing data received from server.');
       }
     } catch (error) {
-      console.error('❌ Error syncing client pricing:', error);
       
       let errorMessage = 'Failed to sync client pricing. Please try again.';
       if (error?.data?.message) {

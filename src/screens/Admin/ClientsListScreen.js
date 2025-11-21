@@ -65,15 +65,7 @@ const ClientsListScreen = ({ navigation }) => {
   };
 
   const handleAddClient = () => {
-    if (__DEV__) {
-      console.log('========== CREATE CLIENT DEBUG ==========');
-      console.log('User object:', user);
-      console.log('User role:', user?.role);
-      console.log('User roleNumber:', user?.roleNumber);
-      console.log('User roleId:', user?.roleId);
-      console.log('Is Admin:', isAdmin);
-      console.log('==========================================');
-    }
+    
     
     if (!isAdmin) {
       Alert.alert('Access Denied', 'Only administrators can create clients.');
@@ -83,7 +75,6 @@ const ClientsListScreen = ({ navigation }) => {
     try {
       navigation.navigate('CreateClient');
     } catch (error) {
-      console.error('Navigation error:', error);
       Alert.alert('Error', `Failed to navigate: ${error.message}`);
     }
   };
@@ -106,7 +97,6 @@ const ClientsListScreen = ({ navigation }) => {
               urlToUse = decodeURIComponent(urlMatch[1]);
             }
           } catch (error) {
-            console.error('Error parsing Google redirect URL:', error);
             return null;
           }
         }
@@ -134,9 +124,7 @@ const ClientsListScreen = ({ navigation }) => {
       
       // If it's an HTML page, don't return it
       if (isHtmlPage && !isImageUrl) {
-        if (__DEV__) {
-          console.warn('⚠️ Client image URL is an HTML page, not an image:', urlToUse);
-        }
+        
         return null;
       }
       
@@ -147,9 +135,7 @@ const ClientsListScreen = ({ navigation }) => {
       }
       
       // Not a recognized image URL
-      if (__DEV__) {
-        console.warn('⚠️ Client image URL does not appear to be an image:', urlToUse);
-      }
+      
       return null;
     };
     
@@ -175,9 +161,7 @@ const ClientsListScreen = ({ navigation }) => {
               }
             }}
             onLoad={() => {
-              if (__DEV__) {
-                console.log('✅ Client image loaded in list:', imageUrl);
-              }
+              
             }}
           />
         ) : (

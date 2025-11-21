@@ -16,6 +16,7 @@ import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
 import { useGetUsersQuery } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
+import { useStatusOptions } from '../../features/statuses/statusesHooks';
 
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // This screen is only for creating new enquiries
@@ -94,6 +95,12 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       label: user.name || user.email || 'Unknown',
       value: user.id || user._id,
     }));
+
+  // Get status options from API (cached)
+  const statusOptionsFromAPI = useStatusOptions();
+  
+  // Filter out "All Status" option for create/edit forms (only needed in filters)
+  const statusOptions = statusOptionsFromAPI.filter(opt => opt.value !== 'all');
 
 
   // Initialize form on mount (only for creating new enquiries)
@@ -209,8 +216,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   const handleNext = () => {
     if (validateForm()) {
-      console.log('📝 ========== ADD ENQUIRY STEP 1 COMPLETED ==========');
-      console.log('📝 Navigating to Step 2 with form data:');
       console.log('📝 Form Data:', JSON.stringify(formData, null, 2));
       console.log('📝 Form Data Summary:', {
         'Title': formData.title,
@@ -225,15 +230,12 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         'Status': formData.status,
         'AssignedTo': formData.assignedTo,
       });
-      console.log('📝 ===========================================');
       
       navigation.navigate('AddEnquiryStep2', { 
         formData,
         isEditMode: false,
       });
     } else {
-      console.warn('⚠️ Form validation failed - cannot proceed to Step 2');
-      console.warn('⚠️ Validation Errors:', errors);
     }
   };
 
@@ -241,19 +243,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Normal', value: 'Normal' },
     { label: 'High', value: 'High' },
     { label: 'Super High', value: 'Super High' },
-  ];
-
-  const statusOptions = [
-    { label: 'Enquiry Created', value: 'Enquiry Created' },
-    { label: 'Design Approval Pending', value: 'Design Approval Pending' },
-    { label: 'CAD', value: 'CAD' },
-    { label: 'Coral', value: 'Coral' },
-    { label: 'Approved Cad', value: 'Approved Cad' },
-    { label: 'Order Placement', value: 'Order Placement' },
-    { label: 'CAM Pending', value: 'CAM Pending' },
-    { label: 'Production', value: 'Production' },
-    { label: 'Completed', value: 'Completed' },
-    { label: 'Rejected', value: 'Rejected' },
   ];
 
   const categoryOptions = [

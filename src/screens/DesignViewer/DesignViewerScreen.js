@@ -72,12 +72,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
           setImageHeaders({
             'Authorization': `Bearer ${token}`,
           });
-          console.log('✅ Auth token loaded for image headers');
         } else {
-          console.warn('⚠️ No auth token found in AsyncStorage');
         }
       } catch (error) {
-        console.error('❌ Error loading auth token:', error);
       }
     };
     loadAuthToken();
@@ -89,9 +86,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
     const interval = setInterval(() => {
       setCurrentTime(new Date());
-      if (__DEV__) {
-        console.log('⏰ Timer tick - Updating current time for delete button check');
-      }
+      
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(interval);
@@ -104,12 +99,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
     try {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
-        console.warn('⚠️ No token available for authenticated image fetch');
         return;
       }
 
-      console.log('🔄 Attempting to fetch image with authentication...');
-      console.log('URL:', currentImageUrl);
       
       const response = await fetch(currentImageUrl, {
         method: 'GET',
@@ -120,25 +112,19 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
       if (response.ok) {
         const contentType = response.headers.get('content-type') || '';
-        console.log('✅ Fetch response OK, content-type:', contentType);
         
         // Check if response is JSON (API returns a URL object)
         if (contentType.includes('application/json')) {
-          console.log('📄 Response is JSON, parsing to extract image URL...');
           const jsonData = await response.json();
-          console.log('JSON response:', jsonData);
           
           // Extract the actual image URL from JSON (could be 'url', 'imageUrl', 'src', etc.)
           const actualImageUrl = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
           
           if (!actualImageUrl) {
-            console.error('❌ No image URL found in JSON response:', jsonData);
             setImageLoadingError(true);
             return;
           }
           
-          console.log('🖼️ Found image URL in JSON, fetching actual image...');
-          console.log('Actual image URL:', actualImageUrl);
           
           // Fetch the actual image from the URL (likely S3, may not need auth)
           const imageResponse = await fetch(actualImageUrl, {
@@ -150,14 +136,11 @@ const DesignViewerScreen = ({ route, navigation }) => {
           });
           
           if (!imageResponse.ok) {
-            console.error('❌ Failed to fetch actual image:', imageResponse.status, imageResponse.statusText);
             setImageLoadingError(true);
             return;
           }
           
-          console.log('✅ Actual image fetched, converting to base64...');
           const arrayBuffer = await imageResponse.arrayBuffer();
-          console.log('ArrayBuffer received, size:', arrayBuffer.byteLength);
           
           // Convert arrayBuffer to base64
           const bytes = new Uint8Array(arrayBuffer);
@@ -169,17 +152,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
             binary += String.fromCharCode.apply(null, chunk);
           }
           
-          console.log('Binary string created, length:', binary.length);
           
           let base64;
           try {
             base64 = btoa(binary);
-            console.log('Base64 conversion successful using btoa');
           } catch (e) {
-            console.log('btoa failed, trying Buffer...', e.message);
             if (typeof Buffer !== 'undefined') {
               base64 = Buffer.from(binary, 'binary').toString('base64');
-              console.log('Base64 conversion successful using Buffer');
             } else {
               throw new Error('Neither btoa nor Buffer available');
             }
@@ -188,19 +167,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
           const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
           const dataUri = `data:${imageContentType};base64,${base64}`;
           
-          console.log('✅ Image fetched and converted to data URI');
-          console.log('Data URI length:', dataUri.length);
-          console.log('Content type:', imageContentType);
-          console.log('Base64 length:', base64.length);
           
           setImageDataUri(dataUri);
           setImageLoadingError(false);
         } else {
           // Direct image response
-          console.log('✅ Response is direct image, converting to base64...');
           
           const arrayBuffer = await response.arrayBuffer();
-          console.log('ArrayBuffer received, size:', arrayBuffer.byteLength);
           
           // Convert arrayBuffer to base64 - chunked for large images
           const bytes = new Uint8Array(arrayBuffer);
@@ -212,17 +185,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
             binary += String.fromCharCode.apply(null, chunk);
           }
           
-          console.log('Binary string created, length:', binary.length);
           
           let base64;
           try {
             base64 = btoa(binary);
-            console.log('Base64 conversion successful using btoa');
           } catch (e) {
-            console.log('btoa failed, trying Buffer...', e.message);
             if (typeof Buffer !== 'undefined') {
               base64 = Buffer.from(binary, 'binary').toString('base64');
-              console.log('Base64 conversion successful using Buffer');
             } else {
               throw new Error('Neither btoa nor Buffer available');
             }
@@ -231,21 +200,14 @@ const DesignViewerScreen = ({ route, navigation }) => {
           const imageContentType = contentType || 'image/jpeg';
           const dataUri = `data:${imageContentType};base64,${base64}`;
           
-          console.log('✅ Image fetched and converted to data URI');
-          console.log('Data URI length:', dataUri.length);
-          console.log('Content type:', imageContentType);
-          console.log('Base64 length:', base64.length);
           
           setImageDataUri(dataUri);
           setImageLoadingError(false);
         }
       } else {
-        console.error('❌ Image fetch failed:', response.status, response.statusText);
-        console.error('Response headers:', response.headers);
         setImageLoadingError(true);
       }
     } catch (error) {
-      console.error('❌ Error fetching image with auth:', error);
       console.error('Error details:', JSON.stringify(error, null, 2));
       setImageLoadingError(true);
     }
@@ -253,18 +215,10 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
   // Comprehensive logging on mount and when data changes
   useEffect(() => {
-    console.log('========== DesignViewerScreen INITIALIZATION ==========');
     console.log('Route params:', JSON.stringify(route.params, null, 2));
-    console.log('designType:', designType);
-    console.log('enquiry exists:', !!enquiry);
     console.log('enquiry keys:', enquiry ? Object.keys(enquiry) : 'null');
     
     if (enquiry) {
-      console.log('Enquiry._originalData exists:', !!enquiry._originalData);
-      console.log('Enquiry.Cad exists:', !!enquiry.Cad);
-      console.log('Enquiry.Coral exists:', !!enquiry.Coral);
-      console.log('Enquiry.CadCode:', enquiry.CadCode);
-      console.log('Enquiry.CoralCode:', enquiry.CoralCode);
       
       if (enquiry.Cad) {
         console.log('Enquiry.Cad type:', Array.isArray(enquiry.Cad) ? 'Array' : typeof enquiry.Cad);
@@ -279,7 +233,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         console.log('Enquiry.Coral length:', Array.isArray(enquiry.Coral) ? enquiry.Coral.length : 'N/A');
       }
     }
-    console.log('======================================================');
   }, []);
 
   // Get enquiry ID for refetching
@@ -307,15 +260,11 @@ const DesignViewerScreen = ({ route, navigation }) => {
     );
     
     if (__DEV__) {
-      console.log('🔍 ========== CLIENT VERSION FILTERING ==========');
-      console.log('🔍 Original versions count:', originalLength);
-      console.log('🔍 Filtered versions count:', designData.length);
       console.log('🔍 Filtered versions:', designData.map(v => ({
         Version: v?.Version || v?.version,
         ShowToClient: v?.ShowToClient || v?.showToClient,
         IsVisibleToClient: v?.IsVisibleToClient || v?.isVisibleToClient
       })));
-      console.log('🔍 ==============================================');
     }
   }
 
@@ -335,17 +284,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
   // Helper function to check if version can be deleted (within 10 minutes)
   const canDeleteVersion = (version) => {
     if (!version) {
-      if (__DEV__) {
-        console.warn('⚠️ canDeleteVersion: No version provided');
-      }
+      
       return false;
     }
     
     // Only designers can delete versions
     if (!isDesigner) {
-      if (__DEV__) {
-        console.log('⚠️ canDeleteVersion: User is not a designer');
-      }
+      
       return false;
     }
     
@@ -366,30 +311,14 @@ const DesignViewerScreen = ({ route, navigation }) => {
     
     // Debug: Log all possible timestamp fields
     if (__DEV__) {
-      console.log('🔍 ========== VERSION TIMESTAMP DEBUG ==========');
       console.log('🔍 Version Object Keys:', Object.keys(version || {}));
-      console.log('🔍 UploadDate:', version?.UploadDate);
-      console.log('🔍 CreatedAt:', version?.CreatedAt);
-      console.log('🔍 UploadedAt:', version?.UploadedAt);
-      console.log('🔍 Timestamp:', version?.Timestamp);
-      console.log('🔍 uploadDate:', version?.uploadDate);
-      console.log('🔍 createdAt:', version?.createdAt);
-      console.log('🔍 uploadedAt:', version?.uploadedAt);
-      console.log('🔍 timestamp:', version?.timestamp);
-      console.log('🔍 UploadedDate:', version?.UploadedDate);
       console.log('🔍 CreatedDate:', version?.CreatedDate);  // ← Backend uses this!
-      console.log('🔍 createdDate:', version?.createdDate);
       console.log('🔍 Full Version Object:', JSON.stringify(version, null, 2));
-      console.log('🔍 ==============================================');
     }
     
     if (!uploadTime) {
       // If no timestamp, assume it's old (can't delete)
-      if (__DEV__) {
-        console.warn('⚠️ No upload timestamp found for version:', version?.Version || version?.version);
-        console.warn('⚠️ This version cannot be deleted - no timestamp available');
-        console.warn('⚠️ Backend should return UploadDate, CreatedAt, UploadedAt, or Timestamp field');
-      }
+      
       return false;
     }
     
@@ -402,16 +331,11 @@ const DesignViewerScreen = ({ route, navigation }) => {
       
       // Check if date is valid
       if (isNaN(upload.getTime())) {
-        if (__DEV__) {
-          console.error('❌ Invalid date format:', uploadTime);
-        }
+        
         return false;
       }
     } catch (error) {
-      if (__DEV__) {
-        console.error('❌ Error parsing upload time:', error);
-        console.error('❌ Upload time value:', uploadTime);
-      }
+      
       return false;
     }
     
@@ -421,15 +345,10 @@ const DesignViewerScreen = ({ route, navigation }) => {
     const canDelete = diffMinutes <= 10;
     
     if (__DEV__) {
-      console.log('⏰ ========== DELETE VERSION CHECK ==========');
-      console.log('⏰ Version:', version?.Version || version?.version);
       console.log('⏰ Upload Time (raw):', uploadTime);
       console.log('⏰ Upload Time (parsed):', upload.toISOString());
       console.log('⏰ Current Time:', now.toISOString());
       console.log('⏰ Time Difference:', diffMinutes.toFixed(2), 'minutes');
-      console.log('⏰ Can Delete:', canDelete);
-      console.log('⏰ Is Designer:', isDesigner);
-      console.log('⏰ ==========================================');
     }
     
     return canDelete;
@@ -437,9 +356,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
   
   // Comprehensive debug logging
   useEffect(() => {
-    console.log('========== DesignViewerScreen DATA STRUCTURE ==========');
-    console.log('designType:', designType);
-    console.log('originalData exists:', !!originalData);
     console.log('designData type:', Array.isArray(designData) ? 'Array' : typeof designData);
     console.log('designData length:', Array.isArray(designData) ? designData.length : 'N/A');
     
@@ -447,32 +363,20 @@ const DesignViewerScreen = ({ route, navigation }) => {
       console.log('designData array:', JSON.stringify(designData, null, 2));
     }
     
-    console.log('selectedDesign exists:', !!selectedDesign);
-    console.log('versionIndex:', versionIndex);
-    console.log('currentVersionNumber:', currentVersionNumber);
     if (selectedDesign) {
       console.log('selectedDesign keys:', Object.keys(selectedDesign));
-      console.log('selectedDesign.Images exists:', !!selectedDesign.Images);
-      console.log('selectedDesign.images exists:', !!selectedDesign.images);
-      console.log('selectedDesign.Version:', selectedDesign.Version);
       console.log('selectedDesign full object:', JSON.stringify(selectedDesign, null, 2));
     }
     
     console.log('images type:', Array.isArray(images) ? 'Array' : typeof images);
-    console.log('images length:', images.length);
     
     if (images.length > 0) {
       console.log('All images:', JSON.stringify(images, null, 2));
-      console.log('Current image index:', currentImageIndex);
       if (currentImageIndex < images.length) {
         console.log('Current image object:', JSON.stringify(images[currentImageIndex], null, 2));
       }
     } else {
-      console.warn('⚠️ NO IMAGES FOUND!');
-      console.log('selectedDesign?.Images:', selectedDesign?.Images);
-      console.log('selectedDesign?.images:', selectedDesign?.images);
     }
-    console.log('======================================================');
   }, [designType, designData, selectedDesign, images, currentImageIndex]);
   
   // Get code for Excel filename
@@ -532,14 +436,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
   // Get current image URL - try multiple endpoint patterns
   const getCurrentImageUrl = () => {
-    console.log('========== getCurrentImageUrl CALLED ==========');
-    console.log('images.length:', images.length);
-    console.log('currentImageIndex:', currentImageIndex);
     
     if (images.length === 0 || currentImageIndex >= images.length) {
-      console.warn('❌ No images available or index out of range');
-      console.log('images.length:', images.length);
-      console.log('currentImageIndex:', currentImageIndex);
       return null;
     }
     
@@ -547,29 +445,22 @@ const DesignViewerScreen = ({ route, navigation }) => {
     console.log('Current image object:', JSON.stringify(currentImage, null, 2));
     
     // Use centralized API base URL
-    console.log('API_BASE_URL:', API_BASE_URL);
 
     if (typeof currentImage === 'object' && currentImage !== null) {
       const imageKey = currentImage.Key || currentImage.key || '';
       const imageId = currentImage.Id || currentImage.id || currentImage._id || '';
       const imageUrl = currentImage.Url || currentImage.url || currentImage.URI || currentImage.uri || '';
       
-      console.log('Extracted values:');
-      console.log('- imageKey:', imageKey);
-      console.log('- imageId:', imageId);
-      console.log('- imageUrl:', imageUrl);
       console.log('- Full object keys:', Object.keys(currentImage));
       
       // If full URL is provided, use it directly
       if (imageUrl && (imageUrl.startsWith('http') || imageUrl.startsWith('https'))) {
-        console.log('✅ Using full URL from object:', imageUrl);
         return imageUrl;
       }
       
       // Try Key-based endpoints first (more reliable for filenames)
       if (imageKey) {
         const encodedKey = encodeURIComponent(imageKey);
-        console.log('Encoded Key:', encodedKey);
         
         // Try multiple endpoint patterns
         const possibleUrls = [
@@ -579,9 +470,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           `${API_BASE_URL}/api/enquiries/${enquiry?.id || enquiry?._id}/files/${encodedKey}`,
         ];
         
-        console.log('Possible URLs to try:');
         possibleUrls.forEach((url, index) => {
-          console.log(`  ${index + 1}. ${url}`);
         });
         
         // Return first URL (most likely)
@@ -600,7 +489,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         
         console.log('Possible URLs (using Id):');
         possibleUrls.forEach((url, index) => {
-          console.log(`  ${index + 1}. ${url}`);
         });
         
         const url = possibleUrls[0];
@@ -608,13 +496,10 @@ const DesignViewerScreen = ({ route, navigation }) => {
         return url;
       }
       
-      console.warn('❌ No image Key or Id found in object:', currentImage);
       console.log('Available keys:', Object.keys(currentImage));
     } else if (typeof currentImage === 'string') {
-      console.log('Current image is a string:', currentImage);
       
       if (currentImage.startsWith('http') || currentImage.startsWith('https')) {
-        console.log('✅ Using string as full URL:', currentImage);
         return currentImage;
       }
       
@@ -625,9 +510,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
       return url;
     }
     
-    console.warn('❌ Unable to generate image URL - unknown type:', typeof currentImage);
-    console.log('Current image value:', currentImage);
-    console.log('======================================================');
     return null;
   };
 
@@ -685,13 +567,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
       const encodedKey = encodeURIComponent(imageKey);
       const downloadUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}?download=true`;
 
-      if (__DEV__) {
-        console.log('========== DOWNLOADING IMAGE ==========');
-        console.log('Image Key:', imageKey);
-        console.log('Encoded Key:', encodedKey);
-        console.log('Download URL:', downloadUrl);
-        console.log('=======================================');
-      }
+      
 
       // Get image filename (use Description if available, otherwise use Key)
       const imageName = currentImage.Description || 
@@ -714,9 +590,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
       // Determine download path
       const downloadPath = `${RNFS.DownloadDirectoryPath}/${imageFilename}`;
 
-      if (__DEV__) {
-        console.log('Downloading image to:', downloadPath);
-      }
+      
 
       // Fetch the image from backend
       const response = await fetch(downloadUrl, {
@@ -740,9 +614,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           throw new Error('Backend did not return a valid download URL');
         }
 
-        if (__DEV__) {
-          console.log('Backend returned signed URL, downloading from S3:', jsonData.url);
-        }
+        
         
         // Download from S3 using fetch
         const s3Response = await fetch(jsonData.url, {
@@ -794,10 +666,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           throw new Error('Downloaded image file is empty');
         }
 
-        if (__DEV__) {
-          console.log('✅ Image downloaded successfully to:', downloadPath);
-          console.log('File size:', fileStats.size, 'bytes');
-        }
+        
 
         // Share/open the file
         try {
@@ -866,10 +735,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           throw new Error('Downloaded image file is empty');
         }
 
-        if (__DEV__) {
-          console.log('✅ Image downloaded successfully to:', downloadPath);
-          console.log('File size:', fileStats.size, 'bytes');
-        }
+        
 
         // Share/open the file
         try {
@@ -898,7 +764,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         }
       }
     } catch (error) {
-      console.error('Error downloading image:', error);
       Alert.alert(
         'Download Failed',
         error?.message || 'Failed to download image. Please try again.'
@@ -979,7 +844,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         }
 
         if (!imageKey) {
-          console.warn(`Skipping image ${i} - no key found`);
           continue;
         }
 
@@ -997,7 +861,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
           });
 
           if (!response.ok) {
-            console.warn(`Failed to download image ${i}: HTTP ${response.status}`);
             continue;
           }
 
@@ -1020,7 +883,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
           });
 
           if (!s3Response.ok) {
-            console.warn(`Failed to fetch image ${i} from S3`);
             continue;
           }
 
@@ -1063,7 +925,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
             imageFiles.push(`file://${tempFilePath}`);
           }
         } catch (error) {
-          console.error(`Error preparing image ${i} for share:`, error);
         }
       }
 
@@ -1100,7 +961,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
               await RNFS.unlink(localPath);
             }
           } catch (error) {
-            console.warn('Error cleaning up temp file:', error);
           }
         }
       }, 5000);
@@ -1116,7 +976,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         }, 1000);
       }
     } catch (error) {
-      console.error('Error sharing:', error);
       Alert.alert(
         'Share Failed',
         error?.message || 'Failed to share images. Please try again.'
@@ -1159,10 +1018,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
       // Determine download path
       const downloadPath = `${RNFS.DownloadDirectoryPath}/${excelFilename}`;
 
-      if (__DEV__) {
-        console.log('Downloading Excel from URL:', downloadUrl);
-        console.log('Downloading to:', downloadPath);
-      }
+      
 
       // First, check what the backend returns (JSON with URL or file stream)
       const response = await fetch(downloadUrl, {
@@ -1186,9 +1042,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           throw new Error('Backend did not return a valid download URL');
         }
 
-        if (__DEV__) {
-          console.log('Backend returned signed URL, downloading from S3:', jsonData.url);
-        }
+        
         
         // Download from S3 using fetch (more reliable than RNFS.downloadFile for S3)
         // RNFS.downloadFile sometimes saves the URL as text instead of downloading the file
@@ -1245,11 +1099,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           }
         }
 
-        if (__DEV__) {
-          console.log('✅ Excel file downloaded successfully from S3 to:', downloadPath);
-          console.log('File size:', fileStats.size, 'bytes');
-          console.log('Original array buffer size:', arrayBuffer.byteLength, 'bytes');
-        }
+        
 
         // Share/open the file
         try {
@@ -1297,10 +1147,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
         // Write file to device
         await RNFS.writeFile(downloadPath, base64, 'base64');
 
-        if (__DEV__) {
-          console.log('✅ Excel file downloaded successfully to:', downloadPath);
-          console.log('File size:', arrayBuffer.byteLength, 'bytes');
-        }
+        
 
         // Share/open the file
         try {
@@ -1323,7 +1170,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         }
       }
     } catch (error) {
-      console.error('Error downloading Excel file:', error);
       console.error('Error details:', {
         message: error.message,
         statusCode: error.statusCode,
@@ -1374,12 +1220,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           text: 'Approve',
           onPress: async () => {
             try {
-              if (__DEV__) {
-                console.log('========== APPROVING DESIGN VERSION FROM DESIGN VIEWER ==========');
-                console.log('Enquiry ID:', enquiryId);
-                console.log('Design Type:', designType);
-                console.log('Version:', version);
-              }
+              
 
               await approveDesignVersion({
                 enquiryId,
@@ -1394,7 +1235,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
                 refetchEnquiry();
               }
             } catch (error) {
-              console.error('Error approving design version:', error);
               Alert.alert(
                 'Error',
                 error?.data?.error || error?.message || 'Failed to approve design version. Please try again.'
@@ -1434,13 +1274,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
     }
 
     try {
-      if (__DEV__) {
-        console.log('========== REJECTING DESIGN VERSION FROM DESIGN VIEWER ==========');
-        console.log('Enquiry ID:', enquiryId);
-        console.log('Design Type:', designType);
-        console.log('Version:', version);
-        console.log('Reason:', rejectionReason);
-      }
+      
 
       await rejectDesignVersion({
         enquiryId,
@@ -1458,7 +1292,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         refetchEnquiry();
       }
     } catch (error) {
-      console.error('Error rejecting design version:', error);
       Alert.alert(
         'Error',
         error?.data?.error || error?.message || 'Failed to reject design version. Please try again.'
@@ -1500,13 +1333,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              if (__DEV__) {
-                console.log('🗑️ ========== DELETING VERSION ==========');
-                console.log('🗑️ Enquiry ID:', enquiryId);
-                console.log('🗑️ Design Type:', designType);
-                console.log('🗑️ Version:', version);
-                console.log('🗑️ ======================================');
-              }
+              
               
               await deleteDesignVersion({
                 enquiryId,
@@ -1527,7 +1354,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
                 navigation.goBack();
               }
             } catch (error) {
-              console.error('Error deleting version:', error);
               Alert.alert(
                 'Error',
                 error?.data?.error || error?.message || 'Failed to delete version. Please try again.'
@@ -1558,13 +1384,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
     const newShowToClient = newValue !== undefined ? newValue : !currentShowToClient;
 
     try {
-      if (__DEV__) {
-        console.log('========== UPDATING SHOW TO CLIENT ==========');
-        console.log('Enquiry ID:', enquiryId);
-        console.log('Design Type:', designType);
-        console.log('Version:', version);
-        console.log('ShowToClient:', newShowToClient);
-      }
+      
 
       await updateShowToClient({
         enquiryId,
@@ -1578,7 +1398,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
         refetchEnquiry();
       }
     } catch (error) {
-      console.error('Error updating ShowToClient:', error);
       Alert.alert(
         'Error',
         error?.data?.error || error?.message || 'Failed to update ShowToClient. Please try again.'
@@ -1620,15 +1439,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
     try {
       const enquiryId = enquiry.id || enquiry._id;
       
-      if (__DEV__) {
-        console.log('========== UPDATING ASSET DESCRIPTION ==========');
-        console.log('Enquiry ID:', enquiryId);
-        console.log('Design Type:', designType);
-        console.log('Version:', version);
-        console.log('Asset ID:', assetId);
-        console.log('Description:', comment);
-        console.log('================================================');
-      }
+      
 
       await updateAssetDescription({
         enquiryId,
@@ -1653,7 +1464,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
       Alert.alert('Success', 'Image description updated successfully');
     } catch (error) {
-      console.error('Error updating asset description:', error);
       const errorMessage = error?.data?.error || error?.data?.message || error?.message || 'Failed to update description. Please try again.';
       Alert.alert('Error', errorMessage);
     }
@@ -1688,18 +1498,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
   // Log when URL is generated and trigger fetch if needed
   useEffect(() => {
-    console.log('========== IMAGE URL GENERATION ==========');
-    console.log('currentImageUrl:', currentImageUrl);
-    console.log('currentImageIndex:', currentImageIndex);
-    console.log('images.length:', images.length);
-    console.log('Will render image:', !!currentImageUrl);
-    console.log('Platform:', Platform.OS);
-    console.log('Use fetch directly:', useFetchDirectly);
-    console.log('==========================================');
     
     // On Android, skip Image component and use fetch directly to avoid 401 errors
     if (currentImageUrl && useFetchDirectly && !imageDataUri) {
-      console.log('📱 Android detected - Using fetch directly to avoid Image component errors');
       fetchImageWithAuth();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1729,12 +1530,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
                         style={styles.image}
                         resizeMode="contain"
                         onLoadStart={() => {
-                          console.log('🖼️ Image component load started for URL:', currentImageUrl);
-                          console.log('🖼️ Using headers:', imageHeaders);
                           setImageLoadingError(false);
                         }}
                         onLoad={() => {
-                          console.log('✅ Image loaded successfully via Image component:', currentImageUrl);
                           setImageLoadingError(false);
                         }}
                         onError={(error) => {
@@ -1757,13 +1555,11 @@ const DesignViewerScreen = ({ route, navigation }) => {
                           
                           // If 401, trigger fetch fallback immediately
                           if (is401) {
-                            console.error('❌ 401 Unauthorized - Triggering fetch fallback immediately');
                             setImageLoadingError(true);
                             fetchImageWithAuth();
                           }
                         }}
                         onLoadEnd={() => {
-                          console.log('🖼️ Image component load ended');
                         }}
                       />
                     </TouchableOpacity>
@@ -1792,13 +1588,10 @@ const DesignViewerScreen = ({ route, navigation }) => {
                         style={styles.image}
                         resizeMode="contain"
                         onLoadStart={() => {
-                          console.log('🖼️ Data URI image load started');
-                          console.log('Data URI length:', imageDataUri.length);
                           console.log('Data URI starts with:', imageDataUri.substring(0, 50));
                           console.log('Data URI format check:', imageDataUri.startsWith('data:image'));
                         }}
                         onLoad={() => {
-                          console.log('✅ Image loaded successfully via data URI');
                           setImageLoadingError(false);
                         }}
                         onError={(error) => {
@@ -1816,7 +1609,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
                           setImageLoadingError(true);
                         }}
                         onLoadEnd={() => {
-                          console.log('🖼️ Data URI image load ended');
                         }}
                       />
                     </TouchableOpacity>
@@ -2009,12 +1801,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
                   const canDelete = canDeleteVersion(selectedDesign);
                   
                   if (__DEV__) {
-                    console.log('🔘 ========== DELETE BUTTON RENDER ==========');
-                    console.log('🔘 Selected Design:', selectedDesign?.Version || selectedDesign?.version);
-                    console.log('🔘 Can Delete:', canDelete);
-                    console.log('🔘 Is Designer:', isDesigner);
                     console.log('🔘 Button will be:', canDelete ? 'ENABLED (Red)' : 'DISABLED (Gray)');
-                    console.log('🔘 ==========================================');
                   }
                   
                   return canDelete ? (

@@ -14,6 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { useGetDashboardDataQuery, useGetEnquiriesQuery, useGetStatusStatisticsQuery } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
+import { useStatuses } from '../../features/statuses/statusesHooks';
 import { StatusCard, Card, EnquiryStatusCard } from '../../components/cards/Cards';
 import { Button, SearchInput } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -42,7 +43,6 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
           });
         }
       } catch (error) {
-        console.error('Error loading auth token:', error);
       }
     };
     loadAuthToken();
@@ -70,9 +70,7 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
           const urlMatch = imageUrl.match(/url=([^&]+)/);
           if (urlMatch) {
             urlToUse = decodeURIComponent(urlMatch[1]);
-            if (__DEV__) {
-              console.log('🔍 Extracted URL from Google redirect:', urlToUse);
-            }
+            
           }
         }
         
@@ -90,9 +88,7 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
         
         // If it's an HTML page, don't try to load it as an image
         if (isHtmlPage && !isImageUrl) {
-          if (__DEV__) {
-            console.warn('⚠️ URL is an HTML page, not an image:', urlToUse);
-          }
+          
           setActualImageUrl(null);
           setIsLoadingImage(false);
           return;
@@ -128,18 +124,14 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
                 return;
               } else if (contentType.includes('text/html')) {
                 // API returned HTML, not an image
-                if (__DEV__) {
-                  console.warn('⚠️ API returned HTML instead of image:', urlToUse);
-                }
+                
                 setActualImageUrl(null);
                 setIsLoadingImage(false);
                 return;
               }
             }
           } catch (fetchError) {
-            if (__DEV__) {
-              console.error('Error fetching image from API:', fetchError);
-            }
+            
           }
         }
         
@@ -148,14 +140,11 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
           setActualImageUrl(urlToUse);
         } else {
           // Not a recognized image URL, show placeholder
-          if (__DEV__) {
-            console.warn('⚠️ URL does not appear to be an image:', urlToUse);
-          }
+          
           setActualImageUrl(null);
         }
         setIsLoadingImage(false);
       } catch (error) {
-        console.error('Error processing image URL:', error);
         setActualImageUrl(null);
         setIsLoadingImage(false);
       }
@@ -187,9 +176,7 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
             setImageError(true);
           }}
           onLoad={() => {
-            if (__DEV__) {
-              console.log('✅ Client image loaded successfully');
-            }
+            
             setIsLoadingImage(false);
           }}
         />
@@ -256,8 +243,53 @@ const DashboardScreen = ({ navigation }) => {
   // Extract enquiries array from response (new API returns { data, pagination })
   const enquiriesData = enquiriesResponse?.data || [];
   
-  // Extract status statistics array
-  const statusStats = statusStatisticsData?.statusStats || [];
+  // Extract status statistics array from aggregate endpoint
+  const statusStatsRaw = statusStatisticsData?.statusStats || [];
+  
+  // Get statuses from API to map counts
+  const { statuses } = useStatuses();
+  
+  // Map aggregate counts to status list from API
+  // Create a map of status name (lowercase) to count from aggregate endpoint
+  const statusCountMap = useMemo(() => {
+    const map = new Map();
+    statusStatsRaw.forEach(item => {
+      const statusName = (item.name || item.status || item.Status || '').toLowerCase();
+      const count = item.count || item.Count || item.value || 0;
+      if (statusName) {
+        map.set(statusName, count);
+      }
+    });
+    return map;
+  }, [statusStatsRaw]);
+  
+  // Map counts to status list from API
+  const statusStats = useMemo(() => {
+    if (!statuses || statuses.length === 0) {
+      // If statuses not loaded yet, return raw stats
+      return statusStatsRaw;
+    }
+    
+    // Create a map for quick lookup of status names (case-insensitive)
+    const statusNameMap = new Map();
+    statuses.forEach(status => {
+      const name = (status.name || status.Name || '').toLowerCase();
+      if (name) {
+        statusNameMap.set(name, status);
+      }
+    });
+    
+    // Map each status from API to its count from aggregate endpoint
+    return statuses.map(status => {
+      const statusName = (status.name || status.Name || '').toLowerCase();
+      const count = statusCountMap.get(statusName) || 0;
+      
+      return {
+        name: status.name || status.Name,
+        count: count,
+      };
+    }).filter(item => item.name); // Filter out any items without a name
+  }, [statuses, statusCountMap, statusStatsRaw]);
 
   // Compute clients with enquiry counts using aggregate data
   const clients = useMemo(() => {
@@ -271,9 +303,7 @@ const DashboardScreen = ({ navigation }) => {
     // Create a map of client ID to enquiry count from aggregate data
     const clientCountMap = new Map();
     if (Array.isArray(clientAggregateData)) {
-      if (__DEV__) {
-        console.log('🔍 [DASHBOARD] Client Aggregate Data:', clientAggregateData.length, 'clients');
-      }
+      
       clientAggregateData.forEach(item => {
         // Aggregate API returns client ID in 'name' field
         const clientId = item.name || item.id || item._id;
@@ -282,9 +312,7 @@ const DashboardScreen = ({ navigation }) => {
           // Store with multiple key formats for matching
           clientCountMap.set(String(clientId), count);
           clientCountMap.set(clientId, count);
-          if (__DEV__) {
-            console.log('🔍 [DASHBOARD] Mapped client ID:', clientId, '→ count:', count);
-          }
+          
         }
       });
     }

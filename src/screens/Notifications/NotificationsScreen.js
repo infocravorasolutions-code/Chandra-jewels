@@ -110,7 +110,6 @@ const NotificationsScreen = ({ navigation }) => {
     try {
       await Promise.all([refetch(), refetchUnreadCount()]);
     } catch (error) {
-      console.error('Error refreshing notifications:', error);
     } finally {
       setRefreshing(false);
     }
@@ -123,7 +122,6 @@ const NotificationsScreen = ({ navigation }) => {
     try {
       await markNotificationRead(notification.id).unwrap();
     } catch (error) {
-      console.error('Error marking notification as read:', error);
     }
   }, [markNotificationRead]);
 
@@ -134,7 +132,6 @@ const NotificationsScreen = ({ navigation }) => {
     try {
       await markAllNotificationsRead().unwrap();
     } catch (error) {
-      console.error('Error marking all notifications as read:', error);
     }
   }, [derivedUnreadCount, markAllNotificationsRead]);
 

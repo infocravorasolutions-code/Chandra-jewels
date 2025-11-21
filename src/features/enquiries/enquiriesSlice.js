@@ -19,7 +19,7 @@ const initialState = {
   },
   searchQuery: '',
   sortBy: 'createdAt',
-  sortOrder: 'desc',
+  sortOrder: 'asc',
   selectedEnquiryId: null,
   selectedStatus: 'All',
   selectedClient: 'All',
@@ -27,7 +27,7 @@ const initialState = {
     currentPage: 1,
     totalPages: 1,
     total: 0,
-    limit: 10, // Changed to 10 for lazy loading
+    limit: 25, // Increased to 25 for better initial display (admins get 50)
   },
 };
 

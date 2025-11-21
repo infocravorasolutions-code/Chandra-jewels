@@ -38,7 +38,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { chatId, chat: routeChat, enquiry, enquiryId: routeEnquiryId, chatType } = route.params || {};
   const alert = useAlert();
-  console.log('routeChat params:', { chatId, routeChat, enquiry, routeEnquiryId, chatType });
   
   // Get enquiryId from route params (fallback to chat or enquiry object)
   const enquiryId = routeEnquiryId || routeChat?.EnquiryId || routeChat?.enquiryId || enquiry?.id || enquiry?._id;
@@ -71,9 +70,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   useFocusEffect(
     React.useCallback(() => {
       if (chat?._id && !messagesLoading) {
-        if (__DEV__) {
-          console.log('🔄 Screen focused - refetching messages for chat:', chat._id);
-        }
+        
         // Small delay to ensure screen is fully mounted
         const timer = setTimeout(() => {
           refetchMessages();
@@ -267,23 +264,18 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
     picker(options, async (response) => {
       if (response.didCancel) {
-        if (__DEV__) {
-          console.log('User cancelled media picker');
-        }
+        
         return;
       }
 
       if (response.errorCode) {
-        console.error('ImagePicker Error:', response.errorMessage);
         alert.error('Error', response.errorMessage || 'Failed to pick media');
         return;
       }
 
       const asset = response.assets?.[0];
       if (!asset || !chat) {
-        if (__DEV__) {
-          console.warn('No asset selected or chat not available');
-        }
+        
         return;
       }
 
@@ -328,12 +320,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
         if (!sent) {
           alert.error('Error', 'Failed to send media. Please try again.');
         } else {
-          if (__DEV__) {
-            console.log('✅ Media sent successfully');
-          }
+          
         }
       } catch (error) {
-        console.error('Error sending media:', error);
         alert.error(
           'Error',
           error.message || 'Failed to send media. Please try again.'

@@ -11,9 +11,7 @@ import * as Sentry from '@sentry/react-native';
 export const testSimpleError = () => {
   try {
     Sentry.captureMessage('Test Error: This is a test error message from Sentry', 'error');
-    console.log('✅ Test error sent to Sentry');
   } catch (error) {
-    console.error('Failed to send test error:', error);
   }
 };
 
@@ -25,7 +23,6 @@ export const testException = () => {
     throw new Error('Test Exception: This is a test exception for Sentry');
   } catch (error) {
     Sentry.captureException(error);
-    console.log('✅ Test exception sent to Sentry');
   }
 };
 
@@ -52,7 +49,6 @@ export const testErrorWithContext = () => {
       user: 'Test User',
     });
     Sentry.captureException(new Error('Test Error with Context and Tags'));
-    console.log('✅ Test error with context sent to Sentry');
   });
 };
 
@@ -61,7 +57,6 @@ export const testErrorWithContext = () => {
  */
 export const testWarning = () => {
   Sentry.captureMessage('Test Warning: This is a warning level message', 'warning');
-  console.log('✅ Test warning sent to Sentry');
 };
 
 /**
@@ -69,7 +64,6 @@ export const testWarning = () => {
  */
 export const testInfo = () => {
   Sentry.captureMessage('Test Info: This is an info level message', 'info');
-  console.log('✅ Test info sent to Sentry');
 };
 
 /**
@@ -88,7 +82,6 @@ export const testNetworkError = () => {
       statusCode: 500,
     });
     Sentry.captureException(networkError);
-    console.log('✅ Test network error sent to Sentry');
   });
 };
 
@@ -111,7 +104,6 @@ export const testErrorWithBreadcrumbs = () => {
   
   // Now capture the error
   Sentry.captureException(new Error('Test Error with Breadcrumbs'));
-  console.log('✅ Test error with breadcrumbs sent to Sentry');
 };
 
 /**
@@ -125,7 +117,6 @@ export const testErrorWithUser = () => {
   });
   
   Sentry.captureException(new Error('Test Error with User Context'));
-  console.log('✅ Test error with user context sent to Sentry');
   
   // Clear user after test
   setTimeout(() => {
@@ -145,7 +136,6 @@ export const testPerformance = () => {
   // Simulate some work
   setTimeout(() => {
     transaction.finish();
-    console.log('✅ Test performance transaction sent to Sentry');
   }, 500);
 };
 

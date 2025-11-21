@@ -47,9 +47,7 @@ export const getCachedImage = async (url) => {
 
     return parsed.dataUri || parsed.url || null;
   } catch (error) {
-    if (__DEV__) {
-      console.warn('Error reading image cache:', error);
-    }
+    
     return null;
   }
 };
@@ -75,9 +73,7 @@ export const cacheImage = async (url, dataUri) => {
       console.log('✅ Image cached:', url.substring(0, 50) + '...');
     }
   } catch (error) {
-    if (__DEV__) {
-      console.warn('Error caching image:', error);
-    }
+    
   }
 };
 
@@ -91,14 +87,10 @@ export const clearImageCache = async () => {
     
     if (cacheKeys.length > 0) {
       await AsyncStorage.multiRemove(cacheKeys);
-      if (__DEV__) {
-        console.log(`✅ Cleared ${cacheKeys.length} cached images`);
-      }
+      
     }
   } catch (error) {
-    if (__DEV__) {
-      console.error('Error clearing image cache:', error);
-    }
+    
   }
 };
 
@@ -127,13 +119,9 @@ export const clearExpiredCache = async () => {
       }
     }
 
-    if (__DEV__ && clearedCount > 0) {
-      console.log(`✅ Cleared ${clearedCount} expired image cache entries`);
-    }
+    
   } catch (error) {
-    if (__DEV__) {
-      console.warn('Error clearing expired cache:', error);
-    }
+    
   }
 };
 
@@ -163,9 +151,7 @@ export const getCacheSize = async () => {
       sizeMB: (totalSize / (1024 * 1024)).toFixed(2),
     };
   } catch (error) {
-    if (__DEV__) {
-      console.warn('Error calculating cache size:', error);
-    }
+    
     return { count: 0, sizeMB: '0' };
   }
 };

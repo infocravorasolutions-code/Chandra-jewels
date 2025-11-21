@@ -30,7 +30,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   
   // Log when Step 2 screen loads
   useEffect(() => {
-    console.log('📋 ========== ADD ENQUIRY STEP 2 LOADED ==========');
     console.log('📋 Received Form Data from Step 1:', JSON.stringify(formData, null, 2));
     console.log('📋 Form Data Summary:', {
       'Title': formData?.title,
@@ -39,9 +38,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       'Category': formData?.category,
       'StoneType': formData?.stoneType,
     });
-    console.log('📋 Is Edit Mode:', isEditMode);
-    console.log('📋 User:', { id: user?.id, role: user?.role });
-    console.log('📋 ===========================================');
   }, []);
   
   // Redux mutations
@@ -67,7 +63,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
         return false;
       }
     }
@@ -99,7 +94,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
         // On newer Android versions, permission might not be needed
         return true;
       }
@@ -122,7 +116,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
 
     launchCamera(options, (response) => {
       if (response.didCancel) {
-        console.log('User cancelled camera picker');
       } else if (response.errorCode) {
         Alert.alert('Error', `Camera Error: ${response.errorMessage}`);
       } else if (response.assets && response.assets.length > 0) {
@@ -154,7 +147,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
 
     launchImageLibrary(options, (response) => {
       if (response.didCancel) {
-        console.log('User cancelled image picker');
       } else if (response.errorCode) {
         Alert.alert('Error', `Image Picker Error: ${response.errorMessage}`);
       } else if (response.assets && response.assets.length > 0) {
@@ -192,14 +184,10 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   };
 
   const handleSubmit = async () => {
-    console.log('========== ENQUIRY CREATION STARTED ==========');
     console.log('Timestamp:', new Date().toISOString());
-    console.log('User ID:', user?.id);
-    console.log('Is Edit Mode:', isEditMode);
     console.log('Form Data from Step 1:', JSON.stringify(formData, null, 2));
     
     if (!user?.id) {
-      console.error('❌ User not found - cannot create enquiry');
       Alert.alert('Error', 'User not found. Please login again.');
       return;
     }
@@ -239,9 +227,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       });
       
       if (selectedImages.length > 0) {
-        console.log('🖼️ Starting image upload process...');
         try {
-          console.log('📤 Uploading images:', selectedImages.length);
           console.log('📤 Selected images details:', selectedImages.map((img, idx) => ({
             index: idx,
             uri: img.uri?.substring(0, 50) + '...',
@@ -253,23 +239,16 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           for (let i = 0; i < selectedImages.length; i++) {
             const image = selectedImages[i];
             try {
-              if (__DEV__) {
-                console.log(`Uploading image ${i + 1}/${selectedImages.length}:`, image);
-              }
+              
               
               const uploadedImage = await uploadImage(image).unwrap();
               if (uploadedImage) {
                 uploadedImages.push(uploadedImage);
-                if (__DEV__) {
-                  console.log(`Image ${i + 1} uploaded successfully:`, uploadedImage);
-                }
+                
               }
             } catch (imageError) {
-              console.error(`Error uploading image ${i + 1}:`, imageError.message || imageError);
               // Continue with other images even if one fails
-              if (__DEV__) {
-                console.error('Full error:', imageError);
-              }
+              
             }
           }
           
@@ -286,24 +265,18 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           
           // Warn user if some images failed
           if (uploadedImages.length < selectedImages.length) {
-            if (__DEV__) {
-              console.warn(`Image upload: ${uploadedImages.length}/${selectedImages.length} images uploaded successfully`);
-            }
+            
             // Don't show alert for partial failures - just log it
             // The enquiry will be created with the successfully uploaded images
           }
         } catch (uploadError) {
-          console.error('Error during image upload process:', uploadError);
           // Continue with enquiry creation even if image upload fails
           // Don't show alert - images are optional, enquiry creation should proceed
-          if (__DEV__) {
-            console.warn('Image upload failed, but continuing with enquiry creation without images');
-          }
+          
         }
       }
       
       // Prepare enquiry data according to API structure
-      console.log('🔨 Preparing enquiry data...');
       
       enquiryData = {
         // Only include Id for updates, not for new enquiries
@@ -367,9 +340,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       // If updating, we might want to preserve existing images, so only add if new images were uploaded
       if (uploadedImages.length > 0) {
         enquiryData.ReferenceImages = uploadedImages;
-        console.log('📎 Reference Images added to enquiry data:', uploadedImages.length, 'images');
       } else {
-        console.log('📎 No reference images to add');
       }
 
       console.log('📤 Final Enquiry Data to be sent:', JSON.stringify(enquiryData, null, 2));
@@ -389,9 +360,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       });
 
       if (isEditMode && enquiryToEdit?.id) {
-        console.log('🔄 Updating existing enquiry:', enquiryToEdit.id);
         const updateResult = await updateEnquiry({ id: enquiryToEdit.id, ...enquiryData }).unwrap();
-        console.log('✅ Enquiry updated successfully:', updateResult);
         
         // Construct updated enquiry object from form data since API only returns _id
         // Normalize priority for display
@@ -467,7 +436,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           { cancelable: false }
         );
       } else {
-        console.log('🆕 Creating new enquiry...');
         console.log('🌐 API Request Details:', {
           'Endpoint': '/api/enquiries',
           'Method': 'POST',
@@ -477,14 +445,12 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         
         const createResult = await createEnquiry(enquiryData).unwrap();
         
-        console.log('✅ Enquiry created successfully!');
         console.log('📥 API Response:', JSON.stringify(createResult, null, 2));
         console.log('📋 Created Enquiry Details:', {
           'Enquiry ID': createResult?.id || createResult?._id || 'Not returned',
           'Name': createResult?.Name || createResult?.name || enquiryData.Name,
           'Status': createResult?.Status || createResult?.status || enquiryData.Status,
         });
-        console.log('========== ENQUIRY CREATION COMPLETED SUCCESSFULLY ==========');
         
         Alert.alert(
           'Enquiry Created',
@@ -502,13 +468,8 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         );
       }
     } catch (error) {
-      console.error('❌ ========== ENQUIRY CREATION ERROR ==========');
-      console.error('❌ Error Type:', isEditMode ? 'UPDATE' : 'CREATE');
       console.error('❌ Timestamp:', new Date().toISOString());
-      console.error('❌ Error Status:', error.status);
-      console.error('❌ Error Status Code:', error.status || error?.data?.status || 'Unknown');
       console.error('❌ Error Data:', JSON.stringify(error.data, null, 2));
-      console.error('❌ Error Message:', error.message || error?.data?.message || error?.data?.error || 'Unknown error');
       console.error('❌ Full Error Object:', JSON.stringify(error, null, 2));
       
       if (enquiryData) {
@@ -526,7 +487,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         console.error('⚠️ Form Data available:', JSON.stringify(formData, null, 2));
       }
       
-      console.error('❌ ===========================================');
       
       // Provide more detailed error message
       let errorMessage = `Failed to ${isEditMode ? 'update' : 'create'} enquiry.`;

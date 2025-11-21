@@ -18,6 +18,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../../context/AuthContext';
 import { useFilteredEnquiries } from '../../features/enquiries/enquiriesHooks';
 import { useClients } from '../../features/clients/clientsHooks';
+import { useStatusOptions } from '../../features/statuses/statusesHooks';
 import {
   setFilters,
   setSearchQuery,
@@ -50,12 +51,21 @@ if (__DEV__) {
 
 const { width } = Dimensions.get('window');
 
-const statusList = ['All', 'Enquiry Created', 'Design Approval Pending', 'CAD', 'Coral', 'Approved Cad', 'Order Placement', 'CAM Pending', 'Production', 'Completed', 'Rejected'];
-
 const EnquiryListScreen = ({ navigation }) => {
   const dispatch = useDispatch();
   const { user } = useAuth();
   const route = useRoute();
+  
+  // Check if user is a designer (coral or cad)
+  const isDesigner = user?.role === 'coral' || user?.role === 'cad';
+  
+  // Get status options from API (cached) - already includes role-based filtering
+  const statusOptions = useStatusOptions();
+  
+  // Convert status options to status list (array of status names/values)
+  const statusList = useMemo(() => {
+    return statusOptions.map(opt => opt.value === 'all' ? 'All' : opt.value);
+  }, [statusOptions]);
   
   // Redux state
   const filters = useSelector(state => state.enquiries.filters);
@@ -205,6 +215,23 @@ const EnquiryListScreen = ({ navigation }) => {
       if (!enrichedEnquiries || !Array.isArray(enrichedEnquiries) || enrichedEnquiries.length === 0) {
         // Fallback to original filtered if no enriched data
         return Array.isArray(filteredEnquiries) ? filteredEnquiries : [];
+      }
+
+      // Debug: Log first enquiry before filtering
+      if (__DEV__ && enrichedEnquiries.length > 0) {
+        const firstEnquiry = enrichedEnquiries[0];
+        console.log('🔍 ========== BEFORE ENRICHED FILTERING ==========');
+        console.log('🔍 First enriched enquiry id:', firstEnquiry?.id);
+        console.log('🔍 First enriched enquiry Name:', firstEnquiry?.Name || firstEnquiry?.title);
+        console.log('🔍 First enriched enquiry AssignedTo:', firstEnquiry?.AssignedTo);
+        console.log('🔍 Total enriched enquiries:', enrichedEnquiries.length);
+        console.log('🔍 Active filters:', {
+          status: filters.status,
+          priority: filters.priority,
+          clientId: filters.clientId,
+          assignedTo: filters.assignedTo,
+        });
+        console.log('🔍 ==============================================');
       }
 
       // Start with a copy and ensure consistent initial order
@@ -582,6 +609,28 @@ const EnquiryListScreen = ({ navigation }) => {
     
     // No need to sort again - we already sorted before filtering
     // Filtering preserves order, so the sorted order is maintained
+      
+      // Debug: Log first enquiry after filtering
+      if (__DEV__ && filtered.length > 0) {
+        const firstFiltered = filtered[0];
+        console.log('🔍 ========== AFTER ENRICHED FILTERING ==========');
+        console.log('🔍 First filtered enquiry id:', firstFiltered?.id);
+        console.log('🔍 First filtered enquiry Name:', firstFiltered?.Name || firstFiltered?.title);
+        console.log('🔍 Total filtered enquiries:', filtered.length);
+        console.log('🔍 ==============================================');
+      } else if (__DEV__ && enrichedEnquiries.length > 0 && filtered.length === 0) {
+        console.warn('⚠️ ========== ALL ENQUIRIES FILTERED OUT ==========');
+        console.warn('⚠️ Had', enrichedEnquiries.length, 'enquiries before filtering');
+        console.warn('⚠️ Have', filtered.length, 'enquiries after filtering');
+        console.warn('⚠️ First enquiry before filtering:', {
+          id: enrichedEnquiries[0]?.id,
+          Name: enrichedEnquiries[0]?.Name,
+          AssignedTo: enrichedEnquiries[0]?.AssignedTo,
+          CurrentStatus: enrichedEnquiries[0]?.CurrentStatus,
+        });
+        console.warn('⚠️ ===============================================');
+      }
+      
       return filtered;
     } catch (error) {
       if (__DEV__) {
@@ -688,11 +737,10 @@ const EnquiryListScreen = ({ navigation }) => {
         mappedStatus = 'all';
       } else {
         // For other statuses, try to match exactly or use title case
-        // Try to match against known status options
-        const knownStatuses = [
-          'Enquiry Created', 'Design Approval Pending', 'CAD', 'Coral',
-          'Approved Cad', 'Order Placement', 'CAM Pending', 'Production', 'Completed', 'Rejected'
-        ];
+        // Try to match against status options from API
+        const knownStatuses = statusOptions
+          .filter(opt => opt.value !== 'all')
+          .map(opt => opt.value);
         const matchedStatus = knownStatuses.find(s => 
           s.toLowerCase() === statusFilter || 
           s.toLowerCase().replace(/\s+/g, '') === statusFilter.replace(/\s+/g, '')
@@ -788,7 +836,23 @@ const EnquiryListScreen = ({ navigation }) => {
   // State to track loading more
   const [isLoadingMoreLocal, setIsLoadingMoreLocal] = useState(false);
   
+  // Auto-load all pages for admins to ensure complete enquiry list display
+  useEffect(() => {
+    if (user?.role === 'admin' && hasMore && !loading && !isLoadingMore && !isLoadingMoreLocal && totalPages > currentPage) {
+      // Automatically load next page if we're an admin and have more pages
+      const timer = setTimeout(() => {
+        if (currentPage < totalPages) {
+          dispatch(setPage(currentPage + 1));
+          loadMore();
+        }
+      }, 1000); // Small delay to avoid overwhelming the API
+      
+      return () => clearTimeout(timer);
+    }
+  }, [user?.role, hasMore, loading, isLoadingMore, isLoadingMoreLocal, currentPage, totalPages, dispatch, loadMore]);
+  
   // Handle loading more data for infinite scroll
+  // Automatically load more pages to ensure all enquiries are displayed
   const handleLoadMore = () => {
     try {
       if (!hasMore || isLoadingMore || isLoadingMoreLocal || loading) return;
@@ -1120,39 +1184,100 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Helper functions for status and priority styling
   const getStatusColor = (status) => {
-    const statusColors = {
-      pending: colors.warning,
-      completed: colors.success,
-      rejected: colors.error,
-    };
-    return statusColors[status] || colors.textSecondary;
+    if (!status) return colors.textSecondary;
+    
+    const statusLower = String(status).toLowerCase();
+    
+    // Handle actual status values from the system
+    if (statusLower.includes('enquiry created') || statusLower === 'enquiry created') {
+      return colors.info || '#2196F3';
+    }
+    if (statusLower.includes('design approval pending') || statusLower.includes('approval pending')) {
+      return colors.warning || '#FF9800';
+    }
+    if (statusLower.includes('coral')) {
+      return colors.primary || '#1976D2';
+    }
+    if (statusLower.includes('cad') && !statusLower.includes('approved')) {
+      return colors.info || '#2196F3';
+    }
+    if (statusLower.includes('approved cad')) {
+      return colors.success || '#4CAF50';
+    }
+    if (statusLower.includes('order placement')) {
+      return colors.accent || '#9C27B0';
+    }
+    if (statusLower.includes('cam pending')) {
+      return colors.secondary || '#7B1FA2';
+    }
+    if (statusLower.includes('production')) {
+      return colors.error || '#F44336';
+    }
+    if (statusLower.includes('completed')) {
+      return colors.success || '#4CAF50';
+    }
+    if (statusLower.includes('rejected')) {
+      return colors.error || '#F44336';
+    }
+    
+    // Legacy support
+    if (statusLower === 'pending') return colors.warning || '#FF9800';
+    if (statusLower === 'completed') return colors.success || '#4CAF50';
+    if (statusLower === 'rejected') return colors.error || '#F44336';
+    
+    return colors.textSecondary;
   };
 
   const getStatusIcon = (status) => {
-    const statusIcons = {
-      pending: 'pendingActions',
-      completed: 'check-circle',
-      rejected: 'cancel',
-    };
-    return statusIcons[status] || 'help';
+    if (!status) return 'help';
+    
+    const statusLower = String(status).toLowerCase();
+    
+    if (statusLower.includes('enquiry created')) return 'add-circle';
+    if (statusLower.includes('approval pending')) return 'pending-actions';
+    if (statusLower.includes('coral')) return 'palette';
+    if (statusLower.includes('cad')) return 'design-services';
+    if (statusLower.includes('approved')) return 'check-circle';
+    if (statusLower.includes('order')) return 'shopping-cart';
+    if (statusLower.includes('production')) return 'build';
+    if (statusLower.includes('completed')) return 'check-circle';
+    if (statusLower.includes('rejected')) return 'cancel';
+    
+    return 'help';
   };
 
   const getPriorityColor = (priority) => {
+    if (!priority) return colors.textSecondary;
+    
+    const priorityLower = String(priority).toLowerCase();
+    
     const priorityColors = {
-      high: colors.error,
-      medium: colors.warning,
-      low: colors.success,
+      'normal': colors.success || '#4CAF50',
+      'high': colors.warning || '#FF9800',
+      'super high': colors.error || '#F44336',
+      // Legacy support
+      'low': colors.success || '#4CAF50',
+      'medium': colors.success || '#4CAF50',
+      'urgent': colors.warning || '#FF9800',
+      'super urgent': colors.error || '#F44336',
     };
-    return priorityColors[priority] || colors.textSecondary;
+    
+    return priorityColors[priorityLower] || colors.textSecondary;
   };
 
   const getPriorityIcon = (priority) => {
-    const priorityIcons = {
-      high: 'priorityHigh',
-      medium: 'remove',
-      low: 'lowPriority',
-    };
-    return priorityIcons[priority] || 'help';
+    if (!priority) return 'help';
+    
+    const priorityLower = String(priority).toLowerCase();
+    
+    if (priorityLower.includes('super') || priorityLower === 'high') {
+      return 'priority-high';
+    }
+    if (priorityLower === 'normal' || priorityLower === 'medium' || priorityLower === 'low') {
+      return 'low-priority';
+    }
+    
+    return 'help';
   };
 
   const formatCurrency = (amount) => {
@@ -1198,7 +1323,7 @@ const EnquiryListScreen = ({ navigation }) => {
         console.log('Sort order toggled:', newOrder);
       }
     } else {
-      dispatch(setSorting({ sortBy: newSortBy, sortOrder: 'desc' })); // Default to desc for new field
+      dispatch(setSorting({ sortBy: newSortBy, sortOrder: 'asc' })); // Default to desc for new field
       if (__DEV__) {
         console.log('Sort changed to:', newSortBy, 'desc');
       }
@@ -1212,6 +1337,9 @@ const EnquiryListScreen = ({ navigation }) => {
     // Filter out the selected status from available options
     const availableStatuses = statusList.filter(status => status !== selectedStatus);
     
+    // For designers, if selectedStatus is 'All' (not in their list), treat it as no selection
+    const hasSelectedStatus = selectedStatus && selectedStatus !== 'All' && statusList.includes(selectedStatus);
+    
     return (
       <View style={styles.compactFilterRow}>
         <Text style={styles.compactFilterLabel}>Status:</Text>
@@ -1222,12 +1350,14 @@ const EnquiryListScreen = ({ navigation }) => {
           contentContainerStyle={styles.compactChipsContent}
         >
           {/* Show selected status first with X button */}
-          {selectedStatus && selectedStatus !== 'All' && (
+          {hasSelectedStatus && (
             <View style={styles.compactSelectedChip}>
               <Text style={styles.compactSelectedChipText}>{selectedStatus}</Text>
               <TouchableOpacity
                 style={styles.compactChipClose}
                 onPress={() => {
+                  // For designers, clear to 'All' (which won't be in their list, effectively showing all)
+                  // For others, set to 'All' explicitly
                   dispatch(setSelectedStatus('All'));
                   dispatch(setFilters({ status: 'all' }));
                 }}
@@ -1485,7 +1615,7 @@ const EnquiryListScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         onEndReached={handleLoadMore}
-        onEndReachedThreshold={0.3}
+        onEndReachedThreshold={0.1} // Lower threshold to load more aggressively and display all enquiries
         numColumns={2}
         columnWrapperStyle={styles.row}
         showsVerticalScrollIndicator={false}

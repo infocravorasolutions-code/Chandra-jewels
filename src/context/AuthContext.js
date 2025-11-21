@@ -36,7 +36,6 @@ export const AuthProvider = ({ children }) => {
       // Dispatch Redux checkAuthState which will handle validation
       await dispatch(checkAuthState()).unwrap();
     } catch (error) {
-      console.error('Error initializing auth:', error);
       // If checkAuthState fails, clear invalid tokens
       await clearInvalidAuth();
     } finally {
@@ -56,7 +55,6 @@ export const AuthProvider = ({ children }) => {
             const currentTime = Math.floor(Date.now() / 1000);
             if (exp < currentTime) {
               // Token is expired, clear it
-              console.log('Token expired, clearing auth state');
               await dispatch(logoutUser()).unwrap();
               return;
             }
@@ -64,7 +62,6 @@ export const AuthProvider = ({ children }) => {
         }
       }
     } catch (error) {
-      console.error('Error clearing invalid auth:', error);
       // If we can't decode token, it's invalid - clear it
       await dispatch(logoutUser()).unwrap();
     }
@@ -74,7 +71,6 @@ export const AuthProvider = ({ children }) => {
   // This function is kept for backward compatibility but should not be used
   // LoginScreen uses useLoginMutation from Redux directly
   const login = async (email, password) => {
-    console.warn('AuthContext.login is deprecated. Use Redux login mutation in LoginScreen instead.');
     return { success: false, error: 'Please use Redux login' };
   };
 
@@ -85,17 +81,14 @@ export const AuthProvider = ({ children }) => {
         try {
           await removePushToken({ token: storedPushToken }).unwrap();
         } catch (error) {
-          console.warn('Failed to unregister push token:', error?.message || error);
         }
       }
       await clearStoredPushToken();
     } catch (err) {
-      console.warn('Error cleaning up push token on logout:', err?.message || err);
     } finally {
       try {
         await dispatch(logoutUser()).unwrap();
       } catch (error) {
-        console.error('Logout error:', error);
       }
     }
   };

@@ -26,31 +26,23 @@ class SocketService {
   async connect(userId) {
     // Prevent multiple connection attempts
     if (this.socket?.connected) {
-      if (__DEV__) {
-        console.log('Socket already connected');
-      }
+      
       return;
     }
 
     if (this.isConnecting) {
-      if (__DEV__) {
-        console.log('Socket connection already in progress');
-      }
+      
       return;
     }
 
     // Clean up any existing socket before creating a new one
     if (this.socket && !this.socket.connected) {
-      if (__DEV__) {
-        console.log('Cleaning up disconnected socket before reconnecting');
-      }
+      
       try {
         this.socket.removeAllListeners();
         this.socket.disconnect();
       } catch (error) {
-        if (__DEV__) {
-          console.warn('Error cleaning up socket:', error);
-        }
+        
       }
       this.socket = null;
     }
@@ -61,13 +53,7 @@ class SocketService {
       // Get auth token
       const token = await AsyncStorage.getItem('token');
       
-      if (__DEV__) {
-        console.log('========== SOCKET CONNECTION ==========');
-        console.log('Connecting to:', SOCKET_URL);
-        console.log('User ID:', userId);
-        console.log('Token available:', !!token);
-        console.log('========================================');
-      }
+      
 
       this.socket = io(SOCKET_URL, {
         transports: ['websocket'], // Use only websocket to avoid polling overhead
@@ -83,9 +69,7 @@ class SocketService {
 
       // Connection events
       this.socket.on('connect', () => {
-        if (__DEV__) {
-          console.log('✅ Connected to chat server');
-        }
+        
         
         this.connected = true;
         this.isConnecting = false;
@@ -100,22 +84,17 @@ class SocketService {
           try {
             callback();
           } catch (error) {
-            console.error('Error in connect listener:', error);
           }
         });
       });
 
       // Reconnection events
       this.socket.on('reconnect_attempt', (attemptNumber) => {
-        if (__DEV__) {
-          console.log(`🔄 Reconnection attempt ${attemptNumber}...`);
-        }
+        
       });
 
       this.socket.on('reconnect', (attemptNumber) => {
-        if (__DEV__) {
-          console.log(`✅ Reconnected to chat server after ${attemptNumber} attempts`);
-        }
+        
         this.connected = true;
         this.isConnecting = false;
         
@@ -132,9 +111,7 @@ class SocketService {
       });
 
       this.socket.on('reconnect_failed', () => {
-        if (__DEV__) {
-          console.warn('⚠️ Reconnection failed. Please check your network connection.');
-        }
+        
         this.connected = false;
         this.isConnecting = false;
       });
@@ -148,9 +125,7 @@ class SocketService {
           if (isTransportError) {
             console.warn('⚠️ WebSocket transport error (network issue, will auto-reconnect):', reason);
           } else if (isServerDisconnect) {
-            console.warn('⚠️ Server disconnected WebSocket:', reason);
           } else {
-            console.log('❌ Disconnected from chat server:', reason);
           }
         }
         
@@ -163,7 +138,6 @@ class SocketService {
           try {
             callback(reason);
           } catch (error) {
-            console.error('Error in disconnect listener:', error);
           }
         });
         
@@ -172,16 +146,13 @@ class SocketService {
         if (isServerDisconnect) {
           // Server disconnected - don't auto-reconnect
           // User will need to manually reconnect or refresh
-          if (__DEV__) {
-            console.warn('Server disconnected. Reconnection may be needed.');
-          }
+          
         }
       });
 
       this.socket.on('connect_error', (error) => {
         if (__DEV__) {
           console.warn('⚠️ Socket connection error (this is OK if WebSocket server is not running):', error.message);
-          console.warn('Chat will work without real-time updates. Make sure WebSocket server is running on:', SOCKET_URL);
         }
         
         // Don't throw error, just log it - chat can work without WebSocket
@@ -192,50 +163,40 @@ class SocketService {
           try {
             callback(error);
           } catch (err) {
-            console.error('Error in error listener:', err);
           }
         });
       });
 
       // Chat events
       this.socket.on('newMessage', (message) => {
-        if (__DEV__) {
-          console.log('📨 New message received:', message);
-        }
+        
         
         this.listeners.newMessage.forEach(callback => {
           try {
             callback(message);
           } catch (error) {
-            console.error('Error in newMessage listener:', error);
           }
         });
       });
 
       this.socket.on('messagesRead', (data) => {
-        if (__DEV__) {
-          console.log('✅ Messages read:', data);
-        }
+        
         
         this.listeners.messagesRead.forEach(callback => {
           try {
             callback(data);
           } catch (error) {
-            console.error('Error in messagesRead listener:', error);
           }
         });
       });
 
       this.socket.on('userTyping', (data) => {
-        if (__DEV__) {
-          console.log('⌨️ User typing:', data);
-        }
+        
         
         this.listeners.userTyping.forEach(callback => {
           try {
             callback(data);
           } catch (error) {
-            console.error('Error in userTyping listener:', error);
           }
         });
       });
@@ -247,26 +208,20 @@ class SocketService {
           // This might be a false error - message could have been sent successfully
           // Check if we're actually connected and receiving messages
           if (this.socket?.connected) {
-            if (__DEV__) {
-              console.warn('⚠️ Socket reported send error, but connection is active. Message may have been sent.');
-            }
+            
           } else {
             if (__DEV__) {
               console.error('Socket error: Failed to send message (socket not connected)');
             }
           }
         } else {
-          if (__DEV__) {
-            console.error('Socket error:', error);
-            console.error('This might be a backend error. Check backend logs for Chat model issues.');
-          }
+          
         }
         
         this.listeners.error.forEach(callback => {
           try {
             callback(error);
           } catch (err) {
-            console.error('Error in error listener:', err);
           }
         });
       });
@@ -286,9 +241,7 @@ class SocketService {
    */
   disconnect() {
     if (this.socket) {
-      if (__DEV__) {
-        console.log('Disconnecting socket...');
-      }
+      
       this.socket.disconnect();
       this.socket = null;
       this.isConnecting = false;
@@ -302,15 +255,11 @@ class SocketService {
    */
   joinChat(chatId, userId) {
     if (!this.socket?.connected) {
-      if (__DEV__) {
-        console.warn('Cannot join chat: socket not connected');
-      }
+      
       return;
     }
 
-    if (__DEV__) {
-      console.log(`Joining chat: ${chatId} for user: ${userId}`);
-    }
+    
 
     this.socket.emit('joinChat', { chatId, userId });
   }
@@ -325,9 +274,7 @@ class SocketService {
       return;
     }
 
-    if (__DEV__) {
-      console.log(`Leaving chat: ${chatId} for user: ${userId}`);
-    }
+    
 
     this.socket.emit('leaveChat', { chatId, userId });
   }
@@ -347,15 +294,11 @@ class SocketService {
    */
   sendMessage(data) {
     if (!this.socket?.connected) {
-      if (__DEV__) {
-        console.warn('⚠️ Cannot send message: socket not connected. Message will not be sent in real-time.');
-      }
+      
       return false;
     }
 
-    if (__DEV__) {
-      console.log('📤 Sending message:', data);
-    }
+    
 
     this.socket.emit('sendMessage', data);
     return true;
@@ -383,7 +326,6 @@ class SocketService {
    */
   on(event, callback) {
     if (!this.listeners[event]) {
-      console.warn(`Unknown event: ${event}`);
       return () => {};
     }
 

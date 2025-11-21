@@ -16,12 +16,9 @@ const baseQuery = fetchBaseQuery({
           console.log('API Request Headers - Authorization token set:', token.substring(0, 20) + '...');
         }
       } else {
-        if (__DEV__) {
-          console.warn('API Request - No token found in AsyncStorage');
-        }
+        
       }
     } catch (error) {
-      console.error('Error getting auth token:', error);
     }
     return headers;
   },
@@ -40,6 +37,7 @@ export const api = createApi({
     'Message',
     'StatusStatistics',
     'Roles',
+    'Statuses',
     'Notification',
     'DeviceToken',
   ],
@@ -72,29 +70,44 @@ export const api = createApi({
         
         // Update cache for role mapping
         if (roles.length > 0) {
-          console.log('📥 ========== ROLES API RESPONSE RECEIVED ==========');
-          console.log('📥 Roles count:', roles.length);
-          console.log('📥 Raw roles data:', roles);
           setRolesCache(roles);
-          console.log('📥 ================================================');
         } else {
-          console.warn('⚠️ Roles API returned empty array');
         }
         
         return roles;
       },
     }),
 
+    // Get Status list from API
+    getStatuses: builder.query({
+      query: () => '/api/codelists/Status',
+      providesTags: ['Statuses'],
+      transformResponse: (data) => {
+        let statuses = [];
+        
+        // Handle array response
+        if (Array.isArray(data)) {
+          statuses = data.map(status => ({
+            name: status.name || status.Name || status.code || status.Code,
+            label: status.label || status.Label || status.name || status.Name || status.code || status.Code,
+          }));
+        }
+        // Handle object response with data property
+        else if (data?.data && Array.isArray(data.data)) {
+          statuses = data.data.map(status => ({
+            name: status.name || status.Name || status.code || status.Code,
+            label: status.label || status.Label || status.name || status.Name || status.code || status.Code,
+          }));
+        }
+        
+        return statuses;
+      },
+    }),
+
     // ==================== AUTH ====================
     login: builder.mutation({
       query: ({ email, password }) => {
-        if (__DEV__) {
-          console.log('========== LOGIN REQUEST ==========');
-          console.log('Email:', email);
-          console.log('Password length:', password?.length || 0);
-          console.log('URL:', '/api/login');
-          console.log('===================================');
-        }
+        
         return {
           url: '/api/login',
           method: 'POST',
@@ -103,11 +116,7 @@ export const api = createApi({
       },
       transformResponse: async (response, meta, arg) => {
         try {
-          if (__DEV__) {
-            console.log('========== LOGIN RESPONSE DEBUG ==========');
-            console.log('Raw response:', response);
-            console.log('Response type:', typeof response);
-          }
+          
           
           // Handle different response formats
           let data = response;
@@ -124,58 +133,38 @@ export const api = createApi({
             : data.token || data.accessToken || data.access_token;
           
           if (!token) {
-            if (__DEV__) {
-              console.error('No token in response. Full response:', data);
-            }
+            
             throw new Error('No token received from server');
           }
           
           if (__DEV__) {
-            console.log('Token received, length:', token.length);
             console.log('Token preview:', token.substring(0, 50) + '...');
           }
           
           const decodedToken = decodeJWT(token);
           if (!decodedToken) {
-            if (__DEV__) {
-              console.error('Failed to decode JWT token');
-            }
+            
             throw new Error('Failed to decode authentication token');
           }
           
           if (__DEV__) {
-            console.log('Decoded token:', decodedToken);
-            console.log('Token Role field:', decodedToken.Role);
-            console.log('Token Id field:', decodedToken.Id);
             console.log('All token fields:', Object.keys(decodedToken));
           }
           
           // Try different case variations for role
           const roleNumber = decodedToken.Role || decodedToken.role || decodedToken.RoleNumber || decodedToken.roleNumber;
-          console.log('🔐 ========== LOGIN - ROLE EXTRACTION ==========');
-          console.log('🔐 Extracted role number from token:', roleNumber);
           console.log('🔐 Token fields:', Object.keys(decodedToken));
           
           if (roleNumber === undefined || roleNumber === null) {
-            console.error('❌ Role not found in token');
             throw new Error(`Role not found in token. Available fields: ${Object.keys(decodedToken).join(', ')}`);
           }
           
-          console.log('🔐 Calling mapRoleNumberToString with role number:', roleNumber);
           const roleString = mapRoleNumberToString(roleNumber);
           
           if (!roleString) {
-            console.error('❌ ========== ROLE MAPPING FAILED ==========');
-            console.error('❌ Unknown role number:', roleNumber);
-            console.error('❌ Available role mappings: 1=admin, 2=coral, 3=cad, 4=client');
-            console.error('❌ ===========================================');
             throw new Error(`Unknown role: ${roleNumber}. Expected 1-4.`);
           }
           
-          console.log('✅ ========== LOGIN - ROLE MAPPING SUCCESS ==========');
-          console.log('✅ Role Number:', roleNumber);
-          console.log('✅ Mapped Role String:', roleString);
-          console.log('✅ ===================================================');
           
           // Try different case variations for ID
           const userId = decodedToken.Id || decodedToken.id || decodedToken.userId || decodedToken.UserId;
@@ -185,11 +174,7 @@ export const api = createApi({
                           decodedToken.fullName || decodedToken.FullName || decodedToken.firstName || decodedToken.FirstName;
           
           if (__DEV__) {
-            console.log('Mapped role:', roleString);
-            console.log('User ID:', userId);
-            console.log('User Name:', userName);
             console.log('All token fields:', Object.keys(decodedToken));
-            console.log('==========================================');
           }
           
           return {
@@ -205,25 +190,12 @@ export const api = createApi({
             },
           };
         } catch (error) {
-          if (__DEV__) {
-            console.error('Login transform error:', error);
-            console.error('Error message:', error.message);
-            console.error('Full error:', error);
-          }
+          
           throw new Error(error.message || 'Login failed');
         }
       },
       transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('========== LOGIN ERROR RESPONSE ==========');
-          console.error('Status:', response.status);
-          console.error('Status text:', response.statusText);
-          console.error('Error data:', response.data);
-          console.error('Error:', response.error);
-          console.error('Full response:', response);
-          console.error('Base URL used:', API_BASE_URL);
-          console.error('===========================================');
-        }
+        
         
         // Provide helpful error messages for common network issues
         let errorMessage = 'Login failed';
@@ -296,7 +268,6 @@ export const api = createApi({
         } else if (data.data && Array.isArray(data.data)) {
           usersArray = data.data;
         } else {
-          console.warn('Unexpected response format from /api/users:', data);
           return [];
         }
 
@@ -330,9 +301,18 @@ export const api = createApi({
         if (search && search.trim()) {
           queryString += `&search=${encodeURIComponent(search.trim())}`;
         }
-        // Add assignedTo filter for non-admin users (or when explicitly provided)
-        if (assignedTo) {
+        // Add assignedTo filter ONLY for non-admin users
+        // CRITICAL: Never add assignedTo for admins - they must see ALL enquiries
+        // Check if role is admin (case-insensitive) to ensure no assignedTo filter
+        const isAdminRole = role?.toLowerCase() === 'admin' || role?.toLowerCase() === 'ad';
+        if (assignedTo && !isAdminRole) {
           queryString += `&assignedTo=${encodeURIComponent(assignedTo)}`;
+        } else if (isAdminRole && assignedTo) {
+          // Safety check: if somehow assignedTo is set for admin, log warning and don't add it
+          if (__DEV__) {
+            console.warn('⚠️ WARNING: assignedTo was set for admin user, ignoring it to show all enquiries');
+            console.warn('⚠️ Role:', role, 'AssignedTo:', assignedTo);
+          }
         }
         
         // For client users, backend should filter enquiries automatically
@@ -357,24 +337,11 @@ export const api = createApi({
             queryString += `&priority=${encodeURIComponent(filters.priority)}`;
           }
           if (filters.clientId && filters.clientId !== 'all') {
-            console.log('🔐 ========== API CLIENT FILTER ==========');
-            console.log('🔐 Adding clientId filter to API:', filters.clientId);
-            console.log('🔐 Role:', role);
-            console.log('🔐 User ID from token:', argUserId);
-            console.log('🔐 Full filters:', filters);
             queryString += `&clientId=${encodeURIComponent(filters.clientId)}`;
-            console.log('🔐 Final query string includes clientId filter');
-            console.log('🔐 Expected: Backend should return enquiries where ClientId =', filters.clientId);
-            console.log('🔐 =========================================');
           } else if (isClientRole && argUserId && (!filters.clientId || filters.clientId === 'all')) {
             // Fallback: For client users without a clientId filter, use userId as clientId
             console.log('🔐 ========== API CLIENT FILTER (FALLBACK) ==========');
-            console.log('🔐 No clientId filter found, using userId as fallback:', argUserId);
-            console.log('🔐 Role:', role);
             queryString += `&clientId=${encodeURIComponent(argUserId)}`;
-            console.log('🔐 Final query string includes userId as clientId filter');
-            console.log('🔐 Expected: Backend should return enquiries where ClientId =', argUserId);
-            console.log('🔐 ===================================================');
           }
           if (filters.assignedTo && filters.assignedTo !== 'all') {
             queryString += `&assignedTo=${encodeURIComponent(filters.assignedTo)}`;
@@ -414,32 +381,19 @@ export const api = createApi({
           }
         } else {
           // Even if no filters, ensure default sort is applied for consistent ordering
-          queryString += `&sortBy=createdAt&sortOrder=desc`;
+          queryString += `&sortBy=createdAt&sortOrder=asc`;
         }
         
         const finalUrl = `/api/enquiries/search?${queryString}`;
-        console.log('🌐 ========== ENQUIRIES API REQUEST ==========');
-        console.log('🌐 URL:', finalUrl);
-        console.log('🌐 Role:', role);
-        console.log('🌐 AssignedTo:', assignedTo);
-        console.log('🌐 Filters:', filters);
-        console.log('🌐 ===========================================');
         return finalUrl;
       },
       providesTags: ['Enquiry'],
       transformResponse: (data, meta, arg) => {
-        console.log('📥 ========== ENQUIRIES API RESPONSE ==========');
-        console.log('📥 Raw response:', data);
-        console.log('📥 Request args:', arg);
         const role = typeof arg === 'object' ? arg?.role : arg;
         const argUserId = typeof arg === 'object' ? arg?.userId : undefined;
         const isClientRole = role === 'client' || role === 'CL';
         if (isClientRole) {
-          console.log('📥 Client user - backend should have filtered enquiries');
-          console.log('📥 User ID:', argUserId);
-          console.log('📥 If backend filtered correctly, these are the user\'s enquiries');
         }
-        console.log('📥 ===========================================');
         
         // Handle paginated response format from new aggregated endpoint
         // Response structure: { data: [...], total: number, page: number, limit: number }
@@ -462,8 +416,6 @@ export const api = createApi({
             };
             // Log for client users
             if (isClientRole && argUserId) {
-              console.log('📥 Enquiries received:', enquiriesArray.length);
-              console.log('📥 Expected ClientId:', argUserId);
               if (enquiriesArray.length > 0) {
                 console.log('📥 Sample enquiry ClientIds:', enquiriesArray.slice(0, 5).map(e => ({
                   id: e.id || e._id,
@@ -477,12 +429,9 @@ export const api = createApi({
                 }).length;
                 console.log('📥 Matching enquiries (ClientId = user.id):', matchingCount, 'out of', enquiriesArray.length);
                 if (matchingCount === 0 && enquiriesArray.length > 0) {
-                  console.warn('📥 ⚠️ WARNING: No enquiries match user ID!');
-                  console.warn('📥 ⚠️ This means enquiries were created with different ClientIds');
                   console.warn('📥 ⚠️ All enquiry ClientIds:', enquiriesArray.map(e => e.clientId || e.ClientId).filter(Boolean).slice(0, 10));
                 }
               } else {
-                console.log('📥 ⚠️ No enquiries returned - check backend filtering');
               }
             }
           } else if (Array.isArray(data)) {
@@ -490,18 +439,27 @@ export const api = createApi({
           } else if (data.enquiries && Array.isArray(data.enquiries)) {
             enquiriesArray = data.enquiries;
           } else {
-            console.warn('Unexpected response format from /api/enquiries/search:', data);
             return { data: [], pagination };
           }
         } else if (Array.isArray(data)) {
           enquiriesArray = data;
         } else {
-          console.warn('Unexpected response format from /api/enquiries/search:', data);
           return { data: [], pagination };
         }
         
         // Normalize enquiry data from aggregated endpoint
-        const normalizedEnquiries = enquiriesArray.map(enquiry => {
+        const normalizedEnquiries = enquiriesArray.map((enquiry, index) => {
+          // Debug: Log first enquiry before normalization
+          if (__DEV__ && index === 0) {
+            console.log('🔍 ========== API NORMALIZATION DEBUG ==========');
+            console.log('🔍 Raw first enquiry _id:', enquiry._id);
+            console.log('🔍 Raw first enquiry Name:', enquiry.Name);
+            console.log('🔍 Raw first enquiry AssignedTo:', enquiry.AssignedTo);
+            console.log('🔍 Raw first enquiry ClientId:', enquiry.ClientId);
+            console.log('🔍 Raw first enquiry CurrentStatus:', enquiry.CurrentStatus);
+            console.log('🔍 ==============================================');
+          }
+          
           // Use CurrentStatus directly from aggregated response
           const currentStatus = enquiry.CurrentStatus || enquiry.Status || 'pending';
           const createdAt = enquiry.CreatedDate || enquiry.CreatedAt || new Date().toISOString();
@@ -549,7 +507,7 @@ export const api = createApi({
           // Extract client name if available (may need to be enriched from clients API)
           const clientName = enquiry.ClientName || enquiry.clientName || 'Unknown Client';
           
-          return {
+          const normalized = {
             id: enquiry._id || enquiry.id,
             title: enquiry.Name || enquiry.name || enquiry.title || 'Untitled Enquiry',
             clientId: enquiry.ClientId || enquiry.clientId || '',
@@ -588,6 +546,18 @@ export const api = createApi({
             CadCode: enquiry.CadCode,
             _originalData: enquiry,
           };
+          
+          // Debug: Log first enquiry after normalization
+          if (__DEV__ && index === 0) {
+            console.log('🔍 ========== AFTER NORMALIZATION ==========');
+            console.log('🔍 Normalized first enquiry id:', normalized.id);
+            console.log('🔍 Normalized first enquiry title:', normalized.title);
+            console.log('🔍 Normalized first enquiry AssignedTo:', normalized.AssignedTo);
+            console.log('🔍 Has valid id?', !!normalized.id);
+            console.log('🔍 =========================================');
+          }
+          
+          return normalized;
         });
         
         // Return both data and pagination metadata
@@ -615,9 +585,7 @@ export const api = createApi({
       transformResponse: async (enquiry, meta, arg) => {
         // Handle null/undefined enquiry or error responses
         if (!enquiry || enquiry === null || typeof enquiry !== 'object') {
-          if (__DEV__) {
-            console.warn('getEnquiryById: Received null, undefined, or invalid enquiry for ID:', arg, 'Response:', enquiry);
-          }
+          
           // Return a minimal object structure to prevent crashes
           return {
             id: null,
@@ -776,7 +744,6 @@ export const api = createApi({
           _originalData: enquiry,
         };
         } catch (transformError) {
-          console.error('Error transforming enquiry data:', transformError);
           // Return fallback object if transformation fails
           return {
             id: enquiry._id || enquiry.id || null,
@@ -797,9 +764,7 @@ export const api = createApi({
       },
       transformErrorResponse: (response, meta, arg) => {
         // Handle API errors (404, 500, etc.)
-        if (__DEV__) {
-          console.warn('getEnquiryById: API error for ID:', arg, 'Status:', response.status, 'Data:', response.data);
-        }
+        
         return {
           error: true,
           message: response.data?.error || response.data?.message || 'Failed to load enquiry',
@@ -810,8 +775,6 @@ export const api = createApi({
 
     createEnquiry: builder.mutation({
       queryFn: async (data, { dispatch }, extraOptions, baseQuery) => {
-        console.log('🌐 ========== CREATE ENQUIRY API REQUEST ==========');
-        console.log('🌐 Endpoint: POST /api/enquiries');
         console.log('🌐 Timestamp:', new Date().toISOString());
         console.log('🌐 Request Payload:', JSON.stringify(data, null, 2));
         console.log('🌐 Payload Size:', JSON.stringify(data).length, 'bytes');
@@ -837,7 +800,6 @@ export const api = createApi({
           
           if (result.error) {
             console.error('❌ API Error Response:', JSON.stringify(result.error, null, 2));
-            console.error('❌ ===========================================');
             return result;
           }
           
@@ -847,12 +809,9 @@ export const api = createApi({
             'Enquiry ID': result.data?.id || result.data?._id || 'Not returned',
             'Name': result.data?.Name || result.data?.name || data.Name,
           });
-          console.log('🌐 ===========================================');
           
           return result;
         } catch (error) {
-          console.error('❌ API Request Exception:', error);
-          console.error('❌ ===========================================');
           return { error: { status: 'CUSTOM_ERROR', data: error.message } };
         }
       },
@@ -946,7 +905,6 @@ export const api = createApi({
         } else if (data.data && Array.isArray(data.data)) {
           clientsArray = data.data;
         } else {
-          console.warn('Unexpected response format from /api/clients:', data);
           return [];
         }
         
@@ -997,9 +955,7 @@ export const api = createApi({
           // Fetch all status counts using aggregate endpoint without assignedTo filter
           const aggregateUrl = '/api/enquiries/aggregate?groupBy=status';
           
-          if (__DEV__) {
-            console.log('📊 [STATUS STATS API] Fetching from:', aggregateUrl);
-          }
+          
           
           const response = await baseQuery(aggregateUrl);
           
@@ -1008,9 +964,7 @@ export const api = createApi({
           }
           
           if (response.error) {
-            if (__DEV__) {
-              console.error('📊 [STATUS STATS API] Error:', response.error);
-            }
+            
             return {
               error: {
                 status: response.error.status || 'FETCH_ERROR',
@@ -1022,7 +976,6 @@ export const api = createApi({
           const statusStats = Array.isArray(response.data) ? response.data : [];
           
           if (__DEV__) {
-            console.log('📊 [STATUS STATS API] Parsed Status Stats:', statusStats);
             console.log('📊 [STATUS STATS API] Total Count:', statusStats.reduce((sum, item) => sum + (item.count || 0), 0));
           }
           
@@ -1033,9 +986,7 @@ export const api = createApi({
             },
           };
         } catch (error) {
-          if (__DEV__) {
-            console.error('📊 [STATUS STATS API] Exception:', error);
-          }
+          
           return {
             error: {
               status: 'CUSTOM_ERROR',
@@ -1120,17 +1071,10 @@ export const api = createApi({
           if (statusAggregateResult.data && !statusAggregateResult.error) {
             const aggregateData = statusAggregateResult.data;
             
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
-            console.log('🔍 [DASHBOARD DEBUG] Role:', role);
-            console.log('🔍 [DASHBOARD DEBUG] UserId:', userId);
-            console.log('🔍 [DASHBOARD DEBUG] Is Admin:', isAdmin);
-            console.log('🔍 [DASHBOARD DEBUG] Is Client:', isClient);
-            console.log('🔍 [DASHBOARD DEBUG] Status Aggregate URL:', statusAggregateUrl);
             console.log('🔍 [DASHBOARD DEBUG] Status Aggregate API Response:', JSON.stringify(aggregateData, null, 2));
             
             // Handle different response formats
             if (Array.isArray(aggregateData)) {
-              console.log('🔍 [DASHBOARD DEBUG] Aggregate data is an array with', aggregateData.length, 'items');
               
               aggregateData.forEach((item, index) => {
                 const statusName = (item.name || item.status || item.Status || item._id || item.group || '').toUpperCase();
@@ -1204,12 +1148,8 @@ export const api = createApi({
               });
             }
             
-            console.log('🔍 [DASHBOARD DEBUG] Final Categorized Counts:', categorizedCounts);
             console.log('🔍 [DASHBOARD DEBUG] Final Status Counts (legacy):', statusCounts);
-            console.log('🔍 [DASHBOARD DEBUG] Total from categorized counts:', categorizedCounts['All']);
-            console.log('🔍 [DASHBOARD DEBUG] Total from status counts:', statusCounts.total);
           } else if (statusAggregateResult.error) {
-            console.warn('🔍 [DASHBOARD DEBUG] Status aggregate API error, falling back to counting from enquiries:', statusAggregateResult.error);
           }
           
           // Process client aggregate data for admin users
@@ -1222,7 +1162,6 @@ export const api = createApi({
             if (Array.isArray(clientAggregateData)) {
               // Count unique clients from aggregate
               totalClientsFromAggregate = clientAggregateData.length;
-              console.log('🔍 [DASHBOARD DEBUG] Total Clients from aggregate:', totalClientsFromAggregate);
             }
           }
 
@@ -1234,7 +1173,6 @@ export const api = createApi({
           // For admin, also check pagination total if available (more accurate than array length)
           const paginationTotal = enquiriesResult.data?.pagination?.total || enquiriesResult.data?.total || null;
           
-          console.log('🔍 [DASHBOARD DEBUG] Enquiries from search API:', enquiries.length, 'enquiries');
           console.log('🔍 [DASHBOARD DEBUG] Enquiries result structure:', {
             isArray: Array.isArray(enquiriesResult.data),
             hasData: !!enquiriesResult.data?.data,
@@ -1313,7 +1251,6 @@ export const api = createApi({
               })
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
             
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
             console.log('🔍 [DASHBOARD DEBUG] ADMIN DASHBOARD CALCULATIONS (from aggregate endpoints):');
             console.log('🔍 [DASHBOARD DEBUG] - Total Enquiries:', totalEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], ')');
             console.log('🔍 [DASHBOARD DEBUG] - Pending Enquiries:', pendingEnquiries, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], ')');
@@ -1324,7 +1261,6 @@ export const api = createApi({
             const sumOfStatuses = pendingEnquiries + approvalPendingEnquiries + completedEnquiries;
             console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', sumOfStatuses);
             console.log('🔍 [DASHBOARD DEBUG] - Does sum match Total?', sumOfStatuses === totalEnquiries, '(Total:', totalEnquiries, '| Sum:', sumOfStatuses, ')');
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
               data: {
@@ -1369,18 +1305,13 @@ export const api = createApi({
               })
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
             
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
-            console.log('🔍 [DASHBOARD DEBUG] CLIENT DASHBOARD CALCULATIONS:');
             console.log('🔍 [DASHBOARD DEBUG] - My Enquiries:', myEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
             console.log('🔍 [DASHBOARD DEBUG] - Pending:', pendingApprovals, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], '| statusCounts.pending:', statusCounts.pending, '| counted:', pendingCount, ')');
             console.log('🔍 [DASHBOARD DEBUG] - Approval Pending:', approvalPending, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], '| counted:', approvalPendingCount, ')');
             console.log('🔍 [DASHBOARD DEBUG] - Completed Orders:', completedOrders, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, '| counted:', completedCount, ')');
             const clientSum = pendingApprovals + approvalPending + completedOrders;
-            console.log('🔍 [DASHBOARD DEBUG] - Total Spent:', totalSpent);
-            console.log('🔍 [DASHBOARD DEBUG] - Enquiries filtered by clientId:', normalizedEnquiries.length);
             console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', clientSum);
             console.log('🔍 [DASHBOARD DEBUG] - Does sum match My Enquiries?', clientSum === myEnquiries, '(My Enquiries:', myEnquiries, '| Sum:', clientSum, ')');
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
               data: {
@@ -1399,7 +1330,6 @@ export const api = createApi({
             const approvalPendingDesigns = categorizedCounts['Approval Pending'] || 0;
             const averageRating = 4.8; // TODO: Fetch from API when available
             
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
             console.log('🔍 [DASHBOARD DEBUG] DESIGNER DASHBOARD CALCULATIONS (from aggregate API):');
             console.log('🔍 [DASHBOARD DEBUG] - Role:', role, '(should use aggregate endpoint)');
             console.log('🔍 [DASHBOARD DEBUG] - Assigned Enquiries:', assignedEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
@@ -1408,7 +1338,6 @@ export const api = createApi({
             console.log('🔍 [DASHBOARD DEBUG] - Completed Designs:', completedDesigns, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, ')');
             console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', pendingDesigns + approvalPendingDesigns + completedDesigns);
             console.log('🔍 [DASHBOARD DEBUG] - Does sum match assigned?', (pendingDesigns + approvalPendingDesigns + completedDesigns) === assignedEnquiries);
-            console.log('🔍 [DASHBOARD DEBUG] ============================================');
             
             return {
               data: {
@@ -1424,7 +1353,6 @@ export const api = createApi({
           
           return { data: {} };
         } catch (error) {
-          console.error('Error loading dashboard data:', error);
           // Return empty data structure on error
           if (role === 'admin') {
             return {
@@ -1504,12 +1432,7 @@ export const api = createApi({
 
           const endpoint = `/api/enquiries/${enquiryId}/upload/${designType}`;
           
-          if (__DEV__) {
-            console.log(`Uploading ${designType} design for enquiry ${enquiryId}`);
-            console.log(`Version: ${version}`);
-            console.log(`Images: ${images?.length || 0}`);
-            console.log(`Excel: ${excel ? 'Yes' : 'No'}`);
-          }
+          
 
           const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
@@ -1522,9 +1445,7 @@ export const api = createApi({
 
           if (response.ok) {
             const data = await response.json();
-            if (__DEV__) {
-              console.log(`Design upload successful:`, data);
-            }
+            
             return { data };
           } else {
             let errorData;
@@ -1536,7 +1457,6 @@ export const api = createApi({
             }
             
             if (__DEV__) {
-              console.error(`❌ Design upload failed: Status ${response.status}`, errorData);
               console.error(`❌ Error details:`, {
                 enquiryId,
                 designType,
@@ -1570,9 +1490,7 @@ export const api = createApi({
             };
           }
         } catch (error) {
-          if (__DEV__) {
-            console.error('Design upload error:', error);
-          }
+          
           return {
             error: {
               status: 'CUSTOM_ERROR',
@@ -1606,15 +1524,11 @@ export const api = createApi({
         'Enquiry',
       ],
       transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('Asset description updated:', response);
-        }
+        
         return response;
       },
       transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('Failed to update asset description:', response);
-        }
+        
         return {
           status: response.status,
           data: response.data,
@@ -1628,13 +1542,7 @@ export const api = createApi({
       query: ({ enquiryId, designType, version }) => {
         const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
         
-        if (__DEV__) {
-          console.log('========== APPROVE DESIGN VERSION API REQUEST ==========');
-          console.log('URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
-          console.log('Method: PUT');
-          console.log('Body:', { IsApprovedVersion: true });
-          console.log('========================================================');
-        }
+        
         
         return {
           url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
@@ -1649,15 +1557,11 @@ export const api = createApi({
         'Enquiry',
       ],
       transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('Design version approved:', response);
-        }
+        
         return response;
       },
       transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('Failed to approve design version:', response);
-        }
+        
         return {
           status: response.status,
           data: response.data,
@@ -1677,11 +1581,7 @@ export const api = createApi({
         };
         
         if (__DEV__) {
-          console.log('========== SAVE PRICING API REQUEST ==========');
-          console.log('URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
-          console.log('Method: PUT');
           console.log('Body (wrapped in Pricing key):', JSON.stringify(requestBody, null, 2));
-          console.log('=============================================');
         }
         
         return {
@@ -1696,15 +1596,11 @@ export const api = createApi({
         'Dashboard',
       ],
       transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('✅ Pricing saved successfully:', response);
-        }
+        
         return response;
       },
       transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('❌ Failed to save pricing:', response);
-        }
+        
         return {
           status: response.status,
           data: response.data,
@@ -1731,15 +1627,11 @@ export const api = createApi({
         'Enquiry',
       ],
       transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('Design version rejected:', response);
-        }
+        
         return response;
       },
       transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('Failed to reject design version:', response);
-        }
+        
         return {
           status: response.status,
           data: response.data,
@@ -1753,13 +1645,7 @@ export const api = createApi({
       query: ({ enquiryId, designType, version, showToClient }) => {
         const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
         
-        if (__DEV__) {
-          console.log('========== UPDATE SHOW TO CLIENT API REQUEST ==========');
-          console.log('URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
-          console.log('Method: PUT');
-          console.log('Body:', { ShowToClient: showToClient });
-          console.log('========================================================');
-        }
+        
         
         return {
           url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
@@ -1774,15 +1660,11 @@ export const api = createApi({
         'Enquiry',
       ],
       transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('ShowToClient updated:', response);
-        }
+        
         return response;
       },
       transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('Failed to update ShowToClient:', response);
-        }
+        
         return {
           status: response.status,
           data: response.data,
@@ -1796,12 +1678,7 @@ export const api = createApi({
       query: ({ enquiryId, designType, version }) => {
         const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
         
-        if (__DEV__) {
-          console.log('🗑️ ========== DELETE VERSION API ==========');
-          console.log('🗑️ URL:', `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`);
-          console.log('🗑️ Method: DELETE');
-          console.log('🗑️ =========================================');
-        }
+        
         
         return {
           url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
@@ -1813,15 +1690,11 @@ export const api = createApi({
         'Enquiry',
       ],
       transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('✅ Version deleted successfully:', response);
-        }
+        
         return response;
       },
       transformErrorResponse: (response) => {
-        if (__DEV__) {
-          console.error('❌ Failed to delete version:', response);
-        }
+        
         return {
           status: response.status,
           data: response.data,
@@ -1852,9 +1725,7 @@ export const api = createApi({
         for (const endpoint of uploadEndpoints) {
           for (const fieldName of fieldNames) {
             try {
-              if (__DEV__) {
-                console.log(`Trying upload to: ${endpoint} with field: ${fieldName}`);
-              }
+              
               
               // Create FormData
               const formData = new FormData();
@@ -1879,20 +1750,15 @@ export const api = createApi({
 
               if (response.ok) {
                 const data = await response.json();
-                if (__DEV__) {
-                  console.log(`Image upload successful to ${endpoint} with field ${fieldName}:`, data);
-                }
+                
                 return { data };
               } else {
                 if (__DEV__) {
                   const errorText = await response.text().catch(() => '');
-                  console.log(`Upload failed at ${endpoint} with field ${fieldName}: Status ${response.status}`);
                 }
               }
             } catch (error) {
-              if (__DEV__) {
-                console.log(`Upload error at ${endpoint} with field ${fieldName}:`, error.message);
-              }
+              
             }
           }
         }
@@ -2027,10 +1893,7 @@ export const api = createApi({
     calculatePricing: builder.mutation({
       query: (data) => {
         if (__DEV__) {
-          console.log('========== PRICING CALCULATION REQUEST ==========');
-          console.log('URL: /api/enquiries/pricingCalculate');
           console.log('Payload:', JSON.stringify(data, null, 2));
-          console.log('================================================');
         }
         return {
           url: '/api/enquiries/pricingCalculate',
@@ -2039,45 +1902,27 @@ export const api = createApi({
         };
       },
       transformResponse: (response) => {
-        if (__DEV__) {
-          console.log('========== PRICING CALCULATION RESPONSE ==========');
-          console.log('Response:', response);
-          console.log('==================================================');
-        }
+        
         return response;
       },
       transformErrorResponse: (response) => {
         if (__DEV__) {
-          console.error('========== PRICING CALCULATION ERROR ==========');
-          console.error('Status:', response.status);
-          console.error('Status text:', response.statusText);
-          console.error('Error data:', response.data);
-          console.error('Error status:', response.status);
           console.error('Full response:', JSON.stringify(response, null, 2));
           
           // Try to extract more details from error response
           if (response.data) {
-            console.error('Error data details:');
             if (typeof response.data === 'string') {
               console.error('Error message (string):', response.data);
             } else if (typeof response.data === 'object') {
               console.error('Error object keys:', Object.keys(response.data));
-              console.error('Error message:', response.data.message);
-              console.error('Error error:', response.data.error);
-              console.error('Error stack:', response.data.stack);
-              console.error('Error details:', response.data.details);
             }
           }
           
           // Check for specific backend error pattern
           if (response.status === 500) {
-            console.error('⚠️ 500 Internal Server Error detected');
             console.error('This is likely the "Cannot read properties of null (reading \'Pricing\')" error');
-            console.error('Backend location: enquiry.service.js:933');
-            console.error('Solution: Backend needs to add null check for client before accessing client.Pricing');
           }
           
-          console.error('===============================================');
         }
         
         // Enhance error message for 500 errors (likely the client.Pricing null error)
@@ -2128,9 +1973,6 @@ export const api = createApi({
         const url = `/api/chats?${params.toString()}`;
         if (__DEV__) {
           console.log('✅✅✅ getChatsByEnquiryV2 (NEW CODE) ✅✅✅');
-          console.log('🔍 Fetching from:', url);
-          console.log('🔍 For enquiryId:', enquiryIdStr);
-          console.log('✅✅✅ If you see OLD endpoint /api/chats/enquiry/, the app needs reload ✅✅✅');
         }
         return url;
       },
@@ -2142,9 +1984,7 @@ export const api = createApi({
           
           // Handle different response formats
           if (!data) {
-            if (__DEV__) {
-              console.log('getChatsByEnquiry: No data returned');
-            }
+            
             return [];
           }
           
@@ -2158,15 +1998,11 @@ export const api = createApi({
           } else if (data.chats && Array.isArray(data.chats)) {
             chatsArray = data.chats;
           } else {
-            if (__DEV__) {
-              console.warn('getChatsByEnquiry: Unexpected response format:', data);
-            }
+            
             return [];
           }
           
-          if (__DEV__) {
-            console.log('getChatsByEnquiry: Found', chatsArray.length, 'chats before filtering');
-          }
+          
           
           // Normalize chat objects and filter by enquiryId
           const normalizedChats = chatsArray.map((chat, index) => {
@@ -2225,9 +2061,7 @@ export const api = createApi({
             isGroup: chat.IsGroup || chat.isGroup || false,
           };
             } catch (chatError) {
-              if (__DEV__) {
-                console.error('Error normalizing chat at index', index, ':', chatError, chat);
-              }
+              
               // Return a minimal valid chat object
               return {
                 _id: chat?._id || chat?.id || `error-${index}`,
@@ -2256,15 +2090,11 @@ export const api = createApi({
             return chatEnquiryId === enquiryIdStr;
           });
           
-          if (__DEV__) {
-            console.log('getChatsByEnquiry: Found', filteredChats.length, 'chats after filtering for enquiryId:', enquiryIdStr);
-          }
+          
           
           return filteredChats;
         } catch (error) {
-          if (__DEV__) {
-            console.error('Error in getChatsByEnquiry transformResponse:', error);
-          }
+          
           return [];
         }
       },
@@ -2282,12 +2112,6 @@ export const api = createApi({
           });
           // Check if error is from old endpoint
           if (response.data && typeof response.data === 'string' && response.data.includes('/api/chats/enquiry/')) {
-            console.error('⚠️ CRITICAL ERROR: Old endpoint detected! URL:', meta?.request?.url || 'unknown');
-            console.error('⚠️ This means the app is still using cached code. Please:');
-            console.error('⚠️ 1. Stop the Metro bundler completely');
-            console.error('⚠️ 2. Clear app cache/data');
-            console.error('⚠️ 3. Restart Metro bundler');
-            console.error('⚠️ 4. Reload the app');
           }
         }
         return {
@@ -2317,12 +2141,8 @@ export const api = createApi({
       transformResponse: (data, meta, arg) => {
         if (__DEV__) {
           console.log('getChats API Response (raw):', data);
-          console.log('Response type:', typeof data);
           console.log('Is Array?', Array.isArray(data));
-          console.log('Request params:', arg);
           if (meta?.response) {
-            console.log('Response status:', meta.response.status);
-            console.log('Response URL:', meta.response.url);
           }
         }
 
@@ -2333,9 +2153,7 @@ export const api = createApi({
           // Check if this is an array of messages (need to aggregate) or chats
           if (data.length > 0 && data[0].message && data[0].enquiryId) {
             // This looks like messages - aggregate into chats by enquiryId
-            if (__DEV__) {
-              console.log('API returned messages, aggregating into chats...');
-            }
+            
             const chatMap = new Map();
             
             data.forEach(msg => {
@@ -2388,23 +2206,15 @@ export const api = createApi({
           } else if (data.data && Array.isArray(data.data)) {
             chatsArray = data.data;
           } else {
-            if (__DEV__) {
-              console.warn('Unexpected response format from /api/chats:', data);
-              console.warn('Expected format: { Total, page, limit, TotalPages, Data } or array');
-            }
+            
             return [];
           }
         } else {
-          if (__DEV__) {
-            console.warn('Unexpected response format from /api/chats:', data);
-          }
+          
           return [];
         }
         
-        if (__DEV__) {
-          console.log('Chats Array Length:', chatsArray.length);
-          console.log('First Chat Item:', chatsArray[0]);
-        }
+        
         
         const normalizedChats = chatsArray.map(chat => {
           // Handle MongoDB ObjectId format for enquiryId
@@ -2489,10 +2299,7 @@ export const api = createApi({
           };
         });
         
-        if (__DEV__) {
-          console.log('Normalized Chats:', normalizedChats);
-          console.log('Normalized Chats Count:', normalizedChats.length);
-        }
+        
         
         return normalizedChats;
       },
@@ -2513,10 +2320,7 @@ export const api = createApi({
           }
 
           const url = `/api/message/${chatId}/messages?${params.toString()}`;
-          if (__DEV__) {
-            console.log(`getChatMessages API Request: ${API_BASE_URL}${url}`);
-            console.log('For chatId:', chatId);
-          }
+          
 
           const response = await fetch(`${API_BASE_URL}${url}`, {
             headers: {
@@ -2534,9 +2338,6 @@ export const api = createApi({
             // This is expected - messages work via WebSocket, historical messages will be empty
             // Only log once per chat to reduce noise
             if (__DEV__ && !global._loggedMissingMessagesEndpoint) {
-              console.warn('⚠️ Backend endpoint /api/message/:chatId/messages not implemented yet.');
-              console.warn('⚠️ Historical messages will be empty. New messages work via WebSocket.');
-              console.warn('⚠️ This is expected behavior until backend implements the endpoint.');
               global._loggedMissingMessagesEndpoint = true;
             }
             // Return empty array - messages will be empty but app won't crash
@@ -2550,7 +2351,6 @@ export const api = createApi({
             data = JSON.parse(responseText);
           } catch (parseError) {
             if (__DEV__) {
-              console.error('❌ Failed to parse response as JSON:', parseError);
               console.error('Response text:', responseText.substring(0, 500));
             }
             // Return empty array if JSON parsing fails
@@ -2591,25 +2391,18 @@ export const api = createApi({
             // Format: { messages: [...], nextCursor: "..." }
             messagesArray = data.messages;
             nextCursor = data.nextCursor || data.NextCursor || null;
-            if (__DEV__) {
-              console.log('✅ Using format: data.messages');
-            }
+            
           } else if (Array.isArray(data)) {
             // Format: direct array [...]
             messagesArray = data;
-            if (__DEV__) {
-              console.log('✅ Using format: direct array');
-            }
+            
           } else if (data && data.result && Array.isArray(data.result)) {
             // Format: { result: [...] }
             messagesArray = data.result;
             nextCursor = data.nextCursor || data.NextCursor || null;
-            if (__DEV__) {
-              console.log('✅ Using format: data.result');
-            }
+            
           } else {
             if (__DEV__) {
-              console.warn('⚠️ Unexpected response format from /api/message/:chatId/messages');
               console.warn('Response structure:', {
                 type: typeof data,
                 isArray: Array.isArray(data),
@@ -2621,9 +2414,7 @@ export const api = createApi({
           }
 
           if (__DEV__) {
-            console.log('Messages Array Length after processing:', messagesArray.length);
             if (messagesArray.length > 0) {
-              console.log('First message sample:', messagesArray[0]);
             }
           }
 
@@ -2725,7 +2516,6 @@ export const api = createApi({
             if (isNetworkError) {
               console.warn('⚠️ Network error fetching messages (server may be unreachable):', errorMessage);
             } else {
-              console.error('❌ Error in getChatMessages queryFn:', error);
             }
           }
           
@@ -2881,9 +2671,7 @@ export const api = createApi({
 
           const endpoint = '/api/message/upload';
 
-          if (__DEV__) {
-            console.log(`Uploading chat media: ${file.name || 'unnamed'}`);
-          }
+          
 
           const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
@@ -2896,16 +2684,12 @@ export const api = createApi({
 
           if (response.ok) {
             const data = await response.json();
-            if (__DEV__) {
-              console.log(`Chat media upload successful:`, data);
-            }
+            
             return { data };
           } else {
             const errorText = await response.text().catch(() => '');
             const errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
-            if (__DEV__) {
-              console.error(`Chat media upload failed: Status ${response.status}`, errorData);
-            }
+            
             return {
               error: {
                 status: response.status,
@@ -2914,9 +2698,7 @@ export const api = createApi({
             };
           }
         } catch (error) {
-          if (__DEV__) {
-            console.error('Chat media upload error:', error);
-          }
+          
           return {
             error: {
               status: 'CUSTOM_ERROR',
@@ -2990,5 +2772,6 @@ export const {
   
   // Code Lists
   useGetRolesQuery,
+  useGetStatusesQuery,
 } = api;
 

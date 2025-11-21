@@ -17,6 +17,7 @@ import IconComponent from '../../components/common/Icon';
 import { useGetEnquiryByIdQuery, useGetUsersQuery, useUpdateEnquiryMutation } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
 import { useAuth } from '../../context/AuthContext';
+import { useStatusOptions } from '../../features/statuses/statusesHooks';
 
 const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const { user } = useAuth();
@@ -145,17 +146,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     };
     
     if (__DEV__) {
-      console.log('EditEnquiryStep1 - Mapping enquiry data');
       console.log('  Full enquiry object:', JSON.stringify(enquiry, null, 2));
       console.log('  Original data:', JSON.stringify(originalData, null, 2));
-      console.log('  Title:', enquiry.title, enquiry.Name, originalData?.Name);
-      console.log('  Metal:', originalData?.Metal, enquiry.Metal);
-      console.log('  MetalWeight:', originalData?.MetalWeight, enquiry.MetalWeight);
-      console.log('  Priority:', originalData?.Priority, enquiry.Priority, enquiry.priority);
-      console.log('  Category:', originalData?.Category, enquiry.Category, enquiry.category);
-      console.log('  ClientId:', enquiryClientId);
-      console.log('  ClientName:', clientName);
-      console.log('  Available clients:', clients.length);
     }
     
     // Priority mapping - check all possible sources
@@ -271,10 +263,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     
     if (currentEnquiryId && finalEnquiryToEdit) {
       if (__DEV__) {
-        console.log('EditEnquiryStep1 - Editing enquiry ID:', currentEnquiryId);
-        console.log('EditEnquiryStep1 - Editing enquiry:', finalEnquiryToEdit);
         console.log('EditEnquiryStep1 - Enquiry keys:', Object.keys(finalEnquiryToEdit || {}));
-        console.log('EditEnquiryStep1 - Original data:', finalEnquiryToEdit._originalData);
         console.log('EditEnquiryStep1 - Original data keys:', finalEnquiryToEdit._originalData ? Object.keys(finalEnquiryToEdit._originalData) : []);
       }
       
@@ -282,17 +271,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       setFormData(initialData);
       
       if (__DEV__) {
-        console.log('EditEnquiryStep1 - Form data populated:', initialData);
-        console.log('EditEnquiryStep1 - Check form fields:');
-        console.log('  - Title:', initialData.title);
-        console.log('  - Description:', initialData.description);
-        console.log('  - Client:', initialData.clientName);
-        console.log('  - Status:', initialData.status);
-        console.log('  - Assigned To:', initialData.assignedTo);
-        console.log('  - Category:', initialData.category);
-        console.log('  - Metal Color:', initialData.metalColor);
-        console.log('  - Metal Quality:', initialData.metalQuality);
-        console.log('  - Quantity:', initialData.quantity);
         console.log('  - Status Options:', statusOptions.map(o => o.value));
         console.log('  - Assigned To Options:', assignedToOptions.map(o => ({ label: o.label, value: o.value })));
       }
@@ -502,9 +480,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         Category: formData.category || 'Ring',
       };
 
-      if (__DEV__) {
-        console.log('Updating enquiry with data:', enquiryData);
-      }
+      
 
       await updateEnquiry({ id: enquiryIdToUpdate, ...enquiryData }).unwrap();
       
@@ -524,7 +500,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         { cancelable: false }
       );
     } catch (error) {
-      console.error('Error updating enquiry:', error);
       Alert.alert(
         'Error',
         error?.data?.error || error?.message || 'Failed to update enquiry. Please try again.',
@@ -542,19 +517,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Super High', value: 'Super High' },
   ];
 
-  const statusOptions = [
-    { label: 'Enquiry Created', value: 'Enquiry Created' },
-    { label: 'Design Approval Pending', value: 'Design Approval Pending' },
-    { label: 'CAD', value: 'CAD' },
-    { label: 'Coral', value: 'Coral' },
-    { label: 'Approved Cad', value: 'Approved Cad' },
-    { label: 'Order Placement', value: 'Order Placement' },
-    { label: 'CAM Pending', value: 'CAM Pending' },
-    { label: 'Production', value: 'Production' },
-    { label: 'Completed', value: 'Completed' },
-    { label: 'Rejected', value: 'Rejected' },
-  ];
-
   // Create assigned-to options from users (exclude clients by role) - memoized to prevent recreation
   const assignedToOptions = useMemo(() => {
     const options = users
@@ -567,13 +529,18 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         value: String(user.id || user._id).trim(), // Ensure value is a string
       }));
     
-    if (__DEV__) {
-      console.log('🔍 Assigned To Options:', options);
-      console.log('🔍 Users loaded:', users.length);
-    }
+    
     
     return options;
   }, [users]);
+
+  // Get status options from API (cached)
+  const statusOptionsFromAPI = useStatusOptions();
+  
+  // Filter out "All Status" option for create/edit forms (only needed in filters)
+  const statusOptions = useMemo(() => {
+    return statusOptionsFromAPI.filter(opt => opt.value !== 'all');
+  }, [statusOptionsFromAPI]);
 
   const categoryOptions = [
     { label: 'Necklace', value: 'Necklace' },

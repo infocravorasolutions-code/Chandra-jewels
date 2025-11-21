@@ -31,19 +31,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { enquiry: initialEnquiry, enquiryId: routeEnquiryId, shouldRefresh } = route.params || {};
   
-  if (__DEV__) {
-    console.log('initialEnquiry', initialEnquiry);
-  }
+  
   // Log route params when screen loads or params change
   useEffect(() => {
-    if (__DEV__) {
-      console.log('========== SingleEnquiryScreen - Route Params ==========');
-      console.log('route.params:', route.params);
-      console.log('initialEnquiry:', initialEnquiry ? { id: initialEnquiry.id || initialEnquiry._id, title: initialEnquiry.title || initialEnquiry.Name } : 'null');
-      console.log('routeEnquiryId:', routeEnquiryId);
-      console.log('shouldRefresh:', shouldRefresh);
-      console.log('========================================================');
-    }
+    
   }, [route.params, initialEnquiry, routeEnquiryId, shouldRefresh]);
   
   // Fetch and cache users for name resolution
@@ -54,12 +45,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   
   // Log enquiryId
   useEffect(() => {
-    if (__DEV__) {
-      console.log('========== SingleEnquiryScreen - Enquiry ID ==========');
-      console.log('enquiryId:', enquiryId);
-      console.log('enquiryId type:', typeof enquiryId);
-      console.log('=====================================================');
-    }
+    
   }, [enquiryId]);
   
   // Redux hooks
@@ -77,26 +63,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   useEffect(() => {
     if (enquiryData && enquiryId) {
       const currentStatus = enquiryData?.status || enquiryData?.Status || enquiryData?._originalData?.Status;
-      if (__DEV__) {
-        console.log('🔄 ========== ENQUIRY STATUS CHECK ==========');
-        console.log('🔄 Enquiry ID:', enquiryId);
-        console.log('🔄 Current Status:', currentStatus);
-        console.log('🔄 Data Updated:', enquiryData?.updatedAt || enquiryData?._originalData?.UpdatedDate);
-        console.log('🔄 =========================================');
-      }
+      
     }
   }, [enquiryData, enquiryId]);
   
   // Log enquiryData changes - reduced logging to prevent performance issues
   useEffect(() => {
-    if (__DEV__ && enquiryData && shouldRefresh) {
-      console.log('========== SingleEnquiryScreen - Enquiry Data Updated ==========');
-      console.log('enquiryData id:', enquiryData?.id || enquiryData?._id);
-      console.log('StoneType:', enquiryData.StoneType || enquiryData.stoneType);
-      console.log('StyleNumber:', enquiryData.StyleNumber || enquiryData.styleNumber);
-      console.log('GatiOrderNumber:', enquiryData.GatiOrderNumber || enquiryData.gatiOrderNumber);
-      console.log('===============================================================');
-    }
+    
   }, [enquiryData?.id, enquiryData?.StoneType, enquiryData?.StyleNumber, enquiryData?.GatiOrderNumber, shouldRefresh]);
 
   const [deleteEnquiry, { isLoading: isDeleting }] = useDeleteEnquiryMutation();
@@ -141,15 +114,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         }
       });
       
-      if (__DEV__) {
-        console.log('Client Name Map created with', map.size, 'entries');
-        console.log('Sample client IDs in map:', Array.from(map.keys()).slice(0, 10));
-        console.log('Total clients loaded:', clients.length);
-      }
     } else {
-      if (__DEV__) {
-        console.warn('No clients data available for name lookup');
-      }
+      
     }
     return map;
   }, [clients]);
@@ -157,9 +123,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // Helper to get client name from ID - try multiple matching strategies
   const getClientName = (clientId) => {
     if (!clientId) {
-      if (__DEV__) {
-        console.log('getClientName: No clientId provided');
-      }
+      
       return 'Unknown Client';
     }
     
@@ -167,43 +131,29 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     
     // Try exact match first
     if (clientNameMap.has(idStr)) {
-      if (__DEV__) {
-        console.log(`getClientName: Found exact match for "${idStr}"`);
-      }
+      
       return clientNameMap.get(idStr);
     }
     
     // Try without spaces
     const noSpaces = idStr.replace(/\s/g, '');
     if (clientNameMap.has(noSpaces)) {
-      if (__DEV__) {
-        console.log(`getClientName: Found match (no spaces) for "${idStr}"`);
-      }
       return clientNameMap.get(noSpaces);
     }
     
     // Try cleaned ObjectId format
     const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').trim();
     if (cleanId !== idStr && clientNameMap.has(cleanId)) {
-      if (__DEV__) {
-        console.log(`getClientName: Found match (cleaned ObjectId) for "${idStr}"`);
-      }
       return clientNameMap.get(cleanId);
     }
     
     const cleanNoSpaces = cleanId.replace(/\s/g, '');
     if (clientNameMap.has(cleanNoSpaces)) {
-      if (__DEV__) {
-        console.log(`getClientName: Found match (cleaned no spaces) for "${idStr}"`);
-      }
       return clientNameMap.get(cleanNoSpaces);
     }
     
     // Try lowercase
     if (clientNameMap.has(idStr.toLowerCase())) {
-      if (__DEV__) {
-        console.log(`getClientName: Found match (lowercase) for "${idStr}"`);
-      }
       return clientNameMap.get(idStr.toLowerCase());
     }
     
@@ -223,9 +173,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       if (foundClient) {
         const name = foundClient.name || foundClient.Name;
         if (name && name !== 'Unknown Client') {
-          if (__DEV__) {
-            console.log(`getClientName: Found via direct search for "${idStr}"`);
-          }
+          
           return name;
         }
       }
@@ -269,14 +217,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   
   // Log which enquiry source is being used
   useEffect(() => {
-    if (__DEV__) {
-      console.log('========== SingleEnquiryScreen - Enquiry Source ==========');
-      console.log('Using enquiryData:', !!enquiryData);
-      console.log('Using initialEnquiry:', !!initialEnquiry);
-      console.log('Final enquiry id:', enquiry?.id || enquiry?._id);
-      console.log('Final enquiry keys:', Object.keys(enquiry).slice(0, 20));
-      console.log('==========================================================');
-    }
   }, [enquiryData, initialEnquiry, enquiry]);
   
   // Get original data for accessing raw API fields
@@ -284,78 +224,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   
   // Log originalData for debugging - Enhanced to show all fields
   useEffect(() => {
-    if (__DEV__ && enquiry) {
-      console.log('========== SingleEnquiryScreen - Field Extraction Debug ==========');
-      console.log('🔍 Enquiry ID:', enquiry?.id || enquiry?._id);
-      console.log('🔍 originalData exists:', !!originalData);
-      console.log('🔍 enquiry keys:', Object.keys(enquiry).slice(0, 30));
-      console.log('🔍 originalData keys:', originalData ? Object.keys(originalData).slice(0, 30) : 'N/A');
-      
-      // Check all possible field locations
-      console.log('🔍 ========== FIELD VALUES CHECK ==========');
-      console.log('🔍 StyleNumber:', {
-        'originalData.StyleNumber': originalData?.StyleNumber,
-        'enquiry.StyleNumber': enquiry?.StyleNumber,
-        'enquiry.styleNumber': enquiry?.styleNumber,
-      });
-      console.log('🔍 GatiOrderNumber:', {
-        'originalData.GatiOrderNumber': originalData?.GatiOrderNumber,
-        'originalData.gatiOrderNumber': originalData?.gatiOrderNumber,
-        'enquiry.GatiOrderNumber': enquiry?.GatiOrderNumber,
-        'enquiry.gatiOrderNumber': enquiry?.gatiOrderNumber,
-        'enquiry._originalData?.GatiOrderNumber': enquiry?._originalData?.GatiOrderNumber,
-        'Type check': typeof (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber),
-        'Is empty string?': (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber) === '',
-        'Is null?': (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber) === null,
-        'Is undefined?': (originalData?.GatiOrderNumber || enquiry?.GatiOrderNumber) === undefined,
-      });
-      console.log('🔍 Stamping:', {
-        'originalData.Stamping': originalData?.Stamping,
-        'enquiry.Stamping': enquiry?.Stamping,
-        'enquiry.stamping': enquiry?.stamping,
-      });
-      console.log('🔍 MetalWeight:', {
-        'originalData.MetalWeight': originalData?.MetalWeight,
-        'enquiry.MetalWeight': enquiry?.MetalWeight,
-        'enquiry.metalWeight': enquiry?.metalWeight,
-      });
-      console.log('🔍 DiamondWeight:', {
-        'originalData.DiamondWeight': originalData?.DiamondWeight,
-        'enquiry.DiamondWeight': enquiry?.DiamondWeight,
-        'enquiry.diamondWeight': enquiry?.diamondWeight,
-      });
-      console.log('🔍 Category:', {
-        'originalData.Category': originalData?.Category,
-        'enquiry.Category': enquiry?.Category,
-        'enquiry.category': enquiry?.category,
-      });
-      console.log('🔍 StoneType:', {
-        'originalData.StoneType': originalData?.StoneType,
-        'enquiry.StoneType': enquiry?.StoneType,
-        'enquiry.stoneType': enquiry?.stoneType,
-      });
-      console.log('🔍 =========================================');
-      console.log('========================================================');
-    }
   }, [enquiry, originalData]);
   
   // Debug: Log enquiry structure to understand data format
   useEffect(() => {
-    if (__DEV__ && enquiry) {
-      console.log('========== ENQUIRY DATA STRUCTURE DEBUG ==========');
-      console.log('enquiry keys:', Object.keys(enquiry));
-      console.log('enquiry._originalData exists:', !!enquiry._originalData);
-      if (enquiry._originalData) {
-        console.log('_originalData keys:', Object.keys(enquiry._originalData));
-        console.log('_originalData.ReferenceImages:', enquiry._originalData.ReferenceImages);
-        console.log('_originalData.Images:', enquiry._originalData.Images);
-      }
-      console.log('enquiry.ReferenceImages:', enquiry.ReferenceImages);
-      console.log('enquiry.images:', enquiry.images);
-      console.log('enquiry.Images:', enquiry.Images);
-      console.log('Full enquiry object (first level):', JSON.stringify(enquiry, null, 2).substring(0, 2000));
-      console.log('================================================');
-    }
   }, [enquiry]);
   
   // Get priority from API (Priority field) - use original value, not normalized
@@ -417,16 +289,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   
   // Debug logging for client name resolution - moved to useEffect to avoid blocking render
   useEffect(() => {
-    if (__DEV__ && clientId && clientName === 'Unknown Client' && !clientsLoading && clients.length > 0) {
-      console.warn('⚠️ Client name lookup failed!');
-      console.warn('  Searching for ClientId:', JSON.stringify(clientId));
-      console.warn('  Available client IDs in map:', Array.from(clientNameMap.keys()).slice(0, 10));
-      console.warn('  Sample client from array:', clients[0] ? {
-        id: clients[0].id,
-        _id: clients[0]._id,
-        name: clients[0].name
-      } : 'No clients');
-    }
   }, [clientId, clientName, clientsLoading, clients.length, clientNameMap]);
   
   // Get dates - check multiple possible fields
@@ -442,12 +304,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       // Always refetch when screen comes into focus to get latest updates
       // This ensures client sees status changes made by admin AND fields added during editing
       if (enquiryId && refetch) {
-        if (__DEV__) {
-          console.log('🔄 ========== SCREEN FOCUSED - REFETCHING ENQUIRY ==========');
-          console.log('🔄 Enquiry ID:', enquiryId);
-          console.log('🔄 Reason: Screen focused (likely returned from edit screen)');
-          console.log('🔄 ========================================================');
-        }
         
         // Use a small delay to ensure navigation is complete
         const timeoutId = setTimeout(() => {
@@ -455,19 +311,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             .then((result) => {
               if (__DEV__) {
                 const data = result?.data;
-                console.log('✅ Refetch completed:', !!data);
-                console.log('✅ Latest status:', data?.status || data?.Status || data?._originalData?.Status);
-                console.log('✅ Latest StyleNumber:', data?.StyleNumber || data?.styleNumber || data?._originalData?.StyleNumber);
-                console.log('✅ Latest GatiOrderNumber:', data?.GatiOrderNumber || data?.gatiOrderNumber || data?._originalData?.GatiOrderNumber);
-                console.log('✅ Latest Stamping:', data?.Stamping || data?.stamping || data?._originalData?.Stamping);
-                console.log('✅ Latest Category:', data?.Category || data?.category || data?._originalData?.Category);
-                console.log('✅ Latest StoneType:', data?.StoneType || data?.stoneType || data?._originalData?.StoneType);
               }
             })
             .catch((error) => {
-              if (__DEV__) {
-                console.error('❌ Refetch error:', error);
-              }
+              
             });
         }, 100);
         
@@ -508,19 +355,14 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   }
 
   const handleApprove = () => {
-    if (__DEV__) {
-      console.log('========== APPROVE BUTTON CLICKED ==========');
-    }
+    
     
     // Get available design versions
     const originalData = enquiry?._originalData || enquiry;
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
     
-    if (__DEV__) {
-      console.log('Coral versions:', coralVersions.length);
-      console.log('CAD versions:', cadVersions.length);
-    }
+    
     
     // Determine which design type and version to approve
     // Priority: Latest coral version, or latest cad version if no coral
@@ -532,9 +374,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
     
     if (versionIndex === null) {
-      if (__DEV__) {
-        console.error('No design versions available to approve');
-      }
+      
       Alert.alert('Error', 'No design versions available to approve');
       return;
     }
@@ -543,9 +383,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       ? (coralVersions[versionIndex]?.Version || `Version ${versionIndex + 1}`)
       : (cadVersions[versionIndex]?.Version || `Version ${versionIndex + 1}`);
     
-    if (__DEV__) {
-      console.log('Will approve:', { designType, version, versionIndex });
-    }
+    
     
     Alert.alert(
       'Approve Design Version',
@@ -555,27 +393,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           text: 'Cancel', 
           style: 'cancel',
           onPress: () => {
-            if (__DEV__) {
-              console.log('Approve cancelled by user');
-            }
+            
           }
         },
         {
           text: 'Approve',
           onPress: async () => {
-            if (__DEV__) {
-              console.log('========== APPROVING DESIGN VERSION ==========');
-              console.log('Design Type:', designType);
-              console.log('Version:', version);
-            }
+            
             
             try {
               const enquiryId = enquiry.id || enquiry._id;
               
-              if (__DEV__) {
-                console.log('Enquiry ID:', enquiryId);
-                console.log('Calling approveDesignVersion API...');
-              }
+              
               
               const result = await approveDesignVersion({
                 enquiryId,
@@ -583,21 +412,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 version,
               }).unwrap();
               
-              if (__DEV__) {
-                console.log('✅ Approve API response:', result);
-              }
+              
               
               Alert.alert('Success', `${designType.toUpperCase()} ${version} approved successfully`);
               // Refetch enquiry data to get updated approval status
               refetch();
             } catch (error) {
-              console.error('========== ERROR APPROVING DESIGN VERSION ==========');
-              console.error('Error object:', error);
-              console.error('Error status:', error.status);
-              console.error('Error data:', error.data);
-              console.error('Error message:', error.message);
-              console.error('Full error:', JSON.stringify(error, null, 2));
-              console.error('======================================================');
               
               Alert.alert(
                 'Error',
@@ -678,7 +498,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       // Refetch enquiry data to get updated rejection status
       refetch();
     } catch (error) {
-      console.error('Error rejecting design version:', error);
       Alert.alert(
         'Error',
         error?.data?.error || error?.message || 'Failed to reject design version. Please try again.'
@@ -723,27 +542,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   };
 
   const renderEnquiryDetails = () => {
-    // Debug: Log ALL keys in enquiry and originalData to find Gati Order Number field
-    if (__DEV__) {
-      console.log('🔍 ========== FULL ENQUIRY DATA INSPECTION ==========');
-      console.log('🔍 All enquiry keys:', Object.keys(enquiry || {}));
-      console.log('🔍 All originalData keys:', Object.keys(originalData || {}));
-      
-      // Search for any field containing "gati" or "Gati" (case-insensitive)
-      const enquiryKeys = Object.keys(enquiry || {});
-      const originalDataKeys = Object.keys(originalData || {});
-      const gatiFields = [
-        ...enquiryKeys.filter(k => k.toLowerCase().includes('gati')),
-        ...originalDataKeys.filter(k => k.toLowerCase().includes('gati'))
-      ];
-      console.log('🔍 Fields containing "gati":', gatiFields);
-      
-      // Log actual values
-      gatiFields.forEach(key => {
-        console.log(`🔍 ${key}:`, enquiry?.[key] || originalData?.[key]);
-      });
-      console.log('🔍 ==================================================');
-    }
     
     // Extract metal details - check ALL possible locations (originalData, enquiry normalized, enquiry raw)
     const metal = originalData?.Metal || enquiry?.Metal || enquiry?.metal || {};
@@ -781,24 +579,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                             enquiry?.gati_order_number ||
                             null;
     
-    // Debug log for Gati Order Number extraction
-    if (__DEV__ && gatiOrderNumber) {
-      console.log('✅ Gati Order Number extracted:', gatiOrderNumber);
-      console.log('✅ Source:', {
-        'from originalData.GatiOrderNumber': !!originalData?.GatiOrderNumber,
-        'from enquiry.GatiOrderNumber': !!enquiry?.GatiOrderNumber,
-        'from enquiry.gatiOrderNumber': !!enquiry?.gatiOrderNumber,
-      });
-    } else if (__DEV__) {
-      console.warn('⚠️ Gati Order Number NOT FOUND in any location');
-      console.warn('⚠️ Checked locations:', {
-        'originalData?.GatiOrderNumber': originalData?.GatiOrderNumber,
-        'originalData?.gatiOrderNumber': originalData?.gatiOrderNumber,
-        'enquiry?.GatiOrderNumber': enquiry?.GatiOrderNumber,
-        'enquiry?.gatiOrderNumber': enquiry?.gatiOrderNumber,
-        'enquiry?._originalData?.GatiOrderNumber': enquiry?._originalData?.GatiOrderNumber,
-      });
-    }
     const stamping = originalData?.Stamping || 
                      enquiry?.Stamping || 
                      enquiry?.stamping ||
@@ -959,17 +739,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     // Fetch image with authentication
     const fetchImageWithAuth = async (imageUrl) => {
       if (!imageUrl) {
-        if (__DEV__) {
-          console.warn(`ImageWithFallback[${index}] - fetchImageWithAuth called without imageUrl`);
-        }
+        
         return;
       }
       
       // Don't fetch if we already have the data URI
       if (imageDataUri) {
-        if (__DEV__) {
-          console.log(`ImageWithFallback[${index}] - Already have data URI, skipping fetch`);
-        }
+        
         return;
       }
       
@@ -979,14 +755,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         
         const token = await AsyncStorage.getItem('token');
         if (!token) {
-          console.warn(`⚠️ No token available for image[${index}]`);
           setImageError(true);
           setImageLoading(false);
           return;
         }
 
-        console.log(`🔄 Fetching reference image[${index}] with authentication...`);
-        console.log(`URL: ${imageUrl}`);
         
         const response = await fetch(imageUrl, {
           method: 'GET',
@@ -997,25 +770,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
         if (response.ok) {
           const contentType = response.headers.get('content-type') || '';
-          console.log(`✅ Reference image[${index}] fetch OK, content-type:`, contentType);
           
           // Check if response is JSON (API returns a URL object)
           if (contentType.includes('application/json')) {
-            console.log(`📄 Reference image[${index}] response is JSON, parsing...`);
             const jsonData = await response.json();
-            console.log(`JSON response:`, jsonData);
             
             // Extract the actual image URL from JSON
             const actualImageUrl = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
             
             if (!actualImageUrl) {
-              console.error(`❌ No image URL found in JSON response for image[${index}]`);
               setImageError(true);
               setImageLoading(false);
               return;
             }
             
-            console.log(`🖼️ Found image URL in JSON for image[${index}], fetching actual image...`);
             
             // Fetch the actual image from the URL (likely S3)
             const imageResponse = await fetch(actualImageUrl, {
@@ -1026,13 +794,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             });
             
             if (!imageResponse.ok) {
-              console.error(`❌ Failed to fetch actual image[${index}]:`, imageResponse.status);
               setImageError(true);
               setImageLoading(false);
               return;
             }
             
-            console.log(`✅ Actual image[${index}] fetched, converting to base64...`);
             const arrayBuffer = await imageResponse.arrayBuffer();
             
             // Convert arrayBuffer to base64
@@ -1059,13 +825,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
             
-            console.log(`✅ Reference image[${index}] fetched and converted to data URI`);
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
           } else {
             // Direct image response
-            console.log(`✅ Reference image[${index}] response is direct image, converting...`);
             
             const arrayBuffer = await response.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
@@ -1091,18 +855,15 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             const imageContentType = contentType || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
             
-            console.log(`✅ Reference image[${index}] fetched and converted to data URI`);
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
           }
         } else {
-          console.error(`❌ Reference image[${index}] fetch failed:`, response.status, response.statusText);
           setImageError(true);
           setImageLoading(false);
         }
       } catch (error) {
-        console.error(`❌ Error fetching reference image[${index}]:`, error);
         setImageError(true);
         setImageLoading(false);
       }
@@ -1120,30 +881,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
         // Full URL provided - use it directly
         imageUrl = imageUri;
-        if (__DEV__) {
-          console.log(`ImageWithFallback[${index}] - Using provided full URL:`, imageUrl);
-        }
+        
       } else if (imageKey) {
         const encodedKey = encodeURIComponent(imageKey);
         imageUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
-        if (__DEV__) {
-          console.log(`ImageWithFallback[${index}] - Generated URL from key:`, imageUrl);
-          console.log(`ImageWithFallback[${index}] - Original key:`, imageKey);
-        }
+        
       } else if (imageId) {
         imageUrl = `${API_BASE_URL}/api/enquiries/files/${imageId}`;
-        if (__DEV__) {
-          console.log(`ImageWithFallback[${index}] - Generated URL from ID:`, imageUrl);
-          console.log(`ImageWithFallback[${index}] - Original ID:`, imageId);
-        }
+        
       }
       
       if (imageUrl) {
         // Check if it's an S3 URL (public, no auth needed) - try direct load first
         if (imageUrl.includes('amazonaws.com') || imageUrl.includes('s3.')) {
-          if (__DEV__) {
-            console.log(`ImageWithFallback[${index}] - Detected S3 URL, trying direct load first`);
-          }
+          
           // Try direct Image component load first for S3 (no auth needed)
           // If that fails, fall back to fetch
           setImageLoading(true);
@@ -1154,13 +905,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           fetchImageWithAuth(imageUrl);
         }
       } else {
-        if (__DEV__) {
-          console.error(`ImageWithFallback[${index}] - No valid image URL generated.`);
-          console.error(`  - imageKey: ${imageKey}`);
-          console.error(`  - imageId: ${imageId}`);
-          console.error(`  - imageUri: ${imageUri}`);
-          console.error(`  - image object:`, JSON.stringify(image, null, 2));
-        }
         setImageError(true);
       }
     }, [imageKey, imageId, imageUri, index]);
@@ -1194,11 +938,9 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         <EnquiryImage
           source={{ uri: imageDataUri }}
           onError={() => {
-            console.error(`❌ Reference image[${index}] data URI load error`);
             setImageError(true);
           }}
           onLoad={() => {
-            console.log(`✅ Reference image[${index}] loaded successfully`);
           }}
         />
       </TouchableOpacity>
@@ -1383,19 +1125,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         const result = await refetch();
         const fullEnquiry = result?.data || enquiryData || enquiry;
         
-        if (__DEV__) {
-          console.log('handleEditEnquiry - Passing enquiry to edit screen:', {
-            id: fullEnquiry?.id,
-            title: fullEnquiry?.title || fullEnquiry?.Name,
-            hasOriginalData: !!fullEnquiry?._originalData,
-            originalDataKeys: fullEnquiry?._originalData ? Object.keys(fullEnquiry._originalData) : [],
-            enquiryKeys: Object.keys(fullEnquiry || {}),
-            hasName: !!fullEnquiry?.Name,
-            hasRemarks: !!fullEnquiry?.Remarks,
-            hasMetal: !!fullEnquiry?.Metal,
-          });
-        }
-        
         navigation.navigate('EditEnquiryStep1', { 
           enquiry: fullEnquiry,
           enquiryId: enquiryId, // Pass ID as fallback
@@ -1408,7 +1137,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         });
       }
     } catch (error) {
-      console.error('Error refetching enquiry for edit:', error);
       // Navigate with what we have
       navigation.navigate('EditEnquiryStep1', { 
         enquiry: enquiry,
@@ -1439,11 +1167,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               await deleteEnquiry(enquiryId || enquiry?.id).unwrap();
               
               // Success - no need for alert since user already navigated
-              if (__DEV__) {
-                console.log('Enquiry deleted successfully');
-              }
+              
             } catch (error) {
-              console.error('Error deleting enquiry:', error);
               // Show error alert
               Alert.alert(
                 'Error',
@@ -1486,9 +1211,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           const currentEnquiryId = enquiryId || currentEnquiry?.id || currentEnquiry?._id;
           
           if (!currentEnquiryId) {
-            if (__DEV__) {
-              console.error('Cannot open chat: enquiryId is missing', { enquiry, initialEnquiry, enquiryId });
-            }
+            
             Alert.alert('Error', 'Cannot open chat: Enquiry ID is missing');
             return;
           }

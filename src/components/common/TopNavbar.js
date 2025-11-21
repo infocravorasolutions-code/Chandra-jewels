@@ -13,6 +13,26 @@ import AccountModal from '../modals/AccountModal';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { images } from '../../constants/images';
+// Import SVG logo - try both files
+let LogoHeaderSvg = null;
+try {
+  // Try the SVG file without spaces first
+  const svgModule = require('../../assets/images/Chandra logo1.svg');
+  LogoHeaderSvg = svgModule.default || svgModule;
+  if (LogoHeaderSvg) {
+    console.log('✅ SVG logo loaded successfully (Chandra logo1.svg)');
+  }
+} catch (error1) {
+  try {
+    // Fallback to the SVG file with spaces
+    const svgModule2 = require('../../assets/images/Chandra logo .svg');
+    LogoHeaderSvg = svgModule2.default || svgModule2;
+    if (LogoHeaderSvg) {
+      console.log('✅ SVG logo loaded successfully (Chandra logo .svg)');
+    }
+  } catch (error2) {
+  }
+}
 import Icon from './Icon';
 import { useGetUnreadNotificationsCountQuery } from '../../store/api';
 
@@ -25,32 +45,25 @@ const TopNavbar = ({ navigation }) => {
 
   // Safety check - don't render if user is not loaded
   if (!user) {
-    console.log('TopNavbar: User not loaded, returning null');
     return null;
   }
   
-  console.log('TopNavbar: User loaded, rendering navbar for user:', user?.name || user?.email || 'Unknown');
 
   const handleNotificationPress = () => {
     navigation.navigate('Notifications');
   };
 
   const handleAccountPress = () => {
-    console.log('Account icon pressed, opening account modal');
-    console.log('Current showAccountModal state:', showAccountModal);
     setButtonPressed('Account');
     setShowAccountModal(true);
-    console.log('Set showAccountModal to true');
   };
 
   const handleLogoutPress = () => {
-    console.log('Logout icon pressed, showing logout modal');
     setButtonPressed('Logout');
     setShowLogoutModal(true);
   };
 
   const handleConfirmLogout = () => {
-    console.log('User confirmed logout');
     setShowLogoutModal(false);
     setShowAccountModal(false);
     logout();
@@ -66,11 +79,14 @@ const TopNavbar = ({ navigation }) => {
               style={styles.logoImage}
               resizeMode="contain"
             />
-            <Image 
-              source={images.logoHeader}
-              style={styles.logoHeaderImage}
-              resizeMode="contain"
-            />
+            {/* SVG Logo Text */}
+            <View style={styles.logoSvgContainer}>
+              <LogoHeaderSvg 
+                width={160}
+                height={40}
+                preserveAspectRatio="xMidYMid meet"
+              />
+            </View>
             {/* {buttonPressed && (
               <Text style={{ color: colors.textWhite, fontSize: 10, marginLeft: 8 }}>
                 {buttonPressed} pressed
@@ -119,7 +135,6 @@ const TopNavbar = ({ navigation }) => {
       <AccountModal
         visible={showAccountModal}
         onClose={() => {
-          console.log('Closing account modal');
           setShowAccountModal(false);
         }}
       />
@@ -166,10 +181,14 @@ const styles = StyleSheet.create({
   },
   leftSection: {
     flex: 1,
+    minWidth: 0, // Allows flex to shrink if needed
   },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-start',
+    flexShrink: 1,
+    maxWidth: '100%',
   },
   logoImage: {
     width: 40,
@@ -179,6 +198,9 @@ const styles = StyleSheet.create({
     height: 40,
     width: 160,
     marginLeft: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
   logoText: {
     marginLeft: 8,
@@ -281,6 +303,14 @@ const styles = StyleSheet.create({
     fontSize: fonts.base,
     fontFamily: fonts.medium,
     color: colors.textWhite,
+  },
+  logoSvgContainer: {
+    marginLeft: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    // Fixed container size - change these to resize the logo
+    width: 160,
+    height: 40,
   },
 });
 

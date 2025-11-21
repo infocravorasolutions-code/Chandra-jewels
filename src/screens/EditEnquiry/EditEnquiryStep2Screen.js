@@ -45,7 +45,6 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
         return false;
       }
     }
@@ -68,7 +67,6 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
         return false;
       }
     }
@@ -114,7 +112,6 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         setSelectedImages(prev => [...prev, ...newImages]);
       }
     } catch (error) {
-      console.error('Image picker error:', error);
       Alert.alert('Error', 'Failed to pick images');
     }
   };
@@ -151,7 +148,6 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
             uploadedImages.push(uploadResult.key || uploadResult.Key);
           }
         } catch (uploadError) {
-          console.error('Error uploading image:', uploadError);
           // Continue with other images even if one fails
         }
       }
@@ -199,9 +195,7 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         enquiryData.ReferenceImages = [...existingImages, ...uploadedImages];
       }
 
-      if (__DEV__) {
-        console.log('Updating enquiry with data:', enquiryData);
-      }
+      
 
       await updateEnquiry({ id: enquiry.id, ...enquiryData }).unwrap();
       
@@ -254,8 +248,6 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
       };
       
       if (__DEV__) {
-        console.log('========== EditEnquiryStep2Screen - Navigation Back ==========');
-        console.log('enquiry.id:', enquiry.id);
         console.log('updatedEnquiry:', {
           id: updatedEnquiry.id,
           StoneType: updatedEnquiry.StoneType,
@@ -264,9 +256,6 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
           MetalWeight: updatedEnquiry.MetalWeight,
           DiamondWeight: updatedEnquiry.DiamondWeight,
         });
-        console.log('shouldRefresh: true');
-        console.log('Navigating to SingleEnquiry screen...');
-        console.log('============================================================');
       }
       
       Alert.alert(
@@ -278,9 +267,7 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
             onPress: () => {
               // Go back to SingleEnquiry screen (removes EditEnquiryStep2 from stack)
               // The SingleEnquiry screen will automatically refresh due to cache invalidation
-              if (__DEV__) {
-                console.log('✅ Alert OK pressed, going back to SingleEnquiry...');
-              }
+              
               navigation.goBack();
             },
           },
@@ -288,7 +275,6 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         { cancelable: false }
       );
     } catch (error) {
-      console.error('Error updating enquiry:', error);
       Alert.alert(
         'Error',
         error.data?.error || error.message || 'Failed to update enquiry. Please try again.'

@@ -23,7 +23,18 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
   
   // Determine if user is a client
   const isClient = role === 'client' || user?.role === 'client' || user?.roleId === 4 || user?.roleNumber === 4;
-  const isAdmin = role === 'admin' || role === 'AD';
+  
+  // Determine if user is an admin - check both role parameter and user.role
+  // Handle case-insensitive and various role formats
+  const roleLower = role?.toLowerCase();
+  const userRoleLower = user?.role?.toLowerCase();
+  const isAdmin = 
+    roleLower === 'admin' || 
+    roleLower === 'ad' || 
+    userRoleLower === 'admin' || 
+    userRoleLower === 'ad' ||
+    user?.roleId === 1 || // Assuming roleId 1 is admin
+    user?.roleNumber === 1; // Assuming roleNumber 1 is admin
   
   // Fetch clients to find client ID for client users (using cached hook)
   const { clients: clientsData = [] } = useClients({
@@ -58,17 +69,22 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
   }, [isClient, user]);
   
   // Determine filtering strategy:
-  // - Admin: No filter (see all enquiries)
+  // - Admin: No filter (see all enquiries) - CRITICAL: assignedTo must be undefined for admins
   // - Client: Filter by clientId (enquiries where they are the client)
   // - Designer/Worker: Filter by assignedTo (enquiries assigned to them)
-  const assignedTo = (isAdmin || isClient) ? undefined : userId; // Only filter by assignedTo for designers/workers
+  // For admins, explicitly set assignedTo to undefined to ensure they see ALL enquiries
+  const assignedTo = isAdmin ? undefined : (isClient ? undefined : userId);
   const clientIdFilter = isClient ? clientIdForFilter : undefined; // Filter by clientId for client users
   
-  // For infinite scroll: always fetch page 1 initially, then load more pages as needed
+  // For proper display: fetch more enquiries initially, especially for admins
   // When searching, fetch ALL enquiries (use large limit) to search across all pages
-  // Otherwise use lazy loading with limit 10
+  // For admins: Use larger limit (50) to show more enquiries initially
+  // For others: Use moderate limit (25) for better initial display
+  // Otherwise use lazy loading with limit 25
   const pageToFetch = searchQuery ? 1 : currentPage;
-  const limitToFetch = searchQuery ? 10000 : 10; // Use 10 for lazy loading, 10000 when searching
+  const limitToFetch = searchQuery 
+    ? 10000  // When searching, fetch all
+    : (isAdmin ? 50 : 25); // Admins get 50, others get 25 per page for better initial display
   
   const filters = useSelector(state => state.enquiries.filters);
   const sortBy = useSelector(state => state.enquiries.sortBy);
@@ -89,12 +105,17 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
     if (__DEV__) {
       console.log('🔐 ========== ENQUIRY FILTERING STRATEGY ==========');
       console.log('🔐 User Role:', role);
+      console.log('🔐 User role from context:', user?.role);
       console.log('🔐 Is Admin:', isAdmin);
       console.log('🔐 Is Client:', isClient);
       console.log('🔐 User ID:', userId);
       console.log('🔐 Client ID For Filter:', clientIdForFilter);
       console.log('🔐 Client ID Filter (final):', clientIdFilter);
       console.log('🔐 AssignedTo Filter:', assignedTo);
+      console.log('🔐 AssignedTo is undefined (admin sees all):', assignedTo === undefined);
+      if (isAdmin && assignedTo !== undefined) {
+        console.warn('⚠️ CRITICAL: Admin user but assignedTo is NOT undefined! This will filter enquiries incorrectly.');
+      }
       console.log('🔐 API Filters being sent:', apiFilters);
       console.log('🔐 Will clientId be sent?', !!(isClient && clientIdFilter));
       console.log('🔐 ClientId value:', clientIdFilter);
@@ -131,6 +152,22 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
     limit: 10,
     totalPages: 1,
   };
+  
+  // Debug: Log first enquiry details to check if it's being filtered
+  useEffect(() => {
+    if (__DEV__ && enquiries.length > 0) {
+      const firstEnquiry = enquiries[0];
+      console.log('🔍 ========== FIRST ENQUIRY DEBUG ==========');
+      console.log('🔍 First enquiry ID:', firstEnquiry?.id || firstEnquiry?._id);
+      console.log('🔍 First enquiry Name:', firstEnquiry?.Name || firstEnquiry?.name);
+      console.log('🔍 First enquiry AssignedTo:', firstEnquiry?.AssignedTo || firstEnquiry?.assignedTo);
+      console.log('🔍 Current User ID:', userId || user?.id);
+      console.log('🔍 Is Admin:', isAdmin);
+      console.log('🔍 AssignedTo Filter Applied:', assignedTo);
+      console.log('🔍 Total enquiries received:', enquiries.length);
+      console.log('🔍 =========================================');
+    }
+  }, [enquiries, userId, user?.id, isAdmin, assignedTo]);
   
   // State to accumulate enquiries across pages for infinite scroll
   const [accumulatedEnquiries, setAccumulatedEnquiries] = useState([]);
@@ -577,8 +614,8 @@ export const useFilteredEnquiries = (role, userId = undefined) => {
     pagination: searchQuery ? {
       total: filteredEnquiries.length,
       page: currentPage,
-      limit: 10,
-      totalPages: Math.ceil(filteredEnquiries.length / 10),
+      limit: isAdmin ? 50 : 25, // Match the fetch limit
+      totalPages: Math.ceil(filteredEnquiries.length / (isAdmin ? 50 : 25)),
     } : pagination,
   };
 };

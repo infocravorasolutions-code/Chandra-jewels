@@ -137,9 +137,7 @@ const ChatsScreen = ({ navigation }) => {
     if (chats.length > 0 && roleId) {
       const filteredChats = filterChatsByRole(chats, roleId);
       
-      if (__DEV__ && filteredChats.length !== chats.length) {
-        console.warn(`⚠️ Filtered out ${chats.length - filteredChats.length} chats that didn't match role ${roleId} requirements`);
-      }
+      
       
       return filteredChats;
     }
@@ -154,9 +152,7 @@ const ChatsScreen = ({ navigation }) => {
         return true; // Assume backend filtered correctly
       });
       
-      if (__DEV__ && filteredChats.length !== chats.length) {
-        console.warn(`⚠️ Filtered out ${chats.length - filteredChats.length} chats that didn't match expected type ${chatType1}`);
-      }
+      
       
       return filteredChats;
     }
@@ -189,9 +185,7 @@ const ChatsScreen = ({ navigation }) => {
     try {
       // If chats API returned data, use it
       if (chatsFromAPI && Array.isArray(chatsFromAPI) && chatsFromAPI.length > 0) {
-        if (__DEV__) {
-          console.log('Using chats from API:', chatsFromAPI.length);
-        }
+        
         return chatsFromAPI;
       }
 
@@ -214,11 +208,7 @@ const ChatsScreen = ({ navigation }) => {
 
       // If API returned empty or error, fall back to enquiries
       if (shouldUseFallback) {
-        if (__DEV__) {
-          console.log('Chats API returned empty or error, creating chats from enquiries...');
-          console.log('Enquiries count:', enquiries?.length || 0);
-          console.log('Expected chat type for fallback:', chatType1);
-        }
+        
         
         // Create chat summaries from enquiries
         // IMPORTANT: Filter by chat type to ensure users only see their allowed chats
@@ -263,10 +253,7 @@ const ChatsScreen = ({ navigation }) => {
               
               // If we don't have clientId, we can't filter properly
               // This is a backend issue - backend should filter by client ownership
-              if (__DEV__) {
-                console.warn('⚠️ WARNING: Cannot filter enquiries by client ownership - missing clientId in user or enquiry object');
-                console.warn('⚠️ Backend should filter /api/enquiries by client ownership for client users');
-              }
+              
               
               // For now, include all (backend should filter, but if it doesn't, we show all)
               // This is not ideal, but better than showing nothing
@@ -293,9 +280,7 @@ const ChatsScreen = ({ navigation }) => {
             return true; // Default: include all (shouldn't reach here)
           });
           
-          if (__DEV__) {
-            console.log('Filtered enquiries for fallback:', filteredEnquiries.length);
-          }
+          
           
           return filteredEnquiries
             .map(enquiry => ({
@@ -328,9 +313,7 @@ const ChatsScreen = ({ navigation }) => {
       // Default: empty array
       return [];
     } catch (error) {
-      if (__DEV__) {
-        console.error('❌ Error in chats useMemo:', error);
-      }
+      
       // Return empty array on error to prevent crash
       return [];
     }
@@ -342,7 +325,6 @@ const ChatsScreen = ({ navigation }) => {
   useEffect(() => {
     if (__DEV__) {
       try {
-        console.log('========== CHATS SCREEN DEBUG ==========');
         console.log('🔍 USER DEBUG:', {
           userId: user?.id,
           roleId: roleId,
@@ -350,10 +332,6 @@ const ChatsScreen = ({ navigation }) => {
           roleNumber: user?.roleNumber,
           isAdmin: isAdmin,
         });
-        console.log('Chat Type 1:', chatType1);
-        console.log('Chat Type 2:', chatType2);
-        console.log('Loading:', loading);
-        console.log('Chats API Error:', chatsError);
         
         // Detailed API response debug
         if (chatsFromAPI1 && Array.isArray(chatsFromAPI1)) {
@@ -396,12 +374,9 @@ const ChatsScreen = ({ navigation }) => {
         if (Array.isArray(chatsFromAPI) && chatsFromAPI.length > 0) {
           const chatTypes = chatsFromAPI.map(c => c.type || c.Type || 'unknown').filter(Boolean);
           const uniqueTypes = [...new Set(chatTypes)];
-          console.log('📋 Chat types in merged list:', uniqueTypes);
           if (!isAdmin && uniqueTypes.length > 1) {
-            console.warn('⚠️ WARNING: Non-admin user has chats of multiple types!', uniqueTypes);
           }
           if (!isAdmin && uniqueTypes.some(t => t.toLowerCase() !== chatType1.toLowerCase())) {
-            console.warn(`⚠️ WARNING: Found chats with wrong type! Expected: ${chatType1}, Found:`, uniqueTypes);
           }
         }
         
@@ -422,22 +397,15 @@ const ChatsScreen = ({ navigation }) => {
           
           // Warn if backend returned all enquiries for a client user
           if (roleId === 4 && enquiries.length > 10) {
-            console.warn('⚠️ WARNING: Backend returned', enquiries.length, 'enquiries for client user');
             console.warn('⚠️ Backend should filter /api/enquiries by client ownership (ClientId)');
-            console.warn('⚠️ User clientId:', userClientId || 'NOT AVAILABLE');
-            console.warn('⚠️ This is a BACKEND ISSUE - backend must filter by ClientId for client users');
           }
         }
         
         console.log('Final Chats:', Array.isArray(chats) ? chats.length : 'Not an array');
         if (Array.isArray(chats) && chats.length > 0) {
           const finalTypes = [...new Set(chats.map(c => c.type || c.Type || c.chatType || 'unknown').filter(Boolean))];
-          console.log('📋 Final Chat Types:', finalTypes);
-          console.log('First Chat:', chats[0]);
         }
-        console.log('========================================');
       } catch (error) {
-        console.error('Error in debug logs:', error);
       }
     }
   }, [chats, loading, chatsError, chatsFromAPI, chatsFromAPI1, chatsFromAPI2, enquiries, user, isAdmin, chatType1, chatType2, roleId, chatsError1, chatsError2]);
@@ -464,9 +432,7 @@ const ChatsScreen = ({ navigation }) => {
         );
       });
     } catch (error) {
-      if (__DEV__) {
-        console.error('❌ Error in filteredChats useMemo:', error);
-      }
+      
       return Array.isArray(chats) ? chats : [];
     }
   }, [chats, searchQuery]);
@@ -489,9 +455,7 @@ const ChatsScreen = ({ navigation }) => {
     // Debounce refetch to prevent excessive API calls
     let refetchTimeout = null;
     const handleNewMessage = (message) => {
-      if (__DEV__) {
-        console.log('New message received, refreshing chat list...');
-      }
+      
       // Clear existing timeout to debounce multiple rapid messages
       if (refetchTimeout) {
         clearTimeout(refetchTimeout);
@@ -525,9 +489,7 @@ const ChatsScreen = ({ navigation }) => {
 
   // Safety check for navigation
   if (!navigation) {
-    if (__DEV__) {
-      console.warn('⚠️ Navigation prop is missing in ChatsScreen');
-    }
+    
     return (
       <SafeAreaView style={styles.container}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -548,9 +510,7 @@ const ChatsScreen = ({ navigation }) => {
           key={chat.id}
           style={styles.chatItem}
           onPress={() => {
-            if (__DEV__) {
-              console.log('Navigating to ChatDetail with chat:', chat);
-            }
+            
             if (navigation && navigation.navigate) {
               navigation.navigate('ChatDetail', {
                 chatId: chat._id || chat.id, // Pass the specific chat ID
@@ -593,9 +553,7 @@ const ChatsScreen = ({ navigation }) => {
         </TouchableOpacity>
       );
     } catch (error) {
-      if (__DEV__) {
-        console.error('❌ Error rendering chat item:', error, chat);
-      }
+      
       return null; // Return null on error to prevent crash
     }
   };

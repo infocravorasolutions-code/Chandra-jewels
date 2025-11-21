@@ -32,13 +32,11 @@ export const usePushNotifications = () => {
       try {
         const registered = await registerForRemoteMessages();
         if (!registered) {
-          console.warn('⚠️ [Push] Skipping FCM sync because device is not registered for remote messages');
           return;
         }
 
         const token = incomingToken || (await messaging().getToken());
         if (!token) {
-          console.warn('⚠️ [Push] FCM token is empty, cannot sync with backend');
           return;
         }
 
@@ -47,17 +45,13 @@ export const usePushNotifications = () => {
           await savePushTokenLocally(token);
         }
 
-        console.log('✅ [Push] FCM token ready:', token);
-        console.log('📨 [Push] Sending FCM token to backend...');
 
         await registerPushToken({
           token,
           device: getDeviceMetadata(),
         }).unwrap();
 
-        console.log('✅ [Push] FCM token registered with backend successfully');
       } catch (error) {
-        console.warn('❌ [Push] Failed to sync FCM token with backend:', error);
       }
     },
     [registerPushToken]
@@ -97,7 +91,6 @@ export const usePushNotifications = () => {
     const initialize = async () => {
       const permissionGranted = await requestPushPermission();
       if (!permissionGranted) {
-        console.warn('Push permission denied by the user');
         return;
       }
 

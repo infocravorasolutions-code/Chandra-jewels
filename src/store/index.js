@@ -5,6 +5,7 @@ import enquiriesReducer from '../features/enquiries/enquiriesSlice';
 import clientsReducer from '../features/clients/clientsSlice';
 import metalPricesReducer from '../features/metalPrices/metalPricesSlice';
 import usersReducer from '../features/users/usersSlice';
+import statusesReducer from '../features/statuses/statusesSlice';
 
 export const store = configureStore({
   reducer: {
@@ -14,6 +15,7 @@ export const store = configureStore({
     clients: clientsReducer,
     metalPrices: metalPricesReducer,
     users: usersReducer,
+    statuses: statusesReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

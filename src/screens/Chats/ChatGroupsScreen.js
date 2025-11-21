@@ -31,9 +31,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
     return id ? String(id).trim() : null;
   }, [enquiryId, enquiry?.id, enquiry?._id]);
   
-  if (__DEV__) {
-    console.log('ChatGroupsScreen - Route params:', { enquiry, enquiryId, currentEnquiryId });
-  }
+  
   
   // Fetch all chats for this enquiry (both admin-client and admin-designer)
   // Use stable query parameters to prevent unnecessary refetches
@@ -135,18 +133,13 @@ const ChatGroupsScreen = ({ route, navigation }) => {
       const chatType = chat?.Type || chat?.type || chat?._originalData?.Type;
       
       if (!chatId) {
-        if (__DEV__) {
-          console.error('Cannot navigate: chatId is missing', chat);
-        }
+        
         return;
       }
       
-      if (__DEV__) {
-        console.log('Navigating to chat:', { chatId, chatType, chat });
-      }
+      
       
       if (navigation?.navigate) {
-        console.log('Navigating to chat:', { chatId, chatType, chat });
         navigation.navigate('ChatDetail', {
           chatId: chatId, // Pass the specific chat ID
           chat: chat, // Pass the full chat object
@@ -156,9 +149,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
         });
       }
     } catch (error) {
-      if (__DEV__) {
-        console.error('Error navigating to chat:', error, chat);
-      }
+      
       setRenderError(error);
     }
   };
@@ -384,9 +375,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
                     </View>
                   );
                 } catch (error) {
-                  if (__DEV__) {
-                    console.error('Error rendering chat item:', error, chat);
-                  }
+                  
                   return null;
                 }
               })

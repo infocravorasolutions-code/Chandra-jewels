@@ -73,11 +73,43 @@ export const CompactEnquiryCard = ({
     return null;
   }
 
-  const statusColor = getStatusColor ? getStatusColor(enquiry.status || 'pending') : colors.primary;
-  const priorityColor = getPriorityColor ? getPriorityColor(enquiry.priority || 'medium') : colors.textSecondary;
+  // Extract status from multiple possible field names
+  let enquiryStatus = '';
+  if (enquiry.StatusHistory && Array.isArray(enquiry.StatusHistory) && enquiry.StatusHistory.length > 0) {
+    // Get the latest status from StatusHistory
+    const sortedHistory = [...enquiry.StatusHistory].sort((a, b) => {
+      const dateA = new Date(a.Date || a.date || a.CreatedDate || 0);
+      const dateB = new Date(b.Date || b.date || b.CreatedDate || 0);
+      return dateB - dateA;
+    });
+    enquiryStatus = sortedHistory[0]?.Status || sortedHistory[0]?.status || '';
+  }
+  if (!enquiryStatus) {
+    enquiryStatus = enquiry.CurrentStatus || enquiry.Status || enquiry.status || 'Enquiry Created';
+  }
+  
+  // Extract priority from multiple possible field names
+  const enquiryPriority = enquiry.Priority || enquiry.priority || 'Normal';
+  
+  const statusColor = getStatusColor ? getStatusColor(enquiryStatus) : colors.primary;
+  const priorityColor = getPriorityColor ? getPriorityColor(enquiryPriority) : colors.textSecondary;
   
   // Check if user is a designer (coral or cad)
   const isDesigner = userRole === 'coral' || userRole === 'cad';
+  
+  // Format status for display
+  const formatStatusForDisplay = (status) => {
+    if (!status) return 'ENQUIRY CREATED';
+    return String(status).replace(/_/g, ' ').toUpperCase();
+  };
+  
+  // Format priority for display
+  const formatPriorityForDisplay = (priority) => {
+    if (!priority) return 'NORMAL';
+    const priorityStr = String(priority);
+    // Handle "Super High" -> "SUPER HIGH"
+    return priorityStr.toUpperCase();
+  };
   
   // Extract metal color and quality
   const metalColor = enquiry.Metal?.Color || enquiry.metal?.color || enquiry.metalColor || 'Gold';
@@ -388,7 +420,7 @@ export const CompactEnquiryCard = ({
           </Text>
           <View style={[styles.compactPriorityBadge, { backgroundColor: priorityColor + '15' }]}>
             <Text style={[styles.compactPriorityText, { color: priorityColor }]} numberOfLines={1}>
-              {(enquiry.priority || 'medium').toUpperCase()}
+              {formatPriorityForDisplay(enquiryPriority)}
             </Text>
           </View>
         </View>
@@ -397,7 +429,7 @@ export const CompactEnquiryCard = ({
         <View style={styles.compactRow2}>
           <View style={[styles.compactStatusBadge, { backgroundColor: statusColor + '15' }]}>
             <Text style={[styles.compactStatusText, { color: statusColor }]} numberOfLines={1}>
-              {(enquiry.status || 'pending').replace('_', ' ').toUpperCase()}
+              {formatStatusForDisplay(enquiryStatus)}
             </Text>
           </View>
         </View>
@@ -525,12 +557,42 @@ export const EnquiryCard = ({
     return null;
   }
 
-  const statusColor = getStatusColor ? getStatusColor(enquiry.status || 'pending') : colors.primary;
-  const statusIcon = getStatusIcon ? getStatusIcon(enquiry.status || 'pending') : 'help';
-  const priorityColor = getPriorityColor ? getPriorityColor(enquiry.priority || 'medium') : colors.textSecondary;
-  const priorityIcon = getPriorityIcon ? getPriorityIcon(enquiry.priority || 'medium') : 'help';
+  // Extract status from multiple possible field names
+  let enquiryStatus = '';
+  if (enquiry.StatusHistory && Array.isArray(enquiry.StatusHistory) && enquiry.StatusHistory.length > 0) {
+    // Get the latest status from StatusHistory
+    const sortedHistory = [...enquiry.StatusHistory].sort((a, b) => {
+      const dateA = new Date(a.Date || a.date || a.CreatedDate || 0);
+      const dateB = new Date(b.Date || b.date || b.CreatedDate || 0);
+      return dateB - dateA;
+    });
+    enquiryStatus = sortedHistory[0]?.Status || sortedHistory[0]?.status || '';
+  }
+  if (!enquiryStatus) {
+    enquiryStatus = enquiry.CurrentStatus || enquiry.Status || enquiry.status || 'Enquiry Created';
+  }
+  
+  // Extract priority from multiple possible field names
+  const enquiryPriority = enquiry.Priority || enquiry.priority || 'Normal';
+  
+  const statusColor = getStatusColor ? getStatusColor(enquiryStatus) : colors.primary;
+  const statusIcon = getStatusIcon ? getStatusIcon(enquiryStatus) : 'help';
+  const priorityColor = getPriorityColor ? getPriorityColor(enquiryPriority) : colors.textSecondary;
+  const priorityIcon = getPriorityIcon ? getPriorityIcon(enquiryPriority) : 'help';
   const formattedPrice = formatCurrency ? formatCurrency(enquiry.budget || 0) : `₹${enquiry.budget || 0}`;
   const formattedDate = formatDate ? formatDate(enquiry.createdAt || new Date().toISOString()) : (enquiry.createdAt || 'Recently');
+  
+  // Format status for display
+  const formatStatusForDisplay = (status) => {
+    if (!status) return 'ENQUIRY CREATED';
+    return String(status).replace(/_/g, ' ').toUpperCase();
+  };
+  
+  // Format priority for display
+  const formatPriorityForDisplay = (priority) => {
+    if (!priority) return 'NORMAL';
+    return String(priority).toUpperCase();
+  };
 
   return (
     <Card style={styles.enquiryCard} onPress={onPress}>
@@ -548,13 +610,13 @@ export const EnquiryCard = ({
           <View style={styles.statusIndicator}>
             <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
             <Text style={[styles.statusText, { color: statusColor }]}>
-              {(enquiry.status || 'pending').replace('_', ' ').toUpperCase()}
+              {formatStatusForDisplay(enquiryStatus)}
             </Text>
           </View>
           <View style={styles.priorityIndicator}>
             <View style={[styles.priorityDot, { backgroundColor: priorityColor }]} />
             <Text style={[styles.priorityText, { color: priorityColor }]}>
-              {(enquiry.priority || 'medium').toUpperCase()}
+              {formatPriorityForDisplay(enquiryPriority)}
             </Text>
           </View>
         </View>
@@ -600,14 +662,14 @@ export const EnquiryCard = ({
             style={[
               styles.progressFill, 
               { 
-                width: (enquiry.status || 'pending') === 'completed' ? '100%' : '20%',
+                width: String(enquiryStatus).toLowerCase().includes('completed') ? '100%' : '20%',
                 backgroundColor: statusColor 
               }
             ]} 
           />
         </View>
         <Text style={styles.progressText}>
-          {(enquiry.status || 'pending') === 'completed' ? 'Completed' : 'Pending'}
+          {String(enquiryStatus).toLowerCase().includes('completed') ? 'Completed' : 'In Progress'}
         </Text>
       </View>
     </Card>

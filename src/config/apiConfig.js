@@ -131,27 +131,11 @@ export const FILE_BASE_URL = getFileBaseUrl();
 
 // Log configuration in development
 if (__DEV__) {
-  console.log('========== API CONFIGURATION ==========');
-  console.log(`API Base URL: ${API_BASE_URL}`);
-  console.log(`Socket Base URL: ${SOCKET_BASE_URL}`);
-  console.log(`File Base URL: ${FILE_BASE_URL}`);
-  console.log(`Platform: ${Platform.OS}`);
-  console.log(`__DEV__: ${__DEV__}`);
-  console.log('');
-  console.log('Configuration Flags:');
-  console.log(`  USE_PRODUCTION_URL: ${USE_PRODUCTION_URL}`);
-  console.log(`  USE_CUSTOM_URL: ${USE_CUSTOM_URL}`);
-  console.log(`  USE_PHYSICAL_DEVICE: ${USE_PHYSICAL_DEVICE}`);
-  console.log(`  USE_SEPARATE_SOCKET_PORT: ${USE_SEPARATE_SOCKET_PORT}`);
   if (USE_CUSTOM_URL) {
-    console.log(`  CUSTOM_API_URL: ${CUSTOM_API_URL}`);
   }
   if (USE_PHYSICAL_DEVICE) {
-    console.log(`  PHYSICAL_DEVICE_IP: ${PHYSICAL_DEVICE_IP}`);
   }
   if (USE_SEPARATE_SOCKET_PORT) {
-    console.log(`  SOCKET_PORT: ${SOCKET_PORT}`);
   }
-  console.log('========================================');
 }
 

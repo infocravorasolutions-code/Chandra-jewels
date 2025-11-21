@@ -19,7 +19,6 @@ import { getRoleDisplayName } from '../../utils/helpers';
 const AccountModal = ({ visible, onClose }) => {
   const { user, logout } = useAuth();
   
-  console.log('AccountModal rendered with visible:', visible);
 
   const handleLogout = () => {
     onClose(); // Close modal first
@@ -62,10 +61,8 @@ const AccountModal = ({ visible, onClose }) => {
       logout();
       setTimeout(() => {
         // This would normally be handled by the login flow
-        console.log(`Switched to ${role} user`);
       }, 100);
     } catch (error) {
-      console.error('Error switching user:', error);
     }
     onClose();
   };
@@ -115,7 +112,6 @@ const AccountModal = ({ visible, onClose }) => {
     },
   ];
 
-  console.log('AccountModal about to render Modal with visible:', visible);
   
   return (
     <Modal

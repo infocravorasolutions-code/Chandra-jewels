@@ -19,7 +19,6 @@ export const checkAuthState = createAsyncThunk(
             const currentTime = Math.floor(Date.now() / 1000);
             if (exp < currentTime) {
               // Token is expired, clear it
-              console.log('Token expired, clearing auth state');
               await AsyncStorage.removeItem('user');
               await AsyncStorage.removeItem('token');
               return null;
@@ -27,7 +26,6 @@ export const checkAuthState = createAsyncThunk(
           }
         } else {
           // Invalid token format, clear it
-          console.log('Invalid token format, clearing auth state');
           await AsyncStorage.removeItem('user');
           await AsyncStorage.removeItem('token');
           return null;
@@ -73,11 +71,9 @@ export const checkAuthState = createAsyncThunk(
               if (fetchedName && fetchedName !== userData.name) {
                 userData.name = fetchedName;
                 userDataUpdated = true;
-                console.log('Updated user name from API:', fetchedName);
               }
             }
           } catch (error) {
-            console.warn('Error fetching user details in checkAuthState:', error);
             // Continue even if fetch fails
           }
         }
@@ -121,13 +117,11 @@ export const checkAuthState = createAsyncThunk(
       }
       return null;
     } catch (error) {
-      console.error('Error checking auth state:', error);
       // Clear potentially corrupted data
       try {
         await AsyncStorage.removeItem('user');
         await AsyncStorage.removeItem('token');
       } catch (clearError) {
-        console.error('Error clearing auth data:', clearError);
       }
       return null;
     }
@@ -142,7 +136,6 @@ export const logoutUser = createAsyncThunk(
       await AsyncStorage.removeItem('user');
       await AsyncStorage.removeItem('token');
     } catch (error) {
-      console.error('Logout error:', error);
     }
   }
 );

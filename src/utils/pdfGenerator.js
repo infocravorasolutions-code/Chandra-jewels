@@ -24,25 +24,13 @@ try {
   
   // Debug: Log library status
   if (__DEV__) {
-    console.log('========== PDF LIBRARY STATUS ==========');
-    console.log('Module loaded:', !!htmlToPdfModule);
-    console.log('Module type:', typeof htmlToPdfModule);
     console.log('Module keys:', htmlToPdfModule ? Object.keys(htmlToPdfModule) : 'no module');
-    console.log('generatePDF available:', !!generatePDF);
-    console.log('generatePDF type:', typeof generatePDF);
-    console.log('Full module:', htmlToPdfModule);
-    console.log('========================================');
   }
 } catch (error) {
-  console.error('react-native-html-to-pdf import error:', error);
-  console.error('Error stack:', error.stack);
-  console.warn('Will use HTML fallback');
 }
 
 // Debug: Log when module loads
-if (__DEV__) {
-  console.log('pdfGenerator.js module loaded');
-}
+
 
 // Helper to convert string to base64 (for data URLs)
 // Improved version that handles large strings and special characters better
@@ -73,7 +61,6 @@ const toBase64 = (str) => {
           return btoa(utf8Bytes);
         }
       } catch (e) {
-        console.warn('btoa failed, using fallback:', e);
       }
     }
     
@@ -128,8 +115,6 @@ const toBase64 = (str) => {
     
     return result;
   } catch (error) {
-    console.error('Base64 encoding error:', error);
-    console.error('String length:', str?.length || 0);
     throw new Error(`Failed to encode to base64: ${error.message}`);
   }
 };
@@ -140,9 +125,7 @@ const toBase64 = (str) => {
  */
 const fetchImageAsBase64 = async (imageUrl) => {
   if (!imageUrl) {
-    if (__DEV__) {
-      console.warn('fetchImageAsBase64: No image URL provided');
-    }
+    
     return '';
   }
   
@@ -163,17 +146,13 @@ const fetchImageAsBase64 = async (imageUrl) => {
     });
     
     if (!response.ok) {
-      if (__DEV__) {
-        console.warn('❌ Failed to fetch image for PDF:', imageUrl, 'Status:', response.status);
-      }
+      
       return '';
     }
     
     // Check if response is JSON (API might return URL object)
     const contentType = response.headers.get('content-type') || '';
-    if (__DEV__) {
-      console.log('📄 Image content-type:', contentType);
-    }
+    
     
     if (contentType.includes('application/json')) {
       const jsonData = await response.json();
@@ -186,9 +165,7 @@ const fetchImageAsBase64 = async (imageUrl) => {
         // S3 presigned URLs are publicly accessible, so we can use them directly
         return actualImageUrl;
       }
-      if (__DEV__) {
-        console.warn('❌ No image URL found in JSON response');
-      }
+      
       return '';
     }
     
@@ -196,9 +173,7 @@ const fetchImageAsBase64 = async (imageUrl) => {
     const arrayBuffer = await response.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
     
-    if (__DEV__) {
-      console.log('📦 Image bytes length:', bytes.length);
-    }
+    
     
     // Convert to base64 string - improved method
     let base64 = '';
@@ -207,13 +182,9 @@ const fetchImageAsBase64 = async (imageUrl) => {
     if (typeof Buffer !== 'undefined') {
       try {
         base64 = Buffer.from(bytes).toString('base64');
-        if (__DEV__) {
-          console.log('✅ Base64 conversion successful using Buffer');
-        }
+        
       } catch (e) {
-        if (__DEV__) {
-          console.warn('Buffer conversion failed, trying manual method:', e);
-        }
+        
       }
     }
     
@@ -233,30 +204,22 @@ const fetchImageAsBase64 = async (imageUrl) => {
         if (typeof btoa !== 'undefined') {
           try {
             base64 = btoa(binary);
-            if (__DEV__) {
-              console.log('✅ Base64 conversion successful using btoa');
-            }
+            
           } catch (e) {
-            if (__DEV__) {
-              console.warn('btoa failed, using manual base64:', e);
-            }
+            
             base64 = toBase64(binary);
           }
         } else {
           base64 = toBase64(binary);
         }
       } catch (error) {
-        if (__DEV__) {
-          console.error('❌ Error converting to base64:', error);
-        }
+        
         return '';
       }
     }
     
     if (!base64) {
-      if (__DEV__) {
-        console.error('❌ Failed to generate base64 string');
-      }
+      
       return '';
     }
     
@@ -267,17 +230,11 @@ const fetchImageAsBase64 = async (imageUrl) => {
     
     const dataUrl = `data:image/${normalizedType};base64,${base64}`;
     
-    if (__DEV__) {
-      console.log('✅ Image converted to base64 data URL');
-      console.log('📏 Data URL length:', dataUrl.length);
-      console.log('🖼️ Image type:', normalizedType);
-      console.log('📊 Base64 length:', base64.length);
-    }
+    
     
     return dataUrl;
   } catch (error) {
     if (__DEV__) {
-      console.error('❌ Error fetching image as base64:', error);
       console.error('Error details:', {
         message: error.message,
         stack: error.stack,
@@ -457,16 +414,12 @@ export const generateEnquiryHTML = async (enquiry) => {
           const s3Url = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
           if (s3Url) {
             finalImageUrl = s3Url;
-            if (__DEV__) {
-              console.log('✅ Resolved single enquiry image to S3 URL');
-            }
+            
           }
         }
       }
     } catch (error) {
-      if (__DEV__) {
-        console.warn('Failed to resolve image URL for single enquiry PDF:', error);
-      }
+      
     }
   }
 
@@ -760,9 +713,6 @@ export const downloadEnquiryPDF = async (enquiry) => {
       try {
         if (__DEV__) {
           console.log('========== ATTEMPTING PDF GENERATION (SINGLE) ==========');
-          console.log('HTML content length:', htmlContent.length);
-          console.log('Filename:', filename);
-          console.log('Platform:', Platform.OS);
         }
         
         // Don't specify directory - let library use its default
@@ -788,9 +738,7 @@ export const downloadEnquiryPDF = async (enquiry) => {
         
         if (__DEV__) {
           console.log('========== PDF GENERATION SUCCESS (SINGLE) ==========');
-          console.log('PDF file path:', file.filePath);
           console.log('File exists:', file.filePath ? await RNFS.exists(file.filePath) : 'no path');
-          console.log('====================================================');
         }
         
         // Verify file exists and is not empty
@@ -819,9 +767,7 @@ export const downloadEnquiryPDF = async (enquiry) => {
               // Copy to Downloads
               await RNFS.copyFile(originalFilePath, downloadPath);
               
-              if (__DEV__) {
-                console.log('PDF copied to Downloads:', downloadPath);
-              }
+              
             } else {
               // If original doesn't exist, try the file path as-is
               if (await RNFS.exists(file.filePath)) {
@@ -831,7 +777,6 @@ export const downloadEnquiryPDF = async (enquiry) => {
               }
             }
           } catch (copyError) {
-            console.warn('Failed to copy to Downloads, using original path:', copyError);
             // Use original path if copy fails
             finalFilePath = originalFilePath;
           }
@@ -840,9 +785,7 @@ export const downloadEnquiryPDF = async (enquiry) => {
           if (await RNFS.exists(finalFilePath)) {
             const fileStats = await RNFS.stat(finalFilePath);
             if (fileStats.size > 0) {
-              if (__DEV__) {
-                console.log('Sharing PDF with path:', finalFilePath);
-              }
+              
               
               // Share the PDF file - use content URI for Android
               await Share.open({
@@ -866,17 +809,11 @@ export const downloadEnquiryPDF = async (enquiry) => {
         }
       } catch (pdfError) {
         console.error('========== PDF GENERATION ERROR (SINGLE) ==========');
-        console.error('Error details:', pdfError);
-        console.error('Error message:', pdfError.message);
-        console.error('Error stack:', pdfError.stack);
-        console.error('===================================================');
         // Fall through to HTML fallback
       }
     } else {
       if (__DEV__) {
         console.warn('PDF library not available or generatePDF function missing (single)');
-        console.warn('generatePDF:', generatePDF);
-        console.warn('Type:', typeof generatePDF);
       }
     }
     
@@ -917,7 +854,6 @@ export const downloadEnquiryPDF = async (enquiry) => {
     return { success: true, filePath: htmlFilePath, isHTML: true };
   } catch (error) {
     if (error.message !== 'User did not share') {
-      console.error('Error generating PDF:', error);
       throw error;
     }
     return { success: false, cancelled: true };
@@ -961,25 +897,19 @@ const generateEmptyHTML = (message) => {
 export const generateEnquiriesListHTML = async (enquiries) => {
   // Validate input
   if (!enquiries) {
-    console.error('generateEnquiriesListHTML: enquiries is null or undefined');
     return generateEmptyHTML('No enquiries data provided');
   }
   
   if (!Array.isArray(enquiries)) {
-    console.error('generateEnquiriesListHTML: enquiries is not an array', typeof enquiries);
     return generateEmptyHTML('Invalid enquiries data format');
   }
   
   if (enquiries.length === 0) {
-    console.warn('generateEnquiriesListHTML: enquiries array is empty');
     return generateEmptyHTML('No enquiries available');
   }
   
   // Debug: Log enquiry data structure
   if (__DEV__) {
-    console.log('========== GENERATING ENQUIRIES LIST HTML ==========');
-    console.log('Total enquiries:', enquiries.length);
-    console.log('Enquiries type:', typeof enquiries);
     console.log('Is array:', Array.isArray(enquiries));
     if (enquiries.length > 0) {
       console.log('First enquiry structure:', {
@@ -996,7 +926,6 @@ export const generateEnquiriesListHTML = async (enquiries) => {
         console.log('Original data sample:', JSON.stringify(enquiries[0]._originalData).substring(0, 500));
       }
     }
-    console.log('===================================================');
   }
   // Get first image URL for each enquiry - improved to check all sources
   const getFirstImageUrl = (enquiry) => {
@@ -1281,9 +1210,7 @@ export const generateEnquiriesListHTML = async (enquiries) => {
         };
         
         // Get image URLs (S3 URLs) - use them directly instead of converting to base64
-        if (__DEV__) {
-          console.log('🔄 Getting image URLs for PDF...');
-        }
+        
         
         const imageUrls = enquiries.map((enquiry, idx) => {
           const originalData = enquiry?._originalData || {};
@@ -1297,9 +1224,7 @@ export const generateEnquiriesListHTML = async (enquiries) => {
             // Fetch to get S3 URL if API endpoint
             return imageUrl;
           } else {
-            if (__DEV__) {
-              console.log(`⚠️ [${idx + 1}/${enquiries.length}] No image URL found`);
-            }
+            
           }
           return '';
         });
@@ -1310,9 +1235,7 @@ export const generateEnquiriesListHTML = async (enquiries) => {
           
           // If it's already an S3 URL, use it directly
           if (imageUrl.includes('amazonaws.com') || imageUrl.includes('s3.')) {
-            if (__DEV__) {
-              console.log(`✅ [${idx + 1}/${imageUrls.length}] Already S3 URL`);
-            }
+            
             return imageUrl;
           }
           
@@ -1332,17 +1255,13 @@ export const generateEnquiriesListHTML = async (enquiries) => {
                 const jsonData = await response.json();
                 const s3Url = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
                 if (s3Url) {
-                  if (__DEV__) {
-                    console.log(`✅ [${idx + 1}/${imageUrls.length}] Resolved to S3 URL`);
-                  }
+                  
                   return s3Url;
                 }
               }
             }
           } catch (error) {
-            if (__DEV__) {
-              console.warn(`⚠️ [${idx + 1}/${imageUrls.length}] Failed to resolve URL:`, error.message);
-            }
+            
           }
           
           return imageUrl; // Fallback to original URL
@@ -1350,16 +1269,13 @@ export const generateEnquiriesListHTML = async (enquiries) => {
         
         if (__DEV__) {
           const successCount = resolvedImageUrls.filter(img => img !== '').length;
-          console.log(`📊 Image URL resolution complete: ${successCount}/${enquiries.length} URLs resolved`);
         }
         
         let rowsGenerated = 0;
         const rows = enquiries.map((enquiry, index) => {
           // Safety check: skip invalid enquiries
           if (!enquiry || typeof enquiry !== 'object') {
-            if (__DEV__) {
-              console.warn(`Skipping invalid enquiry at index ${index}:`, enquiry);
-            }
+            
             return '';
           }
           
@@ -1432,17 +1348,12 @@ export const generateEnquiriesListHTML = async (enquiries) => {
         </tr>
             `;
           } catch (rowError) {
-            if (__DEV__) {
-              console.error(`Error generating row for enquiry ${index}:`, rowError);
-            }
+            
             return ''; // Skip this row if there's an error
           }
         }).filter(row => row !== '').join('');
         
-        if (__DEV__) {
-          console.log(`Generated ${rowsGenerated} table rows out of ${enquiries.length} enquiries`);
-          console.log(`Total row HTML length: ${rows.length} characters`);
-        }
+        
         
         if (rows.length === 0) {
           return '<tr><td colspan="13" style="text-align: center; padding: 20px; color: red;">Error: Failed to generate table rows from enquiry data</td></tr>';
@@ -1474,11 +1385,9 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
     const htmlContent = await generateEnquiriesListHTML(enquiries);
     
     if (__DEV__) {
-      console.log('Generated HTML content length:', htmlContent.length);
       console.log('HTML preview (first 500 chars):', htmlContent.substring(0, 500));
       // Check if table has rows
       const tableRowsMatch = htmlContent.match(/<tr>/g);
-      console.log('Number of table rows found:', tableRowsMatch ? tableRowsMatch.length : 0);
     }
 
     // Create filename
@@ -1488,12 +1397,7 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
     // Try to generate PDF using react-native-html-to-pdf
     if (generatePDF && typeof generatePDF === 'function') {
       try {
-        if (__DEV__) {
-          console.log('========== ATTEMPTING PDF GENERATION ==========');
-          console.log('HTML content length:', htmlContent.length);
-          console.log('Filename:', filename);
-          console.log('Platform:', Platform.OS);
-        }
+        
         
         // Don't specify directory - let library use its default
         // Or use a simple string like "Documents" to avoid path issues
@@ -1517,10 +1421,7 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
         const file = await generatePDF(options);
         
         if (__DEV__) {
-          console.log('========== PDF GENERATION SUCCESS ==========');
-          console.log('PDF file path:', file.filePath);
           console.log('File exists:', file.filePath ? await RNFS.exists(file.filePath) : 'no path');
-          console.log('============================================');
         }
         
         // Verify file exists and is not empty
@@ -1549,9 +1450,7 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
               // Copy to Downloads
               await RNFS.copyFile(originalFilePath, downloadPath);
               
-              if (__DEV__) {
-                console.log('PDF copied to Downloads:', downloadPath);
-              }
+              
             } else {
               // If original doesn't exist, try the file path as-is
               if (await RNFS.exists(file.filePath)) {
@@ -1561,7 +1460,6 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
               }
             }
           } catch (copyError) {
-            console.warn('Failed to copy to Downloads, using original path:', copyError);
             // Use original path if copy fails
             finalFilePath = originalFilePath;
           }
@@ -1570,9 +1468,7 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
           if (await RNFS.exists(finalFilePath)) {
             const fileStats = await RNFS.stat(finalFilePath);
             if (fileStats.size > 0) {
-              if (__DEV__) {
-                console.log('Sharing PDF with path:', finalFilePath);
-              }
+              
               
               // Share the PDF file - use content URI for Android
               await Share.open({
@@ -1595,19 +1491,10 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
           throw new Error('PDF generation returned invalid file path');
         }
       } catch (pdfError) {
-        console.error('========== PDF GENERATION ERROR ==========');
-        console.error('Error details:', pdfError);
-        console.error('Error message:', pdfError.message);
-        console.error('Error stack:', pdfError.stack);
-        console.error('==========================================');
         // Fall through to HTML fallback
       }
     } else {
-      if (__DEV__) {
-        console.warn('PDF library not available or generatePDF function missing');
-        console.warn('generatePDF:', generatePDF);
-        console.warn('Type:', typeof generatePDF);
-      }
+      
     }
     
     // Fallback: Save as HTML if PDF generation fails or library not available
@@ -1617,7 +1504,6 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
     try {
       if (__DEV__) {
         console.log('Saving as HTML file (fallback):', htmlFilePath);
-        console.log('HTML content length:', htmlContent.length);
       }
       
       await RNFS.writeFile(htmlFilePath, htmlContent, 'utf8');
@@ -1648,12 +1534,10 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
       
       return { success: true, filePath: htmlFilePath, isHTML: true };
     } catch (error) {
-      console.error('Error saving HTML file:', error);
       throw error;
     }
   } catch (error) {
     if (error.message !== 'User did not share') {
-      console.error('Error generating PDF:', error);
       throw error;
     }
     return { success: false, cancelled: true };

@@ -22,16 +22,9 @@ const StatusStatisticsScreen = ({ navigation }) => {
   // Debug: Log the data being fetched
   React.useEffect(() => {
     if (__DEV__) {
-      console.log('📊 [STATUS STATS] ============================================');
-      console.log('📊 [STATUS STATS] Loading:', isLoading);
-      console.log('📊 [STATUS STATS] Fetching:', isFetching);
-      console.log('📊 [STATUS STATS] Error:', error);
       console.log('📊 [STATUS STATS] Status Data:', JSON.stringify(statusData, null, 2));
       if (statusData?.statusStats) {
-        console.log('📊 [STATUS STATS] Status Stats Array:', statusData.statusStats);
-        console.log('📊 [STATUS STATS] Total Count:', statusData.total);
       }
-      console.log('📊 [STATUS STATS] ============================================');
     }
   }, [statusData, isLoading, isFetching, error]);
 

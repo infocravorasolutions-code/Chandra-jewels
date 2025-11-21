@@ -8,7 +8,6 @@ import { navigationRef } from './navigationRef';
 const AppNavigator = () => {
   const { isAuthenticated, isLoading } = useAuth();
 
-  console.log('AppNavigator - isLoading:', isLoading, 'isAuthenticated:', isAuthenticated);
 
   if (isLoading) {
     return <AnimatedLogoLoader size={50} />;
