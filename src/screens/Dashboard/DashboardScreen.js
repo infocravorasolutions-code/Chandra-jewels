@@ -620,7 +620,7 @@ const DashboardScreen = ({ navigation }) => {
         value={dashboardData?.pendingDesigns || dashboardData?.categorizedCounts?.['Pending'] || '0'}
         icon={<Icon name="pending" size={20} color={colors.textWhite} />}
         color={colors.primaryDark}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
+        onPress={() => navigation.navigate('Enquiries', { filter: 'coral' })}
       />
       <StatusCard
         title="Approval Pending"

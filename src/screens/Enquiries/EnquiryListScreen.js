@@ -152,9 +152,30 @@ const EnquiryListScreen = ({ navigation }) => {
       params.append(key, String(value));
     });
     
-    const sortField = sortBy || 'CreatedDate';
+    // Map frontend sort field names to backend API field names
+    const sortFieldMap = {
+      'AssignedDate': 'AssignedDate',
+      'CreatedDate': 'CreatedDate',
+      'CurrentStatus': 'CurrentStatus',
+      'AssignedTo': 'AssignedTo',
+      'Name': 'Name',
+      'Category': 'Category',
+      'ClientId': 'ClientId',
+      'Priority': 'Priority',
+      'Metal': 'Metal',
+      'StoneType': 'StoneType',
+      'ShippingDate': 'ShippingDate',
+      // Legacy mappings for backward compatibility
+      'createdAt': 'CreatedDate',
+      'assignedDate': 'AssignedDate',
+      'status': 'CurrentStatus',
+      'title': 'Name',
+      'clientName': 'ClientId',
+    };
+    
+    const backendSortField = sortFieldMap[sortBy] || sortBy || 'AssignedDate';
     const sortDirection = sortOrder || 'desc';
-    params.append('sortBy', sortField);
+    params.append('sortBy', backendSortField);
     params.append('sortOrder', sortDirection);
     
     return params;
@@ -487,105 +508,21 @@ const EnquiryListScreen = ({ navigation }) => {
       return [];
     }
   }, [enquiries, clientNameMap, clientNameOverrides]);
+  // Backend handles sorting, so we just return enriched enquiries as-is
   const displayEnquiries = useMemo(() => {
     try {
       if (!enrichedEnquiries || enrichedEnquiries.length === 0) {
         return [];
       }
-
-      const sorted = [...enrichedEnquiries];
-      sorted.sort((a, b) => {
-        let aValue;
-        let bValue;
-        
-        switch (sortBy) {
-          case 'title':
-            aValue = a.title || a.Name || a.name || '';
-            bValue = b.title || b.Name || b.name || '';
-            break;
-          case 'clientName':
-            aValue = a.clientName || a.ClientName || a.client || '';
-            bValue = b.clientName || b.ClientName || b.client || '';
-            break;
-          case 'budget':
-            aValue = a.budget || a.Budget || a.estimatedPrice || 0;
-            bValue = b.budget || b.Budget || b.estimatedPrice || 0;
-            break;
-          case 'status':
-            aValue = a.status || a.Status || a.CurrentStatus || '';
-            bValue = b.status || b.Status || b.CurrentStatus || '';
-            break;
-          case 'createdAt':
-            aValue = a.createdAt || a.CreatedDate || a.createdDate || a.CreatedAt || '';
-            bValue = b.createdAt || b.CreatedDate || b.createdDate || b.CreatedAt || '';
-            break;
-          case 'updatedAt':
-            aValue = a.updatedAt || a.UpdatedDate || a.updatedDate || a.UpdatedAt || '';
-            bValue = b.updatedAt || b.UpdatedDate || b.updatedDate || b.UpdatedAt || '';
-            break;
-          case 'assignedDate':
-            aValue = a.AssignedDate || a.assignedDate || a.updatedAt || a.createdAt || '';
-            bValue = b.AssignedDate || b.assignedDate || b.updatedAt || b.createdAt || '';
-            break;
-          default:
-            aValue = a[sortBy] || '';
-            bValue = b[sortBy] || '';
-        }
-        
-        if (aValue == null) aValue = '';
-        if (bValue == null) bValue = '';
-        
-        if (sortBy === 'createdAt' || sortBy === 'updatedAt' || sortBy === 'assignedDate') {
-          aValue = aValue ? new Date(aValue).getTime() : 0;
-          bValue = bValue ? new Date(bValue).getTime() : 0;
-        } else if (sortBy === 'budget') {
-          aValue = parseFloat(aValue) || 0;
-          bValue = parseFloat(bValue) || 0;
-        } else if (typeof aValue === 'string') {
-          aValue = aValue.toLowerCase();
-          bValue = bValue.toLowerCase();
-        }
-        
-        let comparison = 0;
-        if (sortOrder === 'asc') {
-          if (typeof aValue === 'number') {
-            comparison = aValue - bValue;
-          } else if (typeof aValue === 'string') {
-            comparison = aValue.localeCompare(bValue);
-          } else if (aValue < bValue) {
-            comparison = -1;
-          } else if (aValue > bValue) {
-            comparison = 1;
-          }
-        } else {
-          if (typeof aValue === 'number') {
-            comparison = bValue - aValue;
-          } else if (typeof aValue === 'string') {
-            comparison = bValue.localeCompare(aValue);
-          } else if (aValue > bValue) {
-            comparison = -1;
-          } else if (aValue < bValue) {
-            comparison = 1;
-          }
-        }
-
-        if (comparison === 0) {
-          const aId = String(a.id || a._id || '');
-          const bId = String(b.id || b._id || '');
-          return aId.localeCompare(bId);
-        }
-        
-        return comparison;
-      });
-    
-      return sorted;
+      // Backend API returns data already sorted, no need for client-side sorting
+      return enrichedEnquiries;
     } catch (error) {
       if (__DEV__) {
         console.error('Error building display enquiries:', error);
       }
       return [];
     }
-  }, [enrichedEnquiries, sortBy, sortOrder]);
+  }, [enrichedEnquiries]);
 
   useEffect(() => {
     if (loading || isLoadingMore) {
@@ -1199,13 +1136,17 @@ const EnquiryListScreen = ({ navigation }) => {
     return date.toLocaleDateString();
   };
 
-  // Sort options
+  // Sort options - matching backend API fields
   const sortOptions = [
-    { key: 'createdAt', label: 'Date Created', icon: 'schedule' },
-    { key: 'title', label: 'Title', icon: 'title' },
-    { key: 'clientName', label: 'Client', icon: 'person' },
-    { key: 'budget', label: 'Budget', icon: 'attach-money' },
-    { key: 'status', label: 'Status', icon: 'flag' },
+    { key: 'AssignedDate', label: 'Assigned Date', icon: 'schedule' },
+    { key: 'CreatedDate', label: 'Date Created', icon: 'event' },
+    { key: 'Name', label: 'Name', icon: 'title' },
+    { key: 'Priority', label: 'Priority', icon: 'priority-high' },
+    { key: 'CurrentStatus', label: 'Status', icon: 'flag' },
+    { key: 'Category', label: 'Category', icon: 'category' },
+    { key: 'ClientId', label: 'Client', icon: 'person' },
+    { key: 'StoneType', label: 'Stone Type', icon: 'diamond' },
+    { key: 'ShippingDate', label: 'Shipping Date', icon: 'local-shipping' },
   ];
 
   const getSortLabel = () => {
@@ -1222,9 +1163,13 @@ const EnquiryListScreen = ({ navigation }) => {
         console.log('Sort order toggled:', newOrder);
       }
     } else {
-      dispatch(setSorting({ sortBy: newSortBy, sortOrder: 'asc' })); // Default to desc for new field
+      // Default sort order based on field type
+      // Date fields default to 'desc' (newest first), others default to 'asc'
+      const dateFields = ['AssignedDate', 'CreatedDate', 'ShippingDate'];
+      const defaultOrder = dateFields.includes(newSortBy) ? 'desc' : 'asc';
+      dispatch(setSorting({ sortBy: newSortBy, sortOrder: defaultOrder }));
       if (__DEV__) {
-        console.log('Sort changed to:', newSortBy, 'desc');
+        console.log('Sort changed to:', newSortBy, defaultOrder);
       }
     }
     setShowSortModal(false);

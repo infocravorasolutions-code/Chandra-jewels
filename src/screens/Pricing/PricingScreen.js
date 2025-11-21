@@ -9,6 +9,7 @@ import {
   Switch,
   Modal,
   TextInput,
+  FlatList,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/cards/Cards';
@@ -1554,155 +1555,177 @@ const PricingScreen = ({ route, navigation }) => {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.stonesContainer}>
+          <View style={styles.stonesTableContainer}>
             {stones.length > 0 ? (
-              stones.map((stone, index) => (
-                <Card key={index} style={styles.stoneCard}>
-                  <View style={styles.stoneCardHeader}>
-                    <CustomText variant="label" style={styles.stoneCardTitle}>
-                      Stone {index + 1}
-                    </CustomText>
-                    <TouchableOpacity
-                      onPress={() => handleDeleteStone(index)}
-                      style={styles.deleteStoneButton}
-                    >
-                      <Icon name="delete" size={20} color={colors.error} />
-                    </TouchableOpacity>
+              <View style={styles.tableWrapper}>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={true}
+                  style={styles.tableScrollContainer}
+                >
+                  <View>
+                    {/* Table Header */}
+                    <View style={styles.tableHeader}>
+                      <View style={[styles.tableHeaderCell, styles.tableCellNumber]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellType]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Type *</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Shape</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>MM</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellMedium]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Weight</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Pieces</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Carat</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Price</CustomText>
+                      </View>
+                      <View style={[styles.tableHeaderCell, styles.tableCellAction]}>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Action</CustomText>
+                      </View>
+                    </View>
+
+                    {/* Table Body */}
+                    <View style={styles.tableBody}>
+                      {stones.map((stone, index) => (
+                      <View key={index} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
+                        {/* Row Number */}
+                        <View style={[styles.tableCell, styles.tableCellNumber]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {index + 1}
+                          </CustomText>
+                        </View>
+
+                        {/* Type Dropdown */}
+                        <View style={[styles.tableCell, styles.tableCellType]}>
+                          {renderTypeDropdown(index, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '')}
+                        </View>
+
+                        {/* Color */}
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.Color || ''}
+                            onChangeText={(value) => handleUpdateStone(index, 'Color', value)}
+                            placeholder="Color"
+                            placeholderTextColor={colors.textLight}
+                          />
+                        </View>
+
+                        {/* Shape */}
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.Shape || ''}
+                            onChangeText={(value) => handleUpdateStone(index, 'Shape', value)}
+                            placeholder="Shape"
+                            placeholderTextColor={colors.textLight}
+                          />
+                        </View>
+
+                        {/* MM Size */}
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.MM || ''}
+                            onChangeText={(value) => handleUpdateStone(index, 'MM', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* Sieve Size */}
+                        <View style={[styles.tableCell, styles.tableCellMedium]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.Sieve || ''}
+                            onChangeText={(value) => handleUpdateStone(index, 'Sieve', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* Weight */}
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.Weight || '0'}
+                            onChangeText={(value) => handleUpdateStone(index, 'Weight', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* Pieces */}
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.Pieces || '0'}
+                            onChangeText={(value) => handleUpdateStone(index, 'Pieces', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* Carat Weight */}
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.CaratWeight || '0'}
+                            onChangeText={(value) => handleUpdateStone(index, 'CaratWeight', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* Price */}
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <TextInput
+                            style={styles.tableInput}
+                            value={stone.Price || '0'}
+                            onChangeText={(value) => handleUpdateStone(index, 'Price', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* Delete Action */}
+                        <View style={[styles.tableCell, styles.tableCellAction]}>
+                          <TouchableOpacity
+                            onPress={() => handleDeleteStone(index)}
+                            style={styles.tableDeleteButton}
+                          >
+                            <Icon name="delete" size={18} color={colors.error} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      ))}
+                    </View>
                   </View>
-                  
-                  <View style={styles.stoneFields}>
-                  {/* Type Dropdown */}
-                    <View style={styles.stoneField}>
-                      <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                        Type *
-                      </CustomText>
-                    {renderTypeDropdown(index, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '')}
-                  </View>
-                  
-                    {/* Row 1: Color and Shape */}
-                    <View style={styles.stoneFieldRow}>
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          Color
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.Color || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'Color', value)}
-                          placeholder="Enter color"
-                    placeholderTextColor={colors.textLight}
-                  />
-                      </View>
-                  
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          Shape
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.Shape || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'Shape', value)}
-                          placeholder="Enter shape"
-                    placeholderTextColor={colors.textLight}
-                  />
-                      </View>
-                    </View>
-                    
-                    {/* Row 2: MM Size and Sieve Size */}
-                    <View style={styles.stoneFieldRow}>
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          MM Size
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.MM || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'MM', value)}
-                          placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                      </View>
-                  
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          Sieve Size
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.Sieve || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'Sieve', value)}
-                          placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                      </View>
-                    </View>
-                    
-                    {/* Row 3: Weight and Pieces */}
-                    <View style={styles.stoneFieldRow}>
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          Weight
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.Weight || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'Weight', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                      </View>
-                  
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          Pieces
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.Pieces || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'Pieces', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                        />
-                      </View>
-                    </View>
-                    
-                    {/* Row 4: Carat Weight and Price */}
-                    <View style={styles.stoneFieldRow}>
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          Carat Weight
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.CaratWeight || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'CaratWeight', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                      </View>
-                  
-                      <View style={[styles.stoneField, styles.stoneFieldHalf]}>
-                        <CustomText variant="caption" style={styles.stoneFieldLabel}>
-                          Price
-                        </CustomText>
-                  <TextInput
-                          style={styles.stoneInput}
-                    value={stone.Price || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'Price', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                        />
-                </View>
-                    </View>
-                  </View>
-                </Card>
-              ))
+                </ScrollView>
+              </View>
             ) : (
               <View style={styles.emptyStonesContainer}>
                 <Icon name="diamond" size={48} color={colors.textLight} />
@@ -1920,78 +1943,126 @@ const styles = StyleSheet.create({
   downloadButton: {
     backgroundColor: colors.primary,
   },
-  stonesContainer: {
+  stonesTableContainer: {
     marginTop: 12,
-    gap: 16,
   },
-  stoneCard: {
-    padding: 16,
+  tableWrapper: {
     backgroundColor: colors.background,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
   },
-  stoneCardHeader: {
+  tableHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: colors.primary || '#2196F3',
+    borderBottomWidth: 2,
+    borderBottomColor: colors.primaryDark || '#1976D2',
+  },
+  tableHeaderCell: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 12,
+  },
+  tableHeaderText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.xs,
+    textAlign: 'center',
+  },
+  tableScrollContainer: {
+    maxHeight: 500,
+  },
+  tableBody: {
+    backgroundColor: colors.background,
+  },
+  tableRow: {
+    flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    minHeight: 50,
   },
-  stoneCardTitle: {
-    fontSize: fonts.base,
-    fontFamily: fonts.bold,
-    color: colors.textPrimary,
+  tableRowEven: {
+    backgroundColor: colors.backgroundSecondary,
   },
-  stoneFields: {
-    gap: 12,
+  tableCell: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRightWidth: 1,
+    borderRightColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 50,
   },
-  stoneField: {
-    marginBottom: 0,
-  },
-  stoneFieldRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  stoneFieldHalf: {
-    flex: 1,
-  },
-  stoneFieldLabel: {
+  tableCellText: {
     fontSize: fonts.xs,
-    fontFamily: fonts.medium,
-    color: colors.textSecondary,
-    marginBottom: 6,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
+    textAlign: 'center',
   },
-  stoneInput: {
+  tableInput: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: fonts.base,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    fontSize: fonts.xs,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     backgroundColor: colors.backgroundSecondary,
+    textAlign: 'center',
+    minWidth: 60,
+    width: '100%',
+  },
+  tableCellNumber: {
+    width: 40,
+    minWidth: 40,
+  },
+  tableCellType: {
+    width: 120,
+    minWidth: 120,
+  },
+  tableCellSmall: {
+    width: 80,
+    minWidth: 80,
+  },
+  tableCellMedium: {
+    width: 100,
+    minWidth: 100,
+  },
+  tableCellAction: {
+    width: 60,
+    minWidth: 60,
+    borderRightWidth: 0,
+  },
+  tableDeleteButton: {
+    padding: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
   },
   dropdownButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 6,
+    borderRadius: 4,
     backgroundColor: colors.backgroundSecondary,
     minWidth: 100,
+    width: '100%',
   },
   dropdownButtonText: {
     fontSize: fonts.xs,
     fontFamily: fonts.medium,
     color: colors.textPrimary,
     flex: 1,
+    textAlign: 'left',
   },
   modalOverlay: {
     flex: 1,

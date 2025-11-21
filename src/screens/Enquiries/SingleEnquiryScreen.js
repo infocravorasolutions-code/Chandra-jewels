@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,6 +9,8 @@ import {
   Text,
   Platform,
   Modal,
+  FlatList,
+  Dimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -193,20 +195,58 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const [selectedDesignType, setSelectedDesignType] = useState(null); // 'coral' or 'cad'
   const [selectedVersionIndex, setSelectedVersionIndex] = useState(null);
   const [selectedImageUri, setSelectedImageUri] = useState(null);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [isImageModalVisible, setImageModalVisible] = useState(false);
+  const [modalImages, setModalImages] = useState([]); // Store image objects for modal
+  const modalFlatListRef = useRef(null);
+  const [modalCurrentIndex, setModalCurrentIndex] = useState(0);
   
-  const handleImagePress = (uri) => {
+  const handleImagePress = (uri, index, allImages) => {
     if (!uri) {
       return;
     }
+    if (__DEV__) {
+      console.log('🖼️ Opening image modal:', { uri, index, allImagesCount: allImages?.length });
+    }
     setSelectedImageUri(uri);
+    setSelectedImageIndex(index);
+    setModalImages(allImages || []);
+    setModalCurrentIndex(index);
     setImageModalVisible(true);
   };
 
   const closeImageModal = () => {
     setImageModalVisible(false);
     setSelectedImageUri(null);
+    setModalImages([]);
+    setModalCurrentIndex(0);
   };
+  
+  // Scroll to selected image when modal opens
+  useEffect(() => {
+    if (isImageModalVisible && modalImages.length > 1 && modalFlatListRef.current) {
+      setTimeout(() => {
+        modalFlatListRef.current?.scrollToIndex({
+          index: modalCurrentIndex,
+          animated: false,
+        });
+      }, 100);
+    }
+  }, [isImageModalVisible, modalCurrentIndex, modalImages.length]);
+  
+  // State for image modal slider - must be at top level of component
+  const screenWidth = Dimensions.get('window').width;
+  
+  // Viewability config for modal FlatList - must be at component level
+  const modalOnViewableItemsChanged = useRef(({ viewableItems }) => {
+    if (viewableItems.length > 0) {
+      setModalCurrentIndex(viewableItems[0].index || 0);
+    }
+  }).current;
+
+  const modalViewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+  }).current;
   
   // API mutations
   const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
@@ -731,7 +771,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   };
 
   // Component to render image with fetch authentication (same approach as DesignViewerScreen)
-  const ImageWithFallback = ({ image, imageKey, imageId, imageUri, index }) => {
+  const ImageWithFallback = ({ image, imageKey, imageId, imageUri, index, onPress }) => {
     const [imageDataUri, setImageDataUri] = useState(null);
     const [imageLoading, setImageLoading] = useState(false);
     const [imageError, setImageError] = useState(false);
@@ -891,6 +931,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         
       }
       
+      if (__DEV__ && onPress === null) {
+        console.log('🖼️ Modal ImageWithFallback fetching:', { imageKey, imageId, imageUri, imageUrl, index });
+      }
+      
       if (imageUrl) {
         // Check if it's an S3 URL (public, no auth needed) - try direct load first
         if (imageUrl.includes('amazonaws.com') || imageUrl.includes('s3.')) {
@@ -905,15 +949,22 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           fetchImageWithAuth(imageUrl);
         }
       } else {
+        if (__DEV__ && onPress === null) {
+          console.warn('🖼️ Modal ImageWithFallback: No image URL found', { imageKey, imageId, imageUri });
+        }
         setImageError(true);
       }
-    }, [imageKey, imageId, imageUri, index]);
+    }, [imageKey, imageId, imageUri, index, onPress]);
+    
+    // Use modal styles if onPress is null (modal context)
+    const containerStyle = onPress === null ? styles.modalImageWrapper : styles.imageContainer;
+    const placeholderStyle = onPress === null ? styles.modalImagePlaceholder : styles.imagePlaceholder;
     
     if (imageError) {
       return (
-        <View style={styles.imageContainer}>
-          <View style={styles.imagePlaceholder}>
-            <Icon name="image" size={24} color={colors.textSecondary} />
+        <View style={containerStyle}>
+          <View style={placeholderStyle}>
+            <Icon name="image" size={onPress === null ? 48 : 24} color={onPress === null ? colors.textWhite : colors.textSecondary} />
           </View>
         </View>
       );
@@ -921,10 +972,36 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     
     if (imageLoading || !imageDataUri) {
       return (
-        <View style={styles.imageContainer}>
-          <View style={styles.imagePlaceholder}>
-            <Icon name="image" size={24} color={colors.textSecondary} />
+        <View style={containerStyle}>
+          <View style={placeholderStyle}>
+            {imageLoading && (
+              <View style={{ marginBottom: 12 }}>
+                <AnimatedLogoLoader size="small" />
+              </View>
+            )}
+            <Icon name="image" size={onPress === null ? 48 : 24} color={onPress === null ? colors.textWhite : colors.textSecondary} />
+            {imageLoading && onPress === null && (
+              <Text style={{ color: colors.textWhite, marginTop: 8, fontSize: fonts.sm }}>
+                Loading image...
+              </Text>
+            )}
           </View>
+        </View>
+      );
+    }
+    
+    // If onPress is null, render without TouchableOpacity (for modal)
+    if (onPress === null) {
+      return (
+        <View style={styles.modalImageWrapper}>
+          <Image
+            source={{ uri: imageDataUri }}
+            style={styles.fullscreenImage}
+            resizeMode="contain"
+            onError={() => {
+              setImageError(true);
+            }}
+          />
         </View>
       );
     }
@@ -933,7 +1010,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       <TouchableOpacity
         style={styles.imageContainer}
         activeOpacity={0.9}
-        onPress={() => handleImagePress(imageDataUri)}
+        onPress={() => {
+          if (onPress) {
+            onPress(imageDataUri);
+          } else {
+            handleImagePress(imageDataUri, index, [imageDataUri]);
+          }
+        }}
       >
         <EnquiryImage
           source={{ uri: imageDataUri }}
@@ -983,10 +1066,66 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       );
     }
 
+    // If only one image, show it without slider
+    if (images.length === 1) {
+      const image = images[0];
+      let imageKey = null;
+      let imageId = null;
+      let imageUri = null;
+      
+      if (typeof image === 'object' && image !== null) {
+        imageKey = image.Key || image.key || image.KeyName || image.keyName || '';
+        imageId = image.Id || image.id || image._id || image.FileId || image.fileId || '';
+        imageUri = image.Url || image.url || image.URI || image.uri || image.Location || image.location || image.UrlPath || image.urlPath || '';
+      } else if (typeof image === 'string') {
+        if (image.startsWith('http') || image.startsWith('https')) {
+          imageUri = image;
+        } else {
+          imageKey = image;
+        }
+      }
+
+      return (
+        <Card style={styles.imagesCard}>
+          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
+            Reference Images
+          </Text>
+          <ImageWithFallback
+            image={image}
+            imageKey={imageKey}
+            imageId={imageId}
+            imageUri={imageUri}
+            index={0}
+          />
+        </Card>
+      );
+    }
+
+    // Build array of image data for the modal slider
+    const imageDataForModal = images.map((image) => {
+      let imageKey = null;
+      let imageId = null;
+      let imageUri = null;
+      
+      if (typeof image === 'object' && image !== null) {
+        imageKey = image.Key || image.key || image.KeyName || image.keyName || '';
+        imageId = image.Id || image.id || image._id || image.FileId || image.fileId || '';
+        imageUri = image.Url || image.url || image.URI || image.uri || image.Location || image.location || image.UrlPath || image.urlPath || '';
+      } else if (typeof image === 'string') {
+        if (image.startsWith('http') || image.startsWith('https')) {
+          imageUri = image;
+        } else {
+          imageKey = image;
+        }
+      }
+      
+      return { image, imageKey, imageId, imageUri };
+    });
+
     return (
       <Card style={styles.imagesCard}>
         <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
-          Reference Images
+          Reference Images {images.length > 1 ? `(${images.length})` : ''}
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {images.map((image, index) => {
@@ -1019,6 +1158,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 imageId={imageId}
                 imageUri={imageUri}
                 index={index}
+                onPress={(uri) => {
+                  // Pass all image data to modal for slider
+                  handleImagePress(uri, index, imageDataForModal);
+                }}
               />
             );
           })}
@@ -1432,7 +1575,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         {user.role === 'admin' && renderAdminActions()}
       </ScrollView>
 
-      {selectedImageUri && (
+      {isImageModalVisible && (
         <Modal
           visible={isImageModalVisible}
           transparent
@@ -1443,11 +1586,69 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             <TouchableOpacity style={styles.fullscreenImageCloseButton} onPress={closeImageModal}>
               <Icon name="close" size={24} color={colors.textWhite} />
             </TouchableOpacity>
-            <Image
-              source={{ uri: selectedImageUri }}
-              style={styles.fullscreenImage}
-              resizeMode="contain"
-            />
+            
+            {modalImages.length > 1 ? (
+              <>
+                {/* Image Counter */}
+                <View style={styles.modalImageCounter}>
+                  <Text style={styles.modalImageCounterText}>
+                    {modalCurrentIndex + 1} / {modalImages.length}
+                  </Text>
+                </View>
+                
+                {/* Slider for multiple images */}
+                <FlatList
+                  ref={modalFlatListRef}
+                  data={modalImages}
+                  renderItem={({ item, index }) => (
+                    <View style={styles.modalImageContainer}>
+                      <ImageWithFallback
+                        image={item.image}
+                        imageKey={item.imageKey}
+                        imageId={item.imageId}
+                        imageUri={item.imageUri}
+                        index={index}
+                        onPress={null} // No click handler in modal
+                      />
+                    </View>
+                  )}
+                  keyExtractor={(item, index) => `modal-image-${index}`}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  initialScrollIndex={modalCurrentIndex}
+                  onViewableItemsChanged={modalOnViewableItemsChanged}
+                  viewabilityConfig={modalViewabilityConfig}
+                  getItemLayout={(data, index) => ({
+                    length: screenWidth,
+                    offset: screenWidth * index,
+                    index,
+                  })}
+                />
+                
+                {/* Pagination Dots */}
+                <View style={styles.modalPaginationContainer}>
+                  {modalImages.map((_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.modalPaginationDot,
+                        index === modalCurrentIndex && styles.modalPaginationDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : (
+              /* Single image - no slider */
+              <View style={styles.modalImageContainer}>
+                <Image
+                  source={{ uri: selectedImageUri }}
+                  style={styles.fullscreenImage}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
           </View>
         </Modal>
       )}
@@ -1540,6 +1741,11 @@ const styles = StyleSheet.create({
   imageContainer: {
     marginRight: 12,
   },
+  sliderImageContainer: {
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   imagePlaceholder: {
     width: 150,
     height: 150,
@@ -1555,6 +1761,26 @@ const styles = StyleSheet.create({
   noImagesText: {
     marginTop: 12,
     textAlign: 'center',
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.border || '#E0E0E0',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    backgroundColor: colors.primary || '#2196F3',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   errorText: {
     textAlign: 'center',
@@ -1676,8 +1902,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   fullscreenImage: {
-    width: '90%',
-    height: '80%',
+    width: '100%',
+    height: '100%',
+  },
+  modalImageContainer: {
+    width: Dimensions.get('window').width,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalImageWrapper: {
+    width: Dimensions.get('window').width,
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  modalImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalImageCounter: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    zIndex: 10,
+  },
+  modalImageCounterText: {
+    color: colors.textWhite,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+  },
+  modalPaginationContainer: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  modalPaginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    marginHorizontal: 4,
+  },
+  modalPaginationDotActive: {
+    backgroundColor: colors.textWhite,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   fullscreenImageCloseButton: {
     position: 'absolute',

@@ -1068,6 +1068,9 @@ export const api = createApi({
           };
           
           // Process status aggregate data for ALL users (including admin)
+          // Also track specific status counts for designers (Coral, CAD, etc.)
+          const specificStatusCounts = {};
+          
           if (statusAggregateResult.data && !statusAggregateResult.error) {
             const aggregateData = statusAggregateResult.data;
             
@@ -1078,7 +1081,11 @@ export const api = createApi({
               
               aggregateData.forEach((item, index) => {
                 const statusName = (item.name || item.status || item.Status || item._id || item.group || '').toUpperCase();
+                const statusNameLower = statusName.toLowerCase();
                 const count = item.count || item.Count || item.value || item.total || 0;
+                
+                // Store specific status counts for designers
+                specificStatusCounts[statusNameLower] = count;
                 
                 console.log(`🔍 [DASHBOARD DEBUG] Item ${index + 1}:`, {
                   rawItem: item,
@@ -1101,7 +1108,7 @@ export const api = createApi({
                 categorizedCounts['All'] += count;
                 
                 // Also populate legacy status counts for backward compatibility
-                const status = statusName.toLowerCase();
+                const status = statusNameLower;
                 if (status === 'pending' || status === 'enquiry created' || status.includes('pending') || status === 'design approval pending') {
                   statusCounts.pending += count;
                 } else if (status === 'completed' || status.includes('completed') || status.includes('approved')) {
@@ -1118,7 +1125,11 @@ export const api = createApi({
               // Handle object format { pending: 10, completed: 5, ... }
               Object.keys(aggregateData).forEach(key => {
                 const normalizedKey = key.toUpperCase();
+                const keyLower = key.toLowerCase();
                 const value = aggregateData[key];
+                
+                // Store specific status counts for designers
+                specificStatusCounts[keyLower] = value || 0;
                 
                 // Categorize
                 let category = 'Pending';
@@ -1132,7 +1143,6 @@ export const api = createApi({
                 categorizedCounts['All'] += value || 0;
                 
                 // Legacy mapping
-                const keyLower = normalizedKey.toLowerCase();
                 if (keyLower === 'pending' || keyLower.includes('pending')) {
                   statusCounts.pending = value || 0;
                 } else if (keyLower === 'completed' || keyLower.includes('completed')) {
@@ -1326,18 +1336,20 @@ export const api = createApi({
           } else if (role === 'coral' || role === 'cad') {
             const assignedEnquiries = categorizedCounts['All'] || statusCounts.total || normalizedEnquiries.length;
             const completedDesigns = categorizedCounts['Completed'] || statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
-            const pendingDesigns = categorizedCounts['Pending'] || statusCounts.pending || normalizedEnquiries.filter(e => e.status === 'pending').length;
+            // For "Pending Designs", specifically count "Coral" status (not all pending statuses)
+            const pendingDesigns = specificStatusCounts['coral'] || 0;
             const approvalPendingDesigns = categorizedCounts['Approval Pending'] || 0;
             const averageRating = 4.8; // TODO: Fetch from API when available
             
             console.log('🔍 [DASHBOARD DEBUG] DESIGNER DASHBOARD CALCULATIONS (from aggregate API):');
             console.log('🔍 [DASHBOARD DEBUG] - Role:', role, '(should use aggregate endpoint)');
             console.log('🔍 [DASHBOARD DEBUG] - Assigned Enquiries:', assignedEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs:', pendingDesigns, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], '| statusCounts.pending:', statusCounts.pending, ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs (Coral status only):', pendingDesigns, '(from specificStatusCounts["coral"]:', specificStatusCounts['coral'], '| categorizedCounts.Pending:', categorizedCounts['Pending'], ')');
             console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Designs:', approvalPendingDesigns, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], ')');
             console.log('🔍 [DASHBOARD DEBUG] - Completed Designs:', completedDesigns, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', pendingDesigns + approvalPendingDesigns + completedDesigns);
-            console.log('🔍 [DASHBOARD DEBUG] - Does sum match assigned?', (pendingDesigns + approvalPendingDesigns + completedDesigns) === assignedEnquiries);
+            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Coral + Approval Pending + Completed):', pendingDesigns + approvalPendingDesigns + completedDesigns);
+            console.log('🔍 [DASHBOARD DEBUG] - Note: Sum may not match assigned if there are other statuses (CAD, Enquiry Created, etc.)');
+            console.log('🔍 [DASHBOARD DEBUG] - All status counts:', JSON.stringify(specificStatusCounts, null, 2));
             
             return {
               data: {
