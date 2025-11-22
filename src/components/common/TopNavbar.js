@@ -13,26 +13,8 @@ import AccountModal from '../modals/AccountModal';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { images } from '../../constants/images';
-// Import SVG logo - try both files
-let LogoHeaderSvg = null;
-try {
-  // Try the SVG file without spaces first
-  const svgModule = require('../../assets/images/Chandra logo1.svg');
-  LogoHeaderSvg = svgModule.default || svgModule;
-  if (LogoHeaderSvg) {
-    console.log('✅ SVG logo loaded successfully (Chandra logo1.svg)');
-  }
-} catch (error1) {
-  try {
-    // Fallback to the SVG file with spaces
-    const svgModule2 = require('../../assets/images/Chandra logo .svg');
-    LogoHeaderSvg = svgModule2.default || svgModule2;
-    if (LogoHeaderSvg) {
-      console.log('✅ SVG logo loaded successfully (Chandra logo .svg)');
-    }
-  } catch (error2) {
-  }
-}
+// Import PNG logo header
+const logoHeaderImage = require('../../assets/images/logo-header (1).png');
 import Icon from './Icon';
 import { useGetUnreadNotificationsCountQuery } from '../../store/api';
 
@@ -79,19 +61,12 @@ const TopNavbar = ({ navigation }) => {
               style={styles.logoImage}
               resizeMode="contain"
             />
-            {/* SVG Logo Text */}
-            <View style={styles.logoSvgContainer}>
-              <LogoHeaderSvg 
-                width={160}
-                height={40}
-                preserveAspectRatio="xMidYMid meet"
-              />
-            </View>
-            {/* {buttonPressed && (
-              <Text style={{ color: colors.textWhite, fontSize: 10, marginLeft: 8 }}>
-                {buttonPressed} pressed
-              </Text>
-            )} */}
+            {/* Logo Header PNG */}
+            <Image 
+              source={logoHeaderImage}
+              style={styles.logoHeaderImage}
+              resizeMode="contain"
+            />
           </View>
         </View>
 
@@ -198,13 +173,6 @@ const styles = StyleSheet.create({
     height: 40,
     width: 160,
     marginLeft: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  logoText: {
-    marginLeft: 8,
-    fontFamily: fonts.bold,
   },
   rightSection: {
     flexDirection: 'row',
@@ -303,14 +271,6 @@ const styles = StyleSheet.create({
     fontSize: fonts.base,
     fontFamily: fonts.medium,
     color: colors.textWhite,
-  },
-  logoSvgContainer: {
-    marginLeft: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    // Fixed container size - change these to resize the logo
-    width: 160,
-    height: 40,
   },
 });
 

@@ -44,6 +44,18 @@ export const checkAuthState = createAsyncThunk(
           }
         }
         
+        // Extract ClientId from token for role 4 (Client users)
+        if (decodedToken && (userData.roleId === 4 || userData.roleNumber === 4)) {
+          const clientId = decodedToken.ClientId || decodedToken.clientId || decodedToken.ClientID || decodedToken.clientID;
+          if (clientId && userData.clientId !== clientId) {
+            userData.clientId = clientId;
+            userDataUpdated = true;
+            if (__DEV__) {
+              console.log('🔐 Client user - ClientId extracted from token:', clientId);
+            }
+          }
+        }
+        
         // Check if name is missing or appears to be email-derived (contains numbers or matches email pattern)
         const isEmailDerivedName = userData.name && (
           userData.name.toLowerCase() === (userData.email?.split('@')[0] || '').toLowerCase() ||

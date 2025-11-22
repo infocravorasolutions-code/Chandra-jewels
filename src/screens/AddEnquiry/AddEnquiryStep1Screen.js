@@ -147,6 +147,43 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     setFormData(initialData);
   }, []); // Only run once on mount
 
+  // Pre-select client for Client users (Role 4) based on their clientId
+  useEffect(() => {
+    if (isClient && user?.clientId && clients.length > 0) {
+      // Find the client that matches the user's clientId
+      const userClient = clients.find(c => {
+        const clientId = c.id || c._id;
+        return String(clientId).trim() === String(user.clientId).trim();
+      });
+      
+      if (userClient) {
+        const clientId = userClient.id || userClient._id;
+        const clientName = userClient.name || userClient.Name || '';
+        
+        if (__DEV__) {
+          console.log('🔐 [ADD ENQUIRY] Pre-selecting client for Client user:', {
+            userClientId: user.clientId,
+            foundClientId: clientId,
+            clientName: clientName,
+          });
+        }
+        
+        setFormData(prev => ({
+          ...prev,
+          clientId: clientId,
+          clientName: clientName,
+        }));
+      } else {
+        if (__DEV__) {
+          console.warn('⚠️ [ADD ENQUIRY] Client user clientId not found in clients list:', {
+            userClientId: user.clientId,
+            availableClients: clients.map(c => ({ id: c.id || c._id, name: c.name })),
+          });
+        }
+      }
+    }
+  }, [isClient, user?.clientId, clients]);
+
   // Ensure status is always "Enquiry Created" for client users
   useEffect(() => {
     if (isClient && formData.status !== 'Enquiry Created') {
@@ -472,17 +509,31 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
             />
           </View>
           <View style={styles.formField}>
-            {renderDropdown(
-              'Client*',
-              formData.clientId,
-              clientOptions,
-              (clientId) => {
-                const selectedClient = clients.find(c => (c.id || c._id) === clientId);
-                handleInputChange('clientId', clientId);
-                handleInputChange('clientName', selectedClient?.name || '');
-              },
-              showClientDropdown,
-              () => setShowClientDropdown(!showClientDropdown)
+            {isClient ? (
+              // For Client users, show as read-only input (pre-selected)
+              <View style={styles.dropdownContainer}>
+                <Text style={styles.dropdownLabel}>Client*</Text>
+                <View style={[styles.dropdown, styles.disabledDropdown]}>
+                  <Text style={[styles.dropdownText, styles.disabledText]}>
+                    {formData.clientName || 'Loading...'}
+                  </Text>
+                  <IconComponent name="lock" size={20} color={colors.textSecondary} />
+                </View>
+              </View>
+            ) : (
+              // For other users, show as dropdown
+              renderDropdown(
+                'Client*',
+                formData.clientId,
+                clientOptions,
+                (clientId) => {
+                  const selectedClient = clients.find(c => (c.id || c._id) === clientId);
+                  handleInputChange('clientId', clientId);
+                  handleInputChange('clientName', selectedClient?.name || '');
+                },
+                showClientDropdown,
+                () => setShowClientDropdown(!showClientDropdown)
+              )
             )}
             {errors.clientId && (
               <Text style={styles.errorText}>{errors.clientId}</Text>
@@ -852,6 +903,13 @@ const styles = StyleSheet.create({
   dropdownOptionTextSelected: {
     fontFamily: fonts.bold,
     color: colors.primary,
+  },
+  disabledDropdown: {
+    backgroundColor: colors.backgroundSecondary,
+    opacity: 0.6,
+  },
+  disabledText: {
+    color: colors.textSecondary,
   },
   weightRow: {
     flexDirection: 'row',

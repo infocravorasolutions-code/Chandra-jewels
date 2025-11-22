@@ -77,7 +77,7 @@ const LoginScreen = ({ navigation }) => {
           user: result.user,
         });
         
-        // Fetch user details from API to get the actual name from database
+        // Fetch user details from API to get the actual name and clientId from database
         let userDetails = null;
         if (result.user.id) {
           try {
@@ -93,10 +93,24 @@ const LoginScreen = ({ navigation }) => {
             if (userResponse.ok) {
               const userDataResponse = await userResponse.json();
               userDetails = userDataResponse.user || userDataResponse;
+              
+              // If ClientId is not in token but user is Role 4, get it from database
+              if (result.user.roleNumber === 4 && !result.user.clientId && userDetails) {
+                const dbClientId = userDetails.clientId || userDetails.ClientId;
+                if (dbClientId) {
+                  result.user.clientId = dbClientId;
+                  if (__DEV__) {
+                    console.log('🔐 [LOGIN] ClientId fetched from database:', dbClientId);
+                  }
+                }
+              }
             } else {
             }
           } catch (error) {
             // Continue with login even if user details fetch fails
+            if (__DEV__) {
+              console.warn('⚠️ [LOGIN] Failed to fetch user details:', error);
+            }
           }
         }
         
@@ -124,11 +138,26 @@ const LoginScreen = ({ navigation }) => {
           ...result.user,
           email: formData.email,
           name: userName, // Use actual name from database
+          // Include ClientId from token or database for role 4 users
+          clientId: result.user.clientId || userDetails?.clientId || userDetails?.ClientId,
           // Include other user details if available
           ...(userDetails && {
             phone: userDetails.phone || userDetails.Phone,
           }),
         };
+        
+        if (__DEV__ && userData.roleNumber === 4) {
+          console.log('🔐 [LOGIN] Final userData for Client user:', {
+            id: userData.id,
+            role: userData.role,
+            roleNumber: userData.roleNumber,
+            clientId: userData.clientId,
+            name: userData.name,
+          });
+          if (!userData.clientId) {
+            console.error('❌ [LOGIN] ERROR: ClientId is missing for Role 4 user!');
+          }
+        }
         
         
         // Store in AsyncStorage

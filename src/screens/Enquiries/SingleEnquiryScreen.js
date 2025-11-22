@@ -1083,12 +1083,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         } else {
           imageKey = image;
         }
-      }
+    }
 
-      return (
-        <Card style={styles.imagesCard}>
-          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
-            Reference Images
+    return (
+      <Card style={styles.imagesCard}>
+        <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
+          Reference Images
           </Text>
           <ImageWithFallback
             image={image}
@@ -1642,11 +1642,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             ) : (
               /* Single image - no slider */
               <View style={styles.modalImageContainer}>
-                <Image
-                  source={{ uri: selectedImageUri }}
-                  style={styles.fullscreenImage}
-                  resizeMode="contain"
-                />
+            <Image
+              source={{ uri: selectedImageUri }}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+            />
               </View>
             )}
           </View>

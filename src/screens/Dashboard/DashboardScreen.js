@@ -201,7 +201,7 @@ const DashboardScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
 
   // Redux hooks for data fetching
-  // Pass both role and userId to get user-specific counts
+  // Pass role, userId, and clientId (for role 4 users) to get user-specific counts
   const { 
     data: dashboardData, 
     isLoading: dashboardLoading, 
@@ -210,6 +210,8 @@ const DashboardScreen = ({ navigation }) => {
     { 
       role: user?.role || 'client',
       userId: user?.id || user?._id || user?.userId,
+      clientId: user?.clientId, // Pass ClientId from token for role 4 users
+      roleNumber: user?.roleNumber || user?.roleId, // Pass role number to identify role 4
     },
     {
       skip: !user,
@@ -784,8 +786,8 @@ const DashboardScreen = ({ navigation }) => {
         {user?.role === 'client' && renderClientDashboard()}
         {(user?.role === 'coral' || user?.role === 'cad') && renderDesignerDashboard(user.role)}
 
-        {/* Quick Actions - Hidden for coral and CAD designers */}
-        {(user?.role !== 'coral' && user?.role !== 'cad') && (
+        {/* Quick Actions - Hidden for coral, CAD designers, and Client users */}
+        {(user?.role !== 'coral' && user?.role !== 'cad' && user?.role !== 'client' && user?.roleNumber !== 4 && user?.roleId !== 4) && (
           <View style={styles.quickActionsSection}>
             {renderQuickActions()}
           </View>

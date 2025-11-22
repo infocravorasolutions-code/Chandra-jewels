@@ -1599,8 +1599,8 @@ const PricingScreen = ({ route, navigation }) => {
                       <View style={[styles.tableHeaderCell, styles.tableCellAction]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Action</CustomText>
                       </View>
-                    </View>
-
+                  </View>
+                  
                     {/* Table Body */}
                     <View style={styles.tableBody}>
                       {stones.map((stone, index) => (
@@ -1609,107 +1609,107 @@ const PricingScreen = ({ route, navigation }) => {
                         <View style={[styles.tableCell, styles.tableCellNumber]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {index + 1}
-                          </CustomText>
+                      </CustomText>
                         </View>
 
                         {/* Type Dropdown */}
                         <View style={[styles.tableCell, styles.tableCellType]}>
-                          {renderTypeDropdown(index, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '')}
-                        </View>
-
+                    {renderTypeDropdown(index, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '')}
+                  </View>
+                  
                         {/* Color */}
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.Color || ''}
-                            onChangeText={(value) => handleUpdateStone(index, 'Color', value)}
+                    value={stone.Color || ''}
+                    onChangeText={(value) => handleUpdateStone(index, 'Color', value)}
                             placeholder="Color"
-                            placeholderTextColor={colors.textLight}
-                          />
-                        </View>
-
+                    placeholderTextColor={colors.textLight}
+                  />
+                      </View>
+                  
                         {/* Shape */}
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.Shape || ''}
-                            onChangeText={(value) => handleUpdateStone(index, 'Shape', value)}
+                    value={stone.Shape || ''}
+                    onChangeText={(value) => handleUpdateStone(index, 'Shape', value)}
                             placeholder="Shape"
-                            placeholderTextColor={colors.textLight}
-                          />
-                        </View>
-
+                    placeholderTextColor={colors.textLight}
+                  />
+                    </View>
+                    
                         {/* MM Size */}
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.MM || ''}
-                            onChangeText={(value) => handleUpdateStone(index, 'MM', value)}
-                            placeholder="0"
-                            placeholderTextColor={colors.textLight}
-                            keyboardType="numeric"
-                          />
-                        </View>
-
+                    value={stone.MM || ''}
+                    onChangeText={(value) => handleUpdateStone(index, 'MM', value)}
+                          placeholder="0"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="numeric"
+                  />
+                      </View>
+                  
                         {/* Sieve Size */}
                         <View style={[styles.tableCell, styles.tableCellMedium]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.Sieve || ''}
-                            onChangeText={(value) => handleUpdateStone(index, 'Sieve', value)}
-                            placeholder="0"
-                            placeholderTextColor={colors.textLight}
-                            keyboardType="numeric"
-                          />
-                        </View>
-
+                    value={stone.Sieve || ''}
+                    onChangeText={(value) => handleUpdateStone(index, 'Sieve', value)}
+                          placeholder="0"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="numeric"
+                  />
+                    </View>
+                    
                         {/* Weight */}
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.Weight || '0'}
-                            onChangeText={(value) => handleUpdateStone(index, 'Weight', value)}
-                            placeholder="0"
-                            placeholderTextColor={colors.textLight}
-                            keyboardType="numeric"
-                          />
-                        </View>
-
+                    value={stone.Weight || '0'}
+                    onChangeText={(value) => handleUpdateStone(index, 'Weight', value)}
+                    placeholder="0"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="numeric"
+                  />
+                      </View>
+                  
                         {/* Pieces */}
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.Pieces || '0'}
-                            onChangeText={(value) => handleUpdateStone(index, 'Pieces', value)}
-                            placeholder="0"
-                            placeholderTextColor={colors.textLight}
-                            keyboardType="numeric"
-                          />
-                        </View>
-
+                    value={stone.Pieces || '0'}
+                    onChangeText={(value) => handleUpdateStone(index, 'Pieces', value)}
+                    placeholder="0"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="numeric"
+                        />
+                    </View>
+                    
                         {/* Carat Weight */}
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.CaratWeight || '0'}
-                            onChangeText={(value) => handleUpdateStone(index, 'CaratWeight', value)}
-                            placeholder="0"
-                            placeholderTextColor={colors.textLight}
-                            keyboardType="numeric"
-                          />
-                        </View>
-
+                    value={stone.CaratWeight || '0'}
+                    onChangeText={(value) => handleUpdateStone(index, 'CaratWeight', value)}
+                    placeholder="0"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="numeric"
+                  />
+                      </View>
+                  
                         {/* Price */}
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
+                  <TextInput
                             style={styles.tableInput}
-                            value={stone.Price || '0'}
-                            onChangeText={(value) => handleUpdateStone(index, 'Price', value)}
-                            placeholder="0"
-                            placeholderTextColor={colors.textLight}
-                            keyboardType="numeric"
-                          />
-                        </View>
+                    value={stone.Price || '0'}
+                    onChangeText={(value) => handleUpdateStone(index, 'Price', value)}
+                    placeholder="0"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="numeric"
+                        />
+                </View>
 
                         {/* Delete Action */}
                         <View style={[styles.tableCell, styles.tableCellAction]}>
@@ -1719,8 +1719,8 @@ const PricingScreen = ({ route, navigation }) => {
                           >
                             <Icon name="delete" size={18} color={colors.error} />
                           </TouchableOpacity>
-                        </View>
-                      </View>
+                    </View>
+                  </View>
                       ))}
                     </View>
                   </View>

@@ -173,8 +173,20 @@ export const api = createApi({
           const userName = decodedToken.Name || decodedToken.name || decodedToken.username || decodedToken.Username || 
                           decodedToken.fullName || decodedToken.FullName || decodedToken.firstName || decodedToken.FirstName;
           
+          // Extract ClientId from token (for role 4 - Client users)
+          const clientId = decodedToken.ClientId || decodedToken.clientId || decodedToken.ClientID || decodedToken.clientID;
+          
           if (__DEV__) {
-            console.log('All token fields:', Object.keys(decodedToken));
+            console.log('🔐 [LOGIN] All token fields:', Object.keys(decodedToken));
+            console.log('🔐 [LOGIN] Decoded token:', JSON.stringify(decodedToken, null, 2));
+            if (roleNumber === 4) {
+              console.log('🔐 [LOGIN] Client user (Role 4) detected');
+              console.log('🔐 [LOGIN] ClientId from token:', clientId);
+              if (!clientId) {
+                console.warn('⚠️ [LOGIN] WARNING: ClientId not found in token for Role 4 user!');
+                console.warn('⚠️ [LOGIN] Token fields available:', Object.keys(decodedToken));
+              }
+            }
           }
           
           return {
@@ -186,6 +198,7 @@ export const api = createApi({
               roleNumber: roleNumber, // Store role ID for filtering
               roleId: roleNumber, // Alias for consistency
               name: userName, // Extract name from token
+              clientId: clientId, // Store ClientId for role 4 users
               iat: decodedToken.iat,
             },
           };
@@ -1024,14 +1037,33 @@ export const api = createApi({
     getDashboardData: builder.query({
       queryFn: async (arg, { dispatch, getState }, extraOptions, baseQuery) => {
         try {
-          // Extract role and userId from argument
+          // Extract role, userId, and clientId from argument
           const role = typeof arg === 'object' ? arg?.role : arg;
           const userId = typeof arg === 'object' ? arg?.userId : undefined;
-
-          console.log('🔍 [DASHBOARD DEBUG] Role:', arg);
+          const clientId = typeof arg === 'object' ? arg?.clientId : undefined;
           
           const isAdmin = role === 'admin' || role === 'AD';
-          const isClient = role === 'client' || role === 'CL';
+          const isClient = role === 'client' || role === 'CL' || role === 4;
+          const roleNumber = typeof arg === 'object' ? arg?.roleNumber || arg?.roleId : undefined;
+          const isClientRole = isClient || roleNumber === 4;
+          
+          // For Client users (role 4), use ClientId from token, not userId
+          const clientFilterId = isClientRole && clientId ? clientId : (isClientRole ? userId : undefined);
+          
+          if (__DEV__ && isClientRole) {
+            console.log('🔐 [DASHBOARD] Client user detected:', {
+              role,
+              roleNumber,
+              userId,
+              clientId,
+              clientFilterId,
+            });
+            if (!clientFilterId) {
+              console.error('❌ [DASHBOARD] ERROR: clientFilterId is missing!');
+              console.error('❌ [DASHBOARD] clientId from arg:', clientId);
+              console.error('❌ [DASHBOARD] userId from arg:', userId);
+            }
+          }
           
           // Build aggregate URLs
           // For status counts: use aggregate endpoint with appropriate filters
@@ -1039,9 +1071,13 @@ export const api = createApi({
           if (isAdmin) {
             // Admin: Get all status counts
             statusAggregateUrl = '/api/enquiries/aggregate?groupBy=status';
-          } else if (isClient) {
-            // Client: Filter by clientId
-            statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${userId}`;
+          } else if (isClientRole && clientFilterId) {
+            // Client: Filter by ClientId from token
+            statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${encodeURIComponent(clientFilterId)}`;
+            if (__DEV__) {
+              console.log('🔐 [DASHBOARD] Using ClientId filter:', clientFilterId);
+              console.log('🔐 [DASHBOARD] Full API URL:', statusAggregateUrl);
+            }
           } else {
             // Coral/CAD: Filter by assignedTo
             statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&assignedTo=${encodeURIComponent(userId)}`;
@@ -1063,8 +1099,12 @@ export const api = createApi({
           if (isAdmin) {
             // For admin, fetch a reasonable number of enquiries for revenue calculation
             enquiriesSearchUrl = '/api/enquiries/search?page=1&limit=1000';
-          } else if (isClient) {
-            enquiriesSearchUrl = `/api/enquiries/search?page=1&limit=100&clientId=${encodeURIComponent(userId)}`;
+          } else if (isClientRole && clientFilterId) {
+            // Client: Use ClientId from token
+            enquiriesSearchUrl = `/api/enquiries/search?page=1&limit=100&clientId=${encodeURIComponent(clientFilterId)}`;
+            if (__DEV__) {
+              console.log('🔐 [DASHBOARD] Enquiries search using ClientId:', clientFilterId);
+            }
           } else {
             enquiriesSearchUrl = `/api/enquiries/search?page=1&limit=100&assignedTo=${encodeURIComponent(userId)}`;
           }

@@ -490,6 +490,24 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 8,
   },
+  adminActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    minWidth: 120,
+  },
+  adminActionButtonPrimary: {
+    backgroundColor: colors.primary,
+  },
+  adminActionText: {
+    color: colors.textWhite,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    marginLeft: 8,
+  },
 });
 
 export default ClientsListScreen;

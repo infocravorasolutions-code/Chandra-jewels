@@ -19,11 +19,13 @@ import { useUploadReferenceImagesMutation, useUpdateEnquiryMutation } from '../.
 import { useAuth } from '../../context/AuthContext';
 import { useUsers } from '../../features/users/usersHooks';
 import { getUserName } from '../../utils/userUtils';
+import SuccessAnimation from '../../components/common/SuccessAnimation';
 
 const AddEnquiryStep2Screen = ({ route, navigation }) => {
   const { formData, enquiry: enquiryToEdit, isEditMode, enquiryId } = route.params;
   const { user } = useAuth();
   const [selectedImages, setSelectedImages] = useState([]);
+  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   
   // Fetch and cache users for name resolution
   useUsers();
@@ -223,7 +225,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       // For new enquiries: Upload reference images and then show success
       if (!isEditMode && enquiryId) {
         // Upload images if any are selected
-        if (selectedImages.length > 0) {
+      if (selectedImages.length > 0) {
           console.log('📤 Uploading reference images to enquiry:', enquiryId);
           try {
             await uploadReferenceImages({
@@ -251,24 +253,11 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           console.log('ℹ️ No reference images selected - enquiry created without images');
         }
 
-        // Success - enquiry was already created in Step 1, images uploaded (if any) in Step 2
-        Alert.alert(
-          'Enquiry Created',
-          'Your enquiry has been created successfully!',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                // Navigate back to enquiries list
-                navigation.navigate('MainTabs', { screen: 'Enquiries' });
-              },
-            },
-          ],
-          { cancelable: false }
-        );
+        // Success - show Lottie animation instead of Alert
+        setShowSuccessAnimation(true);
         return;
-      }
-
+          }
+          
       // For edit mode: Upload new images if any are selected
       if (isEditMode && enquiryToEdit?.id && selectedImages.length > 0) {
         try {
@@ -776,6 +765,17 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
                 </Text>
               </TouchableOpacity>
             </View>
+      {/* Success Animation Modal */}
+      <SuccessAnimation
+        visible={showSuccessAnimation}
+        onComplete={() => {
+          setShowSuccessAnimation(false);
+          // Navigate back to enquiries list
+          navigation.navigate('MainTabs', { screen: 'Enquiries' });
+        }}
+        title="Enquiry Created"
+        message="Your enquiry has been created successfully!"
+      />
     </ScrollView>
   );
 };
