@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -25,6 +25,14 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   const isEditMode = false;
   const { user } = useAuth();
   const [createEnquiry, { isLoading: isCreatingEnquiry }] = useCreateEnquiryMutation();
+  
+  // Check if user is a client
+  const roleLower = user?.role?.toLowerCase();
+  const isClient = 
+    roleLower === 'client' ||
+    roleLower === 'cl' ||
+    user?.roleId === 4 ||
+    user?.roleNumber === 4;
   
   // Initialize form data for new enquiry
   const getInitialFormData = () => {
@@ -90,15 +98,40 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   const users = Array.isArray(usersData) ? usersData : [];
 
   // Create assigned-to options from users (exclude clients by role)
-  const assignedToOptions = users
-    .filter(user => {
-      const roleString = String(user.role || '').toLowerCase();
-      return roleString !== 'client';
-    })
-    .map(user => ({
-      label: user.name || user.email || 'Unknown',
-      value: user.id || user._id,
-    }));
+  // Filter based on selected status:
+  // - If status is "CAD", show only users with role === 3
+  // - If status is "Coral", show only users with role === 2
+  // - Otherwise, show all non-client users
+  const assignedToOptions = useMemo(() => {
+    const statusLower = String(formData.status || '').toLowerCase();
+    
+    return users
+      .filter(user => {
+        const roleString = String(user.role || '').toLowerCase();
+        const roleNumber = typeof user.role === 'number' ? user.role : parseInt(user.role);
+        
+        // Always exclude clients
+        if (roleString === 'client' || roleNumber === 4) {
+          return false;
+        }
+        
+        // Filter based on status
+        if (statusLower=='cad') {
+          // Show only users with role === 3 for CAD status
+          return roleNumber === 3;
+        } else if (statusLower=='coral') {
+          // Show only users with role === 2 for Coral status
+          return roleNumber === 2;
+        }
+        
+        // For other statuses, show all non-client users
+        return true;
+      })
+      .map(user => ({
+        label: user.name || user.email || 'Unknown',
+        value: user.id || user._id,
+      }));
+  }, [users, formData.status]);
 
   // Get status options from API (cached)
   const statusOptionsFromAPI = useStatusOptions();
@@ -106,6 +139,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // Filter out "All Status" option for create/edit forms (only needed in filters)
   const statusOptions = statusOptionsFromAPI.filter(opt => opt.value !== 'all');
 
+  console.log('🔍 Status Options:', statusOptionsFromAPI);
 
   // Initialize form on mount (only for creating new enquiries)
   useEffect(() => {
@@ -113,11 +147,48 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     setFormData(initialData);
   }, []); // Only run once on mount
 
+  // Ensure status is always "Enquiry Created" for client users
+  useEffect(() => {
+    if (isClient && formData.status !== 'Enquiry Created') {
+      setFormData(prev => ({ ...prev, status: 'Enquiry Created' }));
+    }
+  }, [isClient, formData.status]);
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: null }));
+    }
+  };
+
+  // Handle status change - clear assignedTo if current user is not valid for new status
+  const handleStatusChange = (newStatus) => {
+    handleInputChange('status', newStatus);
+    
+    // If there's a currently assigned user, check if they're still valid for the new status
+    if (formData.assignedTo) {
+      const statusLower = String(newStatus || '').toLowerCase();
+      const assignedUser = users.find(u => (u.id || u._id) === formData.assignedTo);
+      
+      if (assignedUser) {
+        const roleNumber = typeof assignedUser.role === 'number' 
+          ? assignedUser.role 
+          : parseInt(assignedUser.role);
+        
+        // Check if assigned user is still valid for the new status
+        let isValid = true;
+        if (statusLower.includes('cad')) {
+          isValid = roleNumber === 3;
+        } else if (statusLower.includes('coral')) {
+          isValid = roleNumber === 2;
+        }
+        
+        // Clear assignedTo if user is not valid for the new status
+        if (!isValid) {
+          handleInputChange('assignedTo', '');
+        }
+      }
     }
   };
 
@@ -132,7 +203,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       newErrors.clientId = 'Client is required';
     }
 
-    if (!formData.status) {
+    // For client users, status is always "Enquiry Created" (set automatically)
+    // For other users, status is required
+    if (!isClient && !formData.status) {
       newErrors.status = 'Status is required';
     }
 
@@ -247,12 +320,15 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       
       const mappedPriority = priorityMap[formData.priority?.toLowerCase()] || priorityMap[formData.priority] || formData.priority || 'Normal';
 
+      // For client users, status is always "Enquiry Created"
+      const enquiryStatus = isClient ? 'Enquiry Created' : (formData.status || 'Enquiry Created');
+
       // Prepare enquiry data according to API structure (without images)
       const enquiryData = {
         Name: formData.title || '',
         ClientId: formData.clientId || user.id,
-        AssignedTo: formData.assignedTo || null,
-        Status: formData.status || 'Enquiry Created',
+        AssignedTo: isClient ? null : (formData.assignedTo || null), // Client users can't assign
+        Status: enquiryStatus,
         Priority: mappedPriority,
         Quantity: parseInt(formData.quantity) || 1,
         Metal: {
@@ -475,32 +551,34 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* Row 4: Status and Assigned To */}
-        <View style={styles.formRow}>
-          <View style={styles.formField}>
-            {renderDropdown(
-              'Status*',
-              formData.status,
-              statusOptions,
-              (value) => handleInputChange('status', value),
-              showStatusDropdown,
-              () => setShowStatusDropdown(!showStatusDropdown)
-            )}
-            {errors.status && (
-              <Text style={styles.errorText}>{errors.status}</Text>
-            )}
+        {/* Row 4: Status and Assigned To - Hidden for client users */}
+        {!isClient && (
+          <View style={styles.formRow}>
+            <View style={styles.formField}>
+              {renderDropdown(
+                'Status*',
+                formData.status,
+                statusOptions,
+                (value) => handleStatusChange(value),
+                showStatusDropdown,
+                () => setShowStatusDropdown(!showStatusDropdown)
+              )}
+              {errors.status && (
+                <Text style={styles.errorText}>{errors.status}</Text>
+              )}
+            </View>
+            <View style={styles.formField}>
+              {renderDropdown(
+                'Assigned To',
+                formData.assignedTo,
+                assignedToOptions,
+                (value) => handleInputChange('assignedTo', value),
+                showAssignedToDropdown,
+                () => setShowAssignedToDropdown(!showAssignedToDropdown)
+              )}
+            </View>
           </View>
-          <View style={styles.formField}>
-            {renderDropdown(
-              'Assigned To',
-              formData.assignedTo,
-              assignedToOptions,
-              (value) => handleInputChange('assignedTo', value),
-              showAssignedToDropdown,
-              () => setShowAssignedToDropdown(!showAssignedToDropdown)
-            )}
-          </View>
-        </View>
+        )}
 
         {/* Row 5: Stone Type (full width) */}
         <View style={styles.formRow}>

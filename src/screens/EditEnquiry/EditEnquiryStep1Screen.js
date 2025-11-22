@@ -287,6 +287,40 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     }
   };
 
+  // Handle status change - clear assignedTo if current user is not valid for new status
+  const handleStatusChange = (newStatus) => {
+    handleInputChange('status', newStatus);
+    
+    // If there's a currently assigned user, check if they're still valid for the new status
+    if (formData.assignedTo) {
+      const statusLower = String(newStatus || '').toLowerCase();
+      const assignedUser = users.find(u => {
+        const userId = String(u.id || u._id).trim();
+        const assignedToId = String(formData.assignedTo).trim();
+        return userId === assignedToId;
+      });
+      
+      if (assignedUser) {
+        const roleNumber = typeof assignedUser.role === 'number' 
+          ? assignedUser.role 
+          : parseInt(assignedUser.role);
+        
+        // Check if assigned user is still valid for the new status
+        let isValid = true;
+        if (statusLower.includes('cad')) {
+          isValid = roleNumber === 3;
+        } else if (statusLower.includes('coral')) {
+          isValid = roleNumber === 2;
+        }
+        
+        // Clear assignedTo if user is not valid for the new status
+        if (!isValid) {
+          handleInputChange('assignedTo', '');
+        }
+      }
+    }
+  };
+
   const validateForm = () => {
     const newErrors = {};
 
@@ -518,21 +552,42 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   ];
 
   // Create assigned-to options from users (exclude clients by role) - memoized to prevent recreation
+  // Filter based on selected status:
+  // - If status is "CAD", show only users with role === 3
+  // - If status is "Coral", show only users with role === 2
+  // - Otherwise, show all non-client users
   const assignedToOptions = useMemo(() => {
+    const statusLower = String(formData.status || '').toLowerCase();
+    
     const options = users
-    .filter(user => {
-      const roleString = String(user.role || '').toLowerCase();
-      return roleString !== 'client';
-    })
-    .map(user => ({
-      label: user.name || user.email || 'Unknown',
+      .filter(user => {
+        const roleString = String(user.role || '').toLowerCase();
+        const roleNumber = typeof user.role === 'number' ? user.role : parseInt(user.role);
+        
+        // Always exclude clients
+        if (roleString === 'client' || roleNumber === 4) {
+          return false;
+        }
+        
+        // Filter based on status
+        if (statusLower=='cad') {
+          // Show only users with role === 3 for CAD status
+          return roleNumber === 3;
+        } else if (statusLower=='coral') {
+          // Show only users with role === 2 for Coral status
+          return roleNumber === 2;
+        }
+        
+        // For other statuses, show all non-client users
+        return true;
+      })
+      .map(user => ({
+        label: user.name || user.email || 'Unknown',
         value: String(user.id || user._id).trim(), // Ensure value is a string
       }));
     
-    
-    
     return options;
-  }, [users]);
+  }, [users, formData.status]);
 
   // Get status options from API (cached)
   const statusOptionsFromAPI = useStatusOptions();
@@ -698,7 +753,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
               'Status*',
               formData.status,
               statusOptions,
-              (value) => handleInputChange('status', value),
+              (value) => handleStatusChange(value),
               showStatusDropdown,
               () => setShowStatusDropdown(!showStatusDropdown),
               [] // No users needed for status

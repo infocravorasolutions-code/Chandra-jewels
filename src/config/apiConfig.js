@@ -11,10 +11,10 @@ import { Platform } from 'react-native';
 // Set these to true/false to control which URL is used
 
 // Force production URL even in development (useful for testing production API)
-export const USE_PRODUCTION_URL = true;
+export const USE_PRODUCTION_URL = false;
 
 // Use custom URL (set CUSTOM_API_URL below)
-export const USE_CUSTOM_URL = false;
+export const USE_CUSTOM_URL = true;
 
 // Use physical device IP instead of emulator localhost
 // Set to true if testing on physical Android device

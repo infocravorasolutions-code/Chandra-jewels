@@ -49,6 +49,8 @@ export const useStatuses = (options = {}) => {
 export const useStatusOptions = () => {
   const { user } = useAuth();
   const { statuses } = useStatuses();
+
+  console.log('🔍 Statuses:', statuses);
   
   const isDesigner = user?.role === 'coral' || user?.role === 'cad';
   

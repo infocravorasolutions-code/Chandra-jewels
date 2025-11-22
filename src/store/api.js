@@ -84,7 +84,7 @@ export const api = createApi({
       providesTags: ['Statuses'],
       transformResponse: (data) => {
         let statuses = [];
-        
+        console.log('🔍 Data:', data);
         // Handle array response
         if (Array.isArray(data)) {
           statuses = data.map(status => ({
@@ -1027,6 +1027,8 @@ export const api = createApi({
           // Extract role and userId from argument
           const role = typeof arg === 'object' ? arg?.role : arg;
           const userId = typeof arg === 'object' ? arg?.userId : undefined;
+
+          console.log('🔍 [DASHBOARD DEBUG] Role:', arg);
           
           const isAdmin = role === 'admin' || role === 'AD';
           const isClient = role === 'client' || role === 'CL';
@@ -1039,7 +1041,7 @@ export const api = createApi({
             statusAggregateUrl = '/api/enquiries/aggregate?groupBy=status';
           } else if (isClient) {
             // Client: Filter by clientId
-            statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${encodeURIComponent(userId)}`;
+            statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${userId}`;
           } else {
             // Coral/CAD: Filter by assignedTo
             statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&assignedTo=${encodeURIComponent(userId)}`;
