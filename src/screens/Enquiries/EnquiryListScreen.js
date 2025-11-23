@@ -109,6 +109,9 @@ const EnquiryListScreen = ({ navigation }) => {
   const prefetchingPageRef = useRef(null);
   const [clientNameOverrides, setClientNameOverrides] = useState({});
   const fetchingClientIdsRef = useRef(new Set());
+  const flatListRef = useRef(null);
+  const scrollPositionRef = useRef(0);
+  const scrollPositionKey = 'enquiryListScrollPosition';
   
   const resolvedFilters = useMemo(() => {
     const normalizedFilters = {
@@ -317,6 +320,113 @@ const EnquiryListScreen = ({ navigation }) => {
     
     fetchEnquiries({ pageToLoad: 1, append: false }).catch(() => {});
   }, [user, fetchEnquiries]);
+
+  // Track previous filter values to detect changes
+  const prevFiltersRef = useRef({ status: null, priority: null, clientId: null, searchQuery: null });
+  
+  // Clear scroll position when filters change (so user starts from top with new filters)
+  useEffect(() => {
+    const currentFilters = {
+      status: filters.status,
+      priority: filters.priority,
+      clientId: filters.clientId,
+      searchQuery: searchQuery,
+    };
+    
+    // Check if filters actually changed (not on initial mount)
+    const filtersChanged = 
+      prevFiltersRef.current.status !== currentFilters.status ||
+      prevFiltersRef.current.priority !== currentFilters.priority ||
+      prevFiltersRef.current.clientId !== currentFilters.clientId ||
+      prevFiltersRef.current.searchQuery !== currentFilters.searchQuery;
+    
+    if (filtersChanged && prevFiltersRef.current.status !== null && flatListRef.current) {
+      // Scroll to top when filters change
+      flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+      scrollPositionRef.current = 0;
+      AsyncStorage.removeItem(scrollPositionKey).catch(() => {});
+      hasRestoredScrollRef.current = false; // Allow restore after filter change
+    }
+    
+    // Update previous filters
+    prevFiltersRef.current = currentFilters;
+  }, [filters.status, filters.priority, filters.clientId, searchQuery]);
+
+  // Save scroll position to AsyncStorage
+  const saveScrollPosition = useCallback(async (offsetY) => {
+    try {
+      scrollPositionRef.current = offsetY;
+      await AsyncStorage.setItem(scrollPositionKey, String(offsetY));
+      if (__DEV__) {
+        console.log('💾 [ENQUIRY LIST] Saved scroll position:', offsetY);
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('Failed to save scroll position:', error);
+      }
+    }
+  }, []);
+
+  // Restore scroll position from AsyncStorage
+  const restoreScrollPosition = useCallback(async () => {
+    try {
+      const savedPosition = await AsyncStorage.getItem(scrollPositionKey);
+      if (savedPosition && flatListRef.current) {
+        const offsetY = parseFloat(savedPosition);
+        if (!isNaN(offsetY) && offsetY > 0) {
+          scrollPositionRef.current = offsetY;
+          // Use setTimeout to ensure FlatList is fully rendered
+          setTimeout(() => {
+            if (flatListRef.current) {
+              flatListRef.current.scrollToOffset({ offset: offsetY, animated: false });
+              if (__DEV__) {
+                console.log('📍 [ENQUIRY LIST] Restored scroll position:', offsetY);
+              }
+            }
+          }, 200);
+        }
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('Failed to restore scroll position:', error);
+      }
+    }
+  }, []);
+
+  // Handle scroll events to track position
+  const handleScroll = useCallback((event) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    scrollPositionRef.current = offsetY;
+  }, []);
+
+  // Restore scroll position when data is loaded (only once on mount)
+  const hasRestoredScrollRef = useRef(false);
+  useEffect(() => {
+    if (!loading && displayEnquiries && Array.isArray(displayEnquiries) && displayEnquiries.length > 0 && !hasRestoredScrollRef.current) {
+      hasRestoredScrollRef.current = true;
+      restoreScrollPosition();
+    }
+  }, [loading, displayEnquiries, restoreScrollPosition]);
+
+  // Clear all filters when component unmounts (user navigates away)
+  useEffect(() => {
+    return () => {
+      // Save final scroll position before unmounting
+      if (scrollPositionRef.current > 0) {
+        saveScrollPosition(scrollPositionRef.current);
+      }
+      // Reset restore flag so scroll can be restored when returning
+      hasRestoredScrollRef.current = false;
+      // Cleanup function runs when component unmounts
+      dispatch(clearFilters());
+      dispatch(setSearchQuery(''));
+      dispatch(setSelectedStatus('All'));
+      dispatch(setSelectedClient('All'));
+      if (__DEV__) {
+        console.log('🧹 [ENQUIRY LIST] Clearing all filters on unmount');
+      }
+    };
+  }, [dispatch, saveScrollPosition]);
 
   useEffect(() => {
     const missingClientIds = new Set();
@@ -559,7 +669,7 @@ const EnquiryListScreen = ({ navigation }) => {
       return;
     }
 
-    if (displayEnquiries.length >= PREFETCH_TARGET) {
+    if (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length >= PREFETCH_TARGET) {
       return;
     }
 
@@ -737,16 +847,17 @@ const EnquiryListScreen = ({ navigation }) => {
   // Debug: Log loading states (only on significant changes, not every render)
   useEffect(() => {
     if (__DEV__ && (loading || isLoadingMore)) {
+      const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
       console.log('📊 Loading States:', {
         isLoadingMore,
         loading,
         hasMore,
         currentPage,
         totalPages,
-        enrichedCount: displayEnquiries.length,
+        enrichedCount: displayEnquiriesLength,
       });
     }
-  }, [isLoadingMore, loading, hasMore, currentPage, totalPages, displayEnquiries.length]);
+  }, [isLoadingMore, loading, hasMore, currentPage, totalPages, displayEnquiries]);
   
   // Render enquiry card item for FlatList
   const renderEnquiryItem = ({ item: enquiry }) => {
@@ -823,10 +934,11 @@ const EnquiryListScreen = ({ navigation }) => {
     const hasMoreData = hasMore;
     
     // Check if currently loading more data
-    const isCurrentlyLoading = isLoadingMore || (loading && displayEnquiries.length > 0 && currentPage > 1);
+    const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
+    const isCurrentlyLoading = isLoadingMore || (loading && displayEnquiriesLength > 0 && currentPage > 1);
     
     // Don't show anything if no data at all
-    if (displayEnquiries.length === 0) {
+    if (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiriesLength === 0) {
       return null;
     }
     
@@ -990,6 +1102,12 @@ const EnquiryListScreen = ({ navigation }) => {
   const onRefresh = async () => {
     try {
       setRefreshing(true);
+      // Scroll to top on refresh
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+      }
+      scrollPositionRef.current = 0;
+      await AsyncStorage.removeItem(scrollPositionKey);
       await fetchEnquiries({ pageToLoad: 1, append: false });
     } catch (error) {
       if (__DEV__) {
@@ -1413,7 +1531,8 @@ const EnquiryListScreen = ({ navigation }) => {
   );
 
   // Show full screen loader only on initial load (when no data yet)
-  if (loading && displayEnquiries.length === 0) {
+  const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
+  if (loading && displayEnquiriesLength === 0) {
     return <AnimatedLogoLoader size={80} />;
   }
 
@@ -1457,7 +1576,8 @@ const EnquiryListScreen = ({ navigation }) => {
       {user?.role === 'admin' && renderClientChips()}
 
       <FlatList
-        data={displayEnquiries.filter(enquiry => enquiry && enquiry.id)}
+        ref={flatListRef}
+        data={(displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries : []).filter(enquiry => enquiry && enquiry.id)}
         renderItem={renderEnquiryItem}
         keyExtractor={(item, index) => {
           // Use stable IDs - fallback to index only if absolutely necessary
@@ -1474,12 +1594,22 @@ const EnquiryListScreen = ({ navigation }) => {
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={[
           styles.flatListContent,
-          displayEnquiries.length === 0 && styles.flatListContentEmpty
+          (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length === 0) && styles.flatListContentEmpty
         ]}
         style={styles.flatList}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        onScroll={handleScroll}
+        onScrollEndDrag={(event) => {
+          const offsetY = event.nativeEvent.contentOffset.y;
+          saveScrollPosition(offsetY);
+        }}
+        onMomentumScrollEnd={(event) => {
+          const offsetY = event.nativeEvent.contentOffset.y;
+          saveScrollPosition(offsetY);
+        }}
+        scrollEventThrottle={16}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.1} // Lower threshold to load more aggressively and display all enquiries
         numColumns={2}
