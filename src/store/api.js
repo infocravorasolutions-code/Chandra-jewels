@@ -38,6 +38,7 @@ export const api = createApi({
     'StatusStatistics',
     'Roles',
     'Statuses',
+    'StoneTypes',
     'Notification',
     'DeviceToken',
   ],
@@ -101,6 +102,32 @@ export const api = createApi({
         }
         
         return statuses;
+      },
+    }),
+
+    // Get Stone Types list from API
+    getStoneTypes: builder.query({
+      query: () => '/api/codelists/StoneTypes',
+      providesTags: ['StoneTypes'],
+      transformResponse: (data) => {
+        let stoneTypes = [];
+        
+        // Handle array response
+        if (Array.isArray(data)) {
+          stoneTypes = data.map(stoneType => ({
+            label: stoneType.label || stoneType.Label || stoneType.name || stoneType.Name || stoneType.code || stoneType.Code || stoneType.value || stoneType.Value,
+            value: stoneType.value || stoneType.Value || stoneType.code || stoneType.Code || stoneType.name || stoneType.Name,
+          }));
+        }
+        // Handle object response with data property
+        else if (data?.data && Array.isArray(data.data)) {
+          stoneTypes = data.data.map(stoneType => ({
+            label: stoneType.label || stoneType.Label || stoneType.name || stoneType.Name || stoneType.code || stoneType.Code || stoneType.value || stoneType.Value,
+            value: stoneType.value || stoneType.Value || stoneType.code || stoneType.Code || stoneType.name || stoneType.Name,
+          }));
+        }
+        
+        return stoneTypes;
       },
     }),
 
@@ -978,6 +1005,10 @@ export const api = createApi({
       invalidatesTags: (result, error, { clientId }) => [
         { type: 'Client', id: clientId },
         'Client',
+        // Also invalidate all Enquiry caches since pricing affects enquiry pricing calculations
+        'Enquiry',
+        // Invalidate Dashboard cache as it may show pricing-related data
+        'Dashboard',
       ],
     }),
 
@@ -1312,8 +1343,9 @@ export const api = createApi({
             const approvalPendingEnquiries = categorizedCounts['Approval Pending'] || 0;
             const completedEnquiries = categorizedCounts['Completed'] || statusCounts.completed || 0;
             
-            // Use client aggregate count if available, otherwise fallback to clients API
-            const totalClients = totalClientsFromAggregate > 0 ? totalClientsFromAggregate : clients.length;
+            // Prefer total count from clients API (includes clients without enquiries)
+            // Fallback to aggregate length only when clients API fails/empty
+            const totalClients = clients.length > 0 ? clients.length : totalClientsFromAggregate;
             
             // Revenue calculation still needs enquiry data (limited fetch for completed enquiries)
             const revenue = normalizedEnquiries
@@ -1398,19 +1430,19 @@ export const api = createApi({
           } else if (role === 'coral' || role === 'cad') {
             const assignedEnquiries = categorizedCounts['All'] || statusCounts.total || normalizedEnquiries.length;
             const completedDesigns = categorizedCounts['Completed'] || statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
-            // For "Pending Designs", specifically count "Coral" status (not all pending statuses)
-            const pendingDesigns = specificStatusCounts['coral'] || 0;
+            // For "Pending Designs", count "CAD" status (but clicking will filter by "Coral")
+            const pendingDesigns = specificStatusCounts['cad'] || 0;
             const approvalPendingDesigns = categorizedCounts['Approval Pending'] || 0;
             const averageRating = 4.8; // TODO: Fetch from API when available
             
             console.log('🔍 [DASHBOARD DEBUG] DESIGNER DASHBOARD CALCULATIONS (from aggregate API):');
             console.log('🔍 [DASHBOARD DEBUG] - Role:', role, '(should use aggregate endpoint)');
             console.log('🔍 [DASHBOARD DEBUG] - Assigned Enquiries:', assignedEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs (Coral status only):', pendingDesigns, '(from specificStatusCounts["coral"]:', specificStatusCounts['coral'], '| categorizedCounts.Pending:', categorizedCounts['Pending'], ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs (CAD status count):', pendingDesigns, '(from specificStatusCounts["cad"]:', specificStatusCounts['cad'], '| categorizedCounts.Pending:', categorizedCounts['Pending'], ')');
             console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Designs:', approvalPendingDesigns, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], ')');
             console.log('🔍 [DASHBOARD DEBUG] - Completed Designs:', completedDesigns, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Coral + Approval Pending + Completed):', pendingDesigns + approvalPendingDesigns + completedDesigns);
-            console.log('🔍 [DASHBOARD DEBUG] - Note: Sum may not match assigned if there are other statuses (CAD, Enquiry Created, etc.)');
+            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (CAD + Approval Pending + Completed):', pendingDesigns + approvalPendingDesigns + completedDesigns);
+            console.log('🔍 [DASHBOARD DEBUG] - Note: Sum may not match assigned if there are other statuses (Coral, Enquiry Created, etc.)');
             console.log('🔍 [DASHBOARD DEBUG] - All status counts:', JSON.stringify(specificStatusCounts, null, 2));
             
             return {
@@ -1465,7 +1497,7 @@ export const api = createApi({
 
     // ==================== FILE UPLOAD ====================
     uploadDesign: builder.mutation({
-      queryFn: async ({ enquiryId, designType, version, images, excel }, { dispatch }, extraOptions, baseQuery) => {
+      queryFn: async ({ enquiryId, designType, version, images, excel, designCode }, { dispatch }, extraOptions, baseQuery) => {
         // Note: invalidatesTags is set in the mutation definition below
         try {
           const token = await AsyncStorage.getItem('token');
@@ -1483,6 +1515,15 @@ export const api = createApi({
           
           // Add version as text
           formData.append('version', version.toString());
+          
+          // Add design code (CoralCode or CadCode) if provided
+          if (designCode && designCode.trim()) {
+            if (designType === 'coral') {
+              formData.append('CoralCode', designCode.trim());
+            } else if (designType === 'cad') {
+              formData.append('CadCode', designCode.trim());
+            }
+          }
           
           // Add images as files
           if (images && images.length > 0) {
@@ -1923,9 +1964,14 @@ export const api = createApi({
 
     // ==================== METAL PRICES ====================
     getMetalPrices: builder.query({
-      query: (useCache = false) => {
+      query: (useCache = false, useFullEndpoint = false) => {
         const cacheBuster = useCache ? '' : `?t=${Date.now()}`;
-        return `/api/metal-prices/latest${cacheBuster}`;
+        // Option to use full endpoint instead of /latest (for debugging)
+        const endpoint = useFullEndpoint ? `/api/metal-prices${cacheBuster}` : `/api/metal-prices/latest${cacheBuster}`;
+        if (__DEV__ && useFullEndpoint) {
+          console.log('📥 Using full endpoint instead of /latest');
+        }
+        return endpoint;
       },
       providesTags: ['MetalPrice'],
       transformResponse: (data) => {
@@ -2002,27 +2048,139 @@ export const api = createApi({
     }),
 
     addMetalPrice: builder.mutation({
-      query: (data) => ({
+      query: (data) => {
+        // Convert date to ISO format with time (backend expects: "2025-11-08T00:00:00.000Z")
+        let dateValue = data.date || new Date().toISOString().split('T')[0];
+        
+        // If date is just YYYY-MM-DD, convert to exact format: "YYYY-MM-DDTHH:mm:ss.sssZ"
+        if (dateValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          dateValue = `${dateValue}T00:00:00.000Z`;
+        } else if (!dateValue.includes('T')) {
+          try {
+            const date = new Date(dateValue);
+            if (!isNaN(date.getTime())) {
+              dateValue = date.toISOString();
+            }
+          } catch (e) {
+            const today = new Date().toISOString().split('T')[0];
+            dateValue = `${today}T00:00:00.000Z`;
+          }
+        }
+        
+        return {
         url: '/api/metal-prices',
         method: 'POST',
         body: {
           metal: data.metal || data.metalType,
           price: data.price,
-          date: data.date || new Date().toISOString().split('T')[0],
+            date: dateValue,
         },
-      }),
+        };
+      },
       invalidatesTags: ['MetalPrice'],
     }),
 
     updateMetalPrice: builder.mutation({
-      query: ({ metal, ...data }) => ({
+      query: ({ metal, ...data }) => {
+        // Convert date to ISO format with time (backend expects: "2025-11-08T00:00:00.000Z")
+        let dateValue = data.date || new Date().toISOString().split('T')[0];
+        
+        // If date is just YYYY-MM-DD, convert to exact format: "YYYY-MM-DDTHH:mm:ss.sssZ"
+        if (dateValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          // Create date string in exact format without timezone conversion
+          dateValue = `${dateValue}T00:00:00.000Z`;
+        } else if (!dateValue.includes('T')) {
+          // If it's not in the right format, try to convert it
+          try {
+            const date = new Date(dateValue);
+            if (!isNaN(date.getTime())) {
+              dateValue = date.toISOString();
+            }
+          } catch (e) {
+            // Fallback: use today's date in correct format
+            const today = new Date().toISOString().split('T')[0];
+            dateValue = `${today}T00:00:00.000Z`;
+          }
+        }
+        
+        const payload = {
+          date: dateValue,
+          price: data.price,
+        };
+        if (__DEV__) {
+          console.log(`📤 API: Updating ${metal} price:`, payload);
+          console.log(`📤 API: Date format: "${dateValue}"`);
+          console.log(`📤 API: Full URL: /api/metal-prices/${metal}`);
+        }
+        return {
         url: `/api/metal-prices/${metal}`,
         method: 'PUT',
-        body: {
-          date: data.date || new Date().toISOString().split('T')[0],
-          price: data.price,
-        },
-      }),
+          body: payload,
+        };
+      },
+      transformResponse: (response, meta, arg) => {
+        if (__DEV__) {
+          console.log(`📥 API: ${arg.metal} update raw response:`, JSON.stringify(response, null, 2));
+          console.log(`📥 API: Response type:`, typeof response);
+          console.log(`📥 API: Response is null:`, response === null);
+          
+          // Check HTTP status from meta
+          const status = meta?.response?.status;
+          console.log(`📥 API: HTTP Status Code:`, status);
+          
+          if (status === 200) {
+            console.log(`✅ PUT Request SUCCEEDED (200 OK)`);
+          } else if (status === 204) {
+            console.log(`✅ PUT Request SUCCEEDED (204 No Content - normal for PUT)`);
+          } else if (status >= 400) {
+            console.error(`❌ PUT Request FAILED with status:`, status);
+          } else {
+            console.log(`⚠️ PUT Request status:`, status);
+          }
+          
+          console.log(`📥 API: Response Headers:`, meta?.response?.headers);
+          console.log(`📥 API: Full Meta:`, JSON.stringify(meta, null, 2));
+        }
+        
+        // Backend returns full document with arrays: { gold: [{date, price}, ...], silver: [...], platinum: [...] }
+        // Process it the same way as GET endpoint to extract latest prices
+        if (response && typeof response === 'object' && (response.gold || response.silver || response.platinum)) {
+          const processedResponse = {};
+          const metals = ['gold', 'silver', 'platinum'];
+          
+          metals.forEach(metalKey => {
+            const metalArray = response[metalKey];
+            if (Array.isArray(metalArray) && metalArray.length > 0) {
+              // Sort by date (newest first) and get the latest entry
+              const sortedByDate = [...metalArray].sort((a, b) => {
+                const dateA = new Date(a.date || a.Date || 0);
+                const dateB = new Date(b.date || b.Date || 0);
+                return dateB - dateA; // Descending order (latest first)
+              });
+              const latestEntry = sortedByDate[0];
+              
+              processedResponse[metalKey] = {
+                price: latestEntry.price || latestEntry.Price || 0,
+                unit: 'per gram',
+                lastUpdated: latestEntry.date || latestEntry.Date || new Date().toISOString(),
+              };
+              
+              if (__DEV__) {
+                console.log(`💰 Processed ${metalKey}:`, processedResponse[metalKey]);
+              }
+            }
+          });
+          
+          if (__DEV__) {
+            console.log(`📊 Processed Response:`, JSON.stringify(processedResponse, null, 2));
+          }
+          
+          // Return the full response so frontend can access all metals
+          return response;
+        }
+        
+        return response;
+      },
       invalidatesTags: ['MetalPrice'],
     }),
 
@@ -2680,15 +2838,29 @@ export const api = createApi({
 
     // ==================== PUSH NOTIFICATION TOKENS ====================
     registerPushToken: builder.mutation({
-      query: ({ token, device }) => ({
-        url: '/api/users/registerPushToken',
-        method: 'POST',
-        body: {
+      query: ({ token, device }) => {
+        const payload = {
           token,
           platform: device?.platform || Platform.OS,
           osVersion: device?.osVersion || Platform.Version?.toString(),
-        },
-      }),
+        };
+        
+        // Log the exact payload being sent (for debugging)
+        if (__DEV__) {
+          console.log('[API] registerPushToken - Sending payload:', {
+            tokenLength: token?.length,
+            tokenPreview: token?.substring(0, 30) + '...',
+            platform: payload.platform,
+            osVersion: payload.osVersion,
+          });
+        }
+        
+        return {
+          url: '/api/users/registerPushToken',
+          method: 'POST',
+          body: payload,
+        };
+      },
       invalidatesTags: [{ type: 'DeviceToken', id: 'CURRENT' }],
     }),
 
@@ -2924,5 +3096,6 @@ export const {
   // Code Lists
   useGetRolesQuery,
   useGetStatusesQuery,
+  useGetStoneTypesQuery,
 } = api;
 

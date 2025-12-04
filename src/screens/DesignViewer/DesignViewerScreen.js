@@ -208,39 +208,22 @@ const DesignViewerScreen = ({ route, navigation }) => {
         setImageLoadingError(true);
       }
     } catch (error) {
-      console.error('Error details:', JSON.stringify(error, null, 2));
+      if (__DEV__) {
+        console.error('Error loading image:', error);
+      }
       setImageLoadingError(true);
     }
   };
 
-  // Comprehensive logging on mount and when data changes
-  useEffect(() => {
-    console.log('Route params:', JSON.stringify(route.params, null, 2));
-    console.log('enquiry keys:', enquiry ? Object.keys(enquiry) : 'null');
-    
-    if (enquiry) {
-      
-      if (enquiry.Cad) {
-        console.log('Enquiry.Cad type:', Array.isArray(enquiry.Cad) ? 'Array' : typeof enquiry.Cad);
-        console.log('Enquiry.Cad length:', Array.isArray(enquiry.Cad) ? enquiry.Cad.length : 'N/A');
-        if (Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0) {
-          console.log('First Cad item:', JSON.stringify(enquiry.Cad[0], null, 2));
-        }
-      }
-      
-      if (enquiry.Coral) {
-        console.log('Enquiry.Coral type:', Array.isArray(enquiry.Coral) ? 'Array' : typeof enquiry.Coral);
-        console.log('Enquiry.Coral length:', Array.isArray(enquiry.Coral) ? enquiry.Coral.length : 'N/A');
-      }
-    }
-  }, []);
 
   // Get enquiry ID for refetching
   const enquiryId = enquiry?.id || enquiry?._id;
   
-  // Refetch enquiry data when screen comes into focus (to get updated descriptions)
+  // Refetch enquiry data when screen comes into focus (to get updated descriptions and pricing)
   const { data: fetchedEnquiryData, refetch: refetchEnquiry } = useGetEnquiryByIdQuery(enquiryId, {
     skip: !enquiryId,
+    refetchOnFocus: true, // Refetch when screen comes into focus to get latest data (including pricing)
+    refetchOnMountOrArgChange: true, // Refetch when enquiryId changes
   });
   
   // Use fetched enquiry data if available, otherwise use route params
@@ -252,21 +235,65 @@ const DesignViewerScreen = ({ route, navigation }) => {
     ? (originalData?.Coral || currentEnquiry?.Coral || [])
     : (originalData?.Cad || currentEnquiry?.Cad || []);
   
-  // Filter versions for clients - only show versions with ShowToClient: true
+  // Filter versions for clients - show versions with ShowToClient: true OR versions uploaded by the client
   if (isClient && Array.isArray(designData)) {
     const originalLength = designData.length;
-    designData = designData.filter(version => 
-      version?.ShowToClient === true || version?.showToClient === true || version?.IsVisibleToClient === true || version?.isVisibleToClient === true
-    );
+    const currentUserId = user?.id || user?._id || user?.userId;
+    const clientId = user?.clientId || user?.ClientId;
     
-    if (__DEV__) {
-      console.log('🔍 Filtered versions:', designData.map(v => ({
-        Version: v?.Version || v?.version,
-        ShowToClient: v?.ShowToClient || v?.showToClient,
-        IsVisibleToClient: v?.IsVisibleToClient || v?.isVisibleToClient
-      })));
-    }
-  }
+    // Get StatusHistory to check who uploaded each version
+    const statusHistory = originalData?.StatusHistory || currentEnquiry?.StatusHistory || [];
+    
+    designData = designData.filter(version => {
+      // Show if marked as visible to client
+      const isVisibleToClient = version?.ShowToClient === true || 
+                                version?.showToClient === true || 
+                                version?.IsVisibleToClient === true || 
+                                version?.isVisibleToClient === true;
+      
+      // Check if this version was uploaded by the client
+      // Match version by CreatedDate and check StatusHistory for "AddedBy"
+      const versionCreatedDate = version?.CreatedDate || version?.createdDate;
+      const versionNumber = version?.Version || version?.version;
+      
+      let isUploadedByClient = false;
+      
+      if (versionCreatedDate && statusHistory.length > 0) {
+        // Find StatusHistory entry that matches this version upload
+        const uploadEntry = statusHistory.find(entry => {
+          const entryDate = entry?.Timestamp || entry?.timestamp;
+          const entryDetails = entry?.Details || entry?.details || '';
+          const matchesVersion = entryDetails.includes(`${designType === 'coral' ? 'Coral' : 'CAD'} Version ${versionNumber}`) ||
+                                entryDetails.includes(`${designType === 'coral' ? 'Coral' : 'CAD'} version ${versionNumber}`);
+          
+          // Check if dates are close (within a few seconds) or if details match
+          if (matchesVersion || (entryDate && versionCreatedDate)) {
+            const entryAddedBy = entry?.AddedBy || entry?.addedBy;
+            if (entryAddedBy) {
+              return String(entryAddedBy) === String(currentUserId) ||
+                     String(entryAddedBy) === String(clientId) ||
+                     String(entryAddedBy) === String(user?.id) ||
+                     String(entryAddedBy) === String(user?._id);
+            }
+          }
+          return false;
+        });
+        
+        isUploadedByClient = !!uploadEntry;
+      }
+      
+      // Also check if version has AddedBy field directly
+      const versionAddedBy = version?.AddedBy || version?.addedBy;
+      if (versionAddedBy && !isUploadedByClient) {
+        isUploadedByClient = String(versionAddedBy) === String(currentUserId) ||
+                            String(versionAddedBy) === String(clientId) ||
+                            String(versionAddedBy) === String(user?.id) ||
+                            String(versionAddedBy) === String(user?._id);
+      }
+      
+      return isVisibleToClient || isUploadedByClient;
+    });
+  }, [designData, user, currentUserId, clientId]);
 
   // Get selected design version (use versionIndex if provided, otherwise use latest)
   const selectedDesign = versionIndex !== undefined && versionIndex >= 0 && versionIndex < designData.length
@@ -309,12 +336,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
                        version?.UploadedDate ||
                        version?.uploadedDate;
     
-    // Debug: Log all possible timestamp fields
-    if (__DEV__) {
-      console.log('🔍 Version Object Keys:', Object.keys(version || {}));
-      console.log('🔍 CreatedDate:', version?.CreatedDate);  // ← Backend uses this!
-      console.log('🔍 Full Version Object:', JSON.stringify(version, null, 2));
-    }
     
     if (!uploadTime) {
       // If no timestamp, assume it's old (can't delete)
@@ -344,40 +365,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
     // Can delete if less than or equal to 10 minutes
     const canDelete = diffMinutes <= 10;
     
-    if (__DEV__) {
-      console.log('⏰ Upload Time (raw):', uploadTime);
-      console.log('⏰ Upload Time (parsed):', upload.toISOString());
-      console.log('⏰ Current Time:', now.toISOString());
-      console.log('⏰ Time Difference:', diffMinutes.toFixed(2), 'minutes');
-    }
-    
     return canDelete;
   };
   
-  // Comprehensive debug logging
-  useEffect(() => {
-    console.log('designData type:', Array.isArray(designData) ? 'Array' : typeof designData);
-    console.log('designData length:', Array.isArray(designData) ? designData.length : 'N/A');
-    
-    if (Array.isArray(designData)) {
-      console.log('designData array:', JSON.stringify(designData, null, 2));
-    }
-    
-    if (selectedDesign) {
-      console.log('selectedDesign keys:', Object.keys(selectedDesign));
-      console.log('selectedDesign full object:', JSON.stringify(selectedDesign, null, 2));
-    }
-    
-    console.log('images type:', Array.isArray(images) ? 'Array' : typeof images);
-    
-    if (images.length > 0) {
-      console.log('All images:', JSON.stringify(images, null, 2));
-      if (currentImageIndex < images.length) {
-        console.log('Current image object:', JSON.stringify(images[currentImageIndex], null, 2));
-      }
-    } else {
-    }
-  }, [designType, designData, selectedDesign, images, currentImageIndex]);
   
   // Get code for Excel filename
   const designCode = designType === 'coral'
@@ -442,7 +432,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
     }
     
     const currentImage = images[currentImageIndex];
-    console.log('Current image object:', JSON.stringify(currentImage, null, 2));
     
     // Use centralized API base URL
 
@@ -450,8 +439,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
       const imageKey = currentImage.Key || currentImage.key || '';
       const imageId = currentImage.Id || currentImage.id || currentImage._id || '';
       const imageUrl = currentImage.Url || currentImage.url || currentImage.URI || currentImage.uri || '';
-      
-      console.log('- Full object keys:', Object.keys(currentImage));
       
       // If full URL is provided, use it directly
       if (imageUrl && (imageUrl.startsWith('http') || imageUrl.startsWith('https'))) {
@@ -470,13 +457,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
           `${API_BASE_URL}/api/enquiries/${enquiry?.id || enquiry?._id}/files/${encodedKey}`,
         ];
         
-        possibleUrls.forEach((url, index) => {
-        });
-        
         // Return first URL (most likely)
-        const url = possibleUrls[0];
-        console.log('✅ Generated image URL (using Key):', url);
-        return url;
+        return possibleUrls[0];
       }
       
       // Try ID-based endpoints
@@ -487,16 +469,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
           `${API_BASE_URL}/api/enquiries/files/${imageId}`,
         ];
         
-        console.log('Possible URLs (using Id):');
-        possibleUrls.forEach((url, index) => {
-        });
-        
-        const url = possibleUrls[0];
-        console.log('✅ Generated image URL (using Id):', url);
-        return url;
+        return possibleUrls[0];
       }
-      
-      console.log('Available keys:', Object.keys(currentImage));
     } else if (typeof currentImage === 'string') {
       
       if (currentImage.startsWith('http') || currentImage.startsWith('https')) {
@@ -505,9 +479,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
       
       // Try enquiries/files endpoint for string keys
       const encodedKey = encodeURIComponent(currentImage);
-      const url = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
-      console.log('✅ Generated image URL (from string):', url);
-      return url;
+      return `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
     }
     
     return null;
@@ -1170,11 +1142,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
         }
       }
     } catch (error) {
-      console.error('Error details:', {
-        message: error.message,
-        statusCode: error.statusCode,
-        fullError: error,
-      });
+      if (__DEV__) {
+        console.error('Error details:', error);
+      }
       
       // Provide more helpful error message
       let errorMessage = 'Failed to download Excel file.';
@@ -1541,17 +1511,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
                                        errorObj.message?.includes('401') ||
                                        String(errorObj).includes('401');
                           
-                          console.error('❌ Image component load ERROR:', {
-                            error: errorObj,
-                            errorCode: errorObj.code,
-                            errorMessage: errorObj.message,
-                            fullError: String(errorObj),
-                            httpCode: is401 ? '401 Unauthorized' : 'Unknown',
-                            url: currentImageUrl,
-                            headers: imageHeaders,
-                            imageIndex: currentImageIndex,
-                            imageObject: images[currentImageIndex],
-                          });
+                          if (__DEV__) {
+                            console.error('❌ Image component load ERROR:', errorObj);
+                          }
                           
                           // If 401, trigger fetch fallback immediately
                           if (is401) {
@@ -1588,24 +1550,16 @@ const DesignViewerScreen = ({ route, navigation }) => {
                         style={styles.image}
                         resizeMode="contain"
                         onLoadStart={() => {
-                          console.log('Data URI starts with:', imageDataUri.substring(0, 50));
-                          console.log('Data URI format check:', imageDataUri.startsWith('data:image'));
+                          // Image loading started
                         }}
                         onLoad={() => {
                           setImageLoadingError(false);
                         }}
                         onError={(error) => {
                           const errorObj = error.nativeEvent?.error || {};
-                          console.error('❌ Data URI image load ERROR:', {
-                            error: errorObj,
-                            errorCode: errorObj.code,
-                            errorMessage: errorObj.message,
-                            fullErrorString: String(errorObj),
-                            dataUriLength: imageDataUri?.length,
-                            dataUriPreview: imageDataUri?.substring(0, 150),
-                            dataUriStartsWith: imageDataUri?.substring(0, 50),
-                            isValidDataUri: imageDataUri?.startsWith('data:image'),
-                          });
+                          if (__DEV__) {
+                            console.error('❌ Data URI image load ERROR:', errorObj);
+                          }
                           setImageLoadingError(true);
                         }}
                         onLoadEnd={() => {
@@ -1800,9 +1754,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
                 {(() => {
                   const canDelete = canDeleteVersion(selectedDesign);
                   
-                  if (__DEV__) {
-                    console.log('🔘 Button will be:', canDelete ? 'ENABLED (Red)' : 'DISABLED (Gray)');
-                  }
                   
                   return canDelete ? (
                     <TouchableOpacity

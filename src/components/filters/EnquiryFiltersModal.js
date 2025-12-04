@@ -15,7 +15,7 @@ import Icon from '../common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { useClients } from '../../features/clients/clientsHooks';
-import { useGetUsersQuery } from '../../store/api';
+import { useGetUsersQuery, useGetStoneTypesQuery } from '../../store/api';
 import { useStatusOptions } from '../../features/statuses/statusesHooks';
 
 const EnquiryFiltersModal = ({
@@ -92,6 +92,9 @@ const EnquiryFiltersModal = ({
 
   // Get status options from API (cached) - already includes "All Status" and role-based filtering
   const statusOptions = useStatusOptions();
+  
+  // Fetch stone types from API
+  const { data: stoneTypesData = [] } = useGetStoneTypesQuery();
 
   const priorityOptions = [
     { label: 'All Priority', value: 'all' },
@@ -137,15 +140,10 @@ const EnquiryFiltersModal = ({
       })),
   ];
 
+  // Stone type options from API with "All Stone Types" option for filters
   const stoneTypeOptions = [
     { label: 'All Stone Types', value: 'all' },
-    { label: 'LabGrown', value: 'LabGrown' },
-    { label: 'CVDLabGrown', value: 'CVDLabGrown' },
-    { label: 'NaturalRegular', value: 'NaturalRegular' },
-    { label: 'NaturalLower', value: 'NaturalLower' },
-    { label: 'Synthetic', value: 'Synthetic' },
-    { label: 'LabTreatedDiamond', value: 'LabTreatedDiamond' },
-    { label: 'ColoredLabTreatedNat', value: 'ColoredLabTreatedNat' },
+    ...(stoneTypesData || []),
   ];
 
   const metalColorOptions = [

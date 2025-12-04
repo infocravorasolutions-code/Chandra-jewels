@@ -192,6 +192,7 @@ const UploadDesignScreen = ({ route, navigation }) => {
         version: selectedVersion.toString(),
         images: selectedImages,
         excel: selectedExcel || null,
+        designCode: designCode.trim(), // Pass the Coral/CAD code to save it
       }).unwrap();
 
       Alert.alert(

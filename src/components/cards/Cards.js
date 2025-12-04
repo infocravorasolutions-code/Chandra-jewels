@@ -111,10 +111,144 @@ export const CompactEnquiryCard = ({
     return priorityStr.toUpperCase();
   };
   
+  // Metal color to abbreviation mapping
+  const getMetalAbbreviation = (color) => {
+    if (!color) return '';
+    
+    const colorStr = String(color).toLowerCase().trim();
+    
+    // Individual color abbreviations
+    const colorMap = {
+      // Yellow Gold variations
+      'yellow gold': 'YG',
+      'yellowgold': 'YG',
+      'yg': 'YG',
+      'gold': 'YG', // Default gold is yellow gold
+      
+      // Rose Gold variations
+      'rose gold': 'RG',
+      'rosegold': 'RG',
+      'rg': 'RG',
+      'pink gold': 'RG',
+      'pinkgold': 'RG',
+      'red gold': 'RG',
+      'redgold': 'RG',
+      
+      // White Gold variations
+      'white gold': 'WG',
+      'whitegold': 'WG',
+      'wg': 'WG',
+      
+      // Platinum
+      'platinum': 'PT',
+      'pt': 'PT',
+      
+      // Silver
+      'silver': 'AG',
+      'ag': 'AG',
+      '925': 'AG', // Sterling silver
+      'sterling silver': 'AG',
+    };
+    
+    // Helper function to extract color abbreviation
+    const extractColorAbbrev = (text) => {
+      for (const [key, abbrev] of Object.entries(colorMap)) {
+        if (text.includes(key)) {
+          return abbrev;
+        }
+      }
+      return null;
+    };
+    
+    // Check for two tone (2 colors)
+    if (colorStr.includes('two tone') || colorStr.includes('twotone') || colorStr.includes('two-tone')) {
+      const colors = [];
+      
+      // Extract individual colors
+      if (colorStr.includes('yellow') || colorStr.includes('gold') && !colorStr.includes('white') && !colorStr.includes('rose')) {
+        colors.push('YG');
+      }
+      if (colorStr.includes('rose') || colorStr.includes('pink') || colorStr.includes('red gold')) {
+        colors.push('RG');
+      }
+      if (colorStr.includes('white')) {
+        colors.push('WG');
+      }
+      if (colorStr.includes('platinum')) {
+        colors.push('PT');
+      }
+      if (colorStr.includes('silver') || colorStr.includes('925')) {
+        colors.push('AG');
+      }
+      
+      // If we found specific colors, show them
+      if (colors.length >= 2) {
+        return `2T ${colors.join('/')}`;
+      } else if (colors.length === 1) {
+        // Only one color found, but it's two tone - show as 2T with the color
+        return `2T ${colors[0]}`;
+      } else {
+        // Generic two tone
+        return '2T';
+      }
+    }
+    
+    // Check for three tone (3 colors)
+    if (colorStr.includes('three tone') || colorStr.includes('threetone') || colorStr.includes('three-tone') || colorStr.includes('3 tone')) {
+      const colors = [];
+      
+      // Extract individual colors
+      if (colorStr.includes('yellow') || (colorStr.includes('gold') && !colorStr.includes('white') && !colorStr.includes('rose'))) {
+        colors.push('YG');
+      }
+      if (colorStr.includes('rose') || colorStr.includes('pink') || colorStr.includes('red gold')) {
+        colors.push('RG');
+      }
+      if (colorStr.includes('white')) {
+        colors.push('WG');
+      }
+      if (colorStr.includes('platinum')) {
+        colors.push('PT');
+      }
+      if (colorStr.includes('silver') || colorStr.includes('925')) {
+        colors.push('AG');
+      }
+      
+      // If we found specific colors, show them
+      if (colors.length >= 2) {
+        return `3T ${colors.join('/')}`;
+      } else if (colors.length === 1) {
+        // Only one color found, but it's three tone - show as 3T with the color
+        return `3T ${colors[0]}`;
+      } else {
+        // Generic three tone
+        return '3T';
+      }
+    }
+    
+    // Single color - direct match
+    if (colorMap[colorStr]) {
+      return colorMap[colorStr];
+    }
+    
+    // Partial match for single colors
+    for (const [key, abbrev] of Object.entries(colorMap)) {
+      if (colorStr.includes(key)) {
+        return abbrev;
+      }
+    }
+    
+    // If no match found, return original (or first 2 uppercase letters as fallback)
+    return colorStr.length >= 2 ? colorStr.substring(0, 2).toUpperCase() : colorStr.toUpperCase();
+  };
+  
   // Extract metal color and quality
   const metalColor = enquiry.Metal?.Color || enquiry.metal?.color || enquiry.metalColor || 'Gold';
   const metalQuality = enquiry.Metal?.Quality || enquiry.metal?.quality || enquiry.metalQuality || '';
-  const metalDisplay = metalQuality ? `${metalColor} ${metalQuality}` : metalColor;
+  const metalAbbreviation = getMetalAbbreviation(metalColor);
+  const metalDisplay = metalQuality && metalAbbreviation 
+    ? `${metalQuality} ${metalAbbreviation}` 
+    : metalAbbreviation || metalColor;
   
   // Get assigned to - resolve ID to name if needed (only if not designer)
   const assignedToId = enquiry.AssignedTo || enquiry.assignedTo;
@@ -128,8 +262,77 @@ export const CompactEnquiryCard = ({
   // Get category
   const category = enquiry.Category || enquiry.category || 'N/A';
   
-  // Format dates
-  const createdDate = formatDate ? formatDate(enquiry.createdAt || new Date().toISOString()) : (enquiry.createdAt ? new Date(enquiry.createdAt).toLocaleDateString() : 'N/A');
+  // Format dates - Created date should always show actual date, not relative
+  const formatCreatedDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'N/A';
+      
+      // Format as dd/mm/yy
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = String(date.getFullYear()).slice(-2); // Last 2 digits of year
+      
+      return `${day}/${month}/${year}`;
+    } catch (error) {
+      return 'N/A';
+    }
+  };
+  
+  // Get created date from multiple possible fields
+  const getCreatedDate = () => {
+    // Check normalized field first
+    if (enquiry.createdAt) {
+      return enquiry.createdAt;
+    }
+    
+    // Check original data fields
+    if (enquiry._originalData) {
+      // Check StatusHistory for earliest timestamp
+      if (enquiry._originalData.StatusHistory && Array.isArray(enquiry._originalData.StatusHistory) && enquiry._originalData.StatusHistory.length > 0) {
+        const sortedHistory = [...enquiry._originalData.StatusHistory].sort((a, b) => {
+          const dateA = new Date(a.Timestamp || a.timestamp || a.Date || a.date || a.CreatedDate || 0);
+          const dateB = new Date(b.Timestamp || b.timestamp || b.Date || b.date || b.CreatedDate || 0);
+          return dateA - dateB; // Sort ascending to get earliest
+        });
+        const earliestTimestamp = sortedHistory[0]?.Timestamp || sortedHistory[0]?.timestamp || sortedHistory[0]?.Date || sortedHistory[0]?.date || sortedHistory[0]?.CreatedDate;
+        if (earliestTimestamp) {
+          return earliestTimestamp;
+        }
+      }
+      
+      // Check other possible date fields in original data
+      if (enquiry._originalData.CreatedDate) {
+        return enquiry._originalData.CreatedDate;
+      }
+      if (enquiry._originalData.createdAt) {
+        return enquiry._originalData.createdAt;
+      }
+    }
+    
+    // Check StatusHistory directly on enquiry
+    if (enquiry.StatusHistory && Array.isArray(enquiry.StatusHistory) && enquiry.StatusHistory.length > 0) {
+      const sortedHistory = [...enquiry.StatusHistory].sort((a, b) => {
+        const dateA = new Date(a.Timestamp || a.timestamp || a.Date || a.date || a.CreatedDate || 0);
+        const dateB = new Date(b.Timestamp || b.timestamp || b.Date || b.date || b.CreatedDate || 0);
+        return dateA - dateB; // Sort ascending to get earliest
+      });
+      const earliestTimestamp = sortedHistory[0]?.Timestamp || sortedHistory[0]?.timestamp || sortedHistory[0]?.Date || sortedHistory[0]?.date || sortedHistory[0]?.CreatedDate;
+      if (earliestTimestamp) {
+        return earliestTimestamp;
+      }
+    }
+    
+    // Check other possible fields
+    if (enquiry.CreatedDate) {
+      return enquiry.CreatedDate;
+    }
+    
+    return null;
+  };
+  
+  const createdDate = formatCreatedDate(getCreatedDate());
   const shippingDate = formatDate && enquiry.deadline ? formatDate(enquiry.deadline) : (enquiry.ShippingDate || enquiry.deadline ? new Date(enquiry.ShippingDate || enquiry.deadline).toLocaleDateString() : 'N/A');
   
   // Format price (only for client role)
@@ -413,29 +616,31 @@ export const CompactEnquiryCard = ({
       </View>
 
       <View style={styles.compactCardContent}>
-        {/* Row 1: Name and Priority */}
-        <View style={styles.compactRow1}>
-          <Text style={styles.compactName} numberOfLines={1}>
+        {/* Name, Priority and Status - Header section */}
+        <View style={styles.compactHeaderSection}>
+          <Text style={styles.compactName} numberOfLines={2}>
             {enquiry.title || enquiry.Name || 'Untitled Enquiry'}
           </Text>
-          <View style={[styles.compactPriorityBadge, { backgroundColor: priorityColor + '15' }]}>
-            <Text style={[styles.compactPriorityText, { color: priorityColor }]} numberOfLines={1}>
-              {formatPriorityForDisplay(enquiryPriority)}
-            </Text>
+          <View style={styles.compactBadgesRow}>
+            <View style={[styles.compactPriorityBadge, { backgroundColor: priorityColor + '15' }]}>
+              <Text style={[styles.compactPriorityText, { color: priorityColor }]} numberOfLines={1}>
+                {formatPriorityForDisplay(enquiryPriority)}
+              </Text>
+            </View>
+            <View style={[styles.compactStatusBadge, { backgroundColor: statusColor + '15' }]}>
+              <Text style={[styles.compactStatusText, { color: statusColor }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>
+                {formatStatusForDisplay(enquiryStatus)}
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* Row 2: Status (right aligned) */}
-        <View style={styles.compactRow2}>
-          <View style={[styles.compactStatusBadge, { backgroundColor: statusColor + '15' }]}>
-            <Text style={[styles.compactStatusText, { color: statusColor }]} numberOfLines={1}>
-              {formatStatusForDisplay(enquiryStatus)}
-            </Text>
+        {/* Row 1: AssignedTo | Client */}
+        <View style={styles.compactRow1}>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Assigned to</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>{assignedTo}</Text>
           </View>
-        </View>
-
-        {/* Row 3: Client Name (replacing Created Date position) */}
-        <View style={styles.compactRow3}>
           <View style={styles.compactFieldGroup}>
             <Text style={styles.compactLabelText}>Client</Text>
             <Text style={styles.compactValueText} numberOfLines={1}>
@@ -444,53 +649,35 @@ export const CompactEnquiryCard = ({
           </View>
         </View>
 
-        {/* Row 4: Assigned To and Shipping (hidden for designers) */}
-        {!isDesigner && (
-          <View style={styles.compactRow4}>
-            <View style={styles.compactFieldGroup}>
-              <Text style={styles.compactLabelText}>Assigned to</Text>
-              <Text style={styles.compactValueText} numberOfLines={1}>{assignedTo}</Text>
-            </View>
-            <View style={styles.compactFieldGroup}>
-              <Text style={styles.compactLabelText}>Shipping</Text>
-              <Text style={styles.compactValueText} numberOfLines={1}>
-                {shippingDate !== 'N/A' ? shippingDate : 'N/A'}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Row 5: Metal, Category, Stone type */}
-        <View style={styles.compactRow5}>
-          <View style={styles.compactMaterialItem}>
-            <Text style={styles.compactMaterialLabel}>Metal</Text>
-            <Text style={styles.compactMaterialValue} numberOfLines={1}>{metalDisplay}</Text>
-          </View>
-          <View style={styles.compactMaterialItem}>
-            <Text style={styles.compactMaterialLabel}>Category</Text>
-            <Text style={styles.compactMaterialValue} numberOfLines={1}>{category}</Text>
-          </View>
-          <View style={styles.compactMaterialItem}>
-            <Text style={styles.compactMaterialLabel}>Stone type</Text>
-            <Text style={styles.compactMaterialValue} numberOfLines={1}>{stoneType}</Text>
-          </View>
-        </View>
-
-        {/* Row 6: Created Date (moved down) */}
-        <View style={styles.compactRow3}>
+        {/* Row 2: CreatedDate | ShippingDate */}
+        <View style={styles.compactRow2}>
           <View style={styles.compactFieldGroup}>
             <Text style={styles.compactLabelText}>Created</Text>
-            <Text style={styles.compactValueText}>{createdDate}</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>{createdDate}</Text>
+          </View>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Shipping</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>
+              {shippingDate !== 'N/A' ? shippingDate : 'N/A'}
+            </Text>
           </View>
         </View>
 
-        {/* Row 7: Price (only for client) */}
-        {showPrice && (
-          <View style={styles.compactRow6}>
-            <Text style={styles.compactPriceLabel}>Price</Text>
-            <Text style={styles.compactPriceValue}>{price}</Text>
+        {/* Row 3: Metal | Category | Stone Type */}
+        <View style={styles.compactRow3}>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Metal</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>{metalDisplay}</Text>
           </View>
-        )}
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Category</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>{category}</Text>
+          </View>
+          <View style={styles.compactFieldGroup}>
+            <Text style={styles.compactLabelText}>Stone type</Text>
+            <Text style={styles.compactValueText} numberOfLines={1}>{stoneType}</Text>
+          </View>
+        </View>
 
         {/* Row 7: Design Progress - Design, CAD, Order placement */}
         {/* <View style={styles.compactRow7}>
@@ -1041,19 +1228,22 @@ const styles = StyleSheet.create({
   compactCardContent: {
     padding: 8,
   },
-  // Row 1: Name and Priority
-  compactRow1: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
+  // Header Section: Name, Priority and Status
+  compactHeaderSection: {
+    marginBottom: 6,
   },
   compactName: {
     fontSize: fonts.sm,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    flex: 1,
-    marginRight: 4,
+    marginBottom: 4,
+  },
+  compactBadgesRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    gap: 4,
+    flexWrap: 'wrap',
   },
   compactPriorityBadge: {
     paddingHorizontal: 6,
@@ -1065,27 +1255,39 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     letterSpacing: 0.3,
   },
-  // Row 2: Status
-  compactRow2: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginBottom: 6,
-  },
   compactStatusBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+    flex: 1,
+    minWidth: 0, // Allow shrinking
   },
   compactStatusText: {
     fontSize: 8,
     fontFamily: fonts.bold,
     letterSpacing: 0.3,
+    textAlign: 'center',
   },
-  // Row 3: Assigned to and Created
+  // Row 1: AssignedTo | Client
+  compactRow1: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+    gap: 4,
+  },
+  // Row 2: CreatedDate | ShippingDate
+  compactRow2: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+    gap: 4,
+  },
+  // Row 3: Metal | Category | Stone Type
   compactRow3: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 4,
+    gap: 4,
   },
   compactFieldGroup: {
     flex: 1,

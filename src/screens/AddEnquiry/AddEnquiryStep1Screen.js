@@ -15,7 +15,7 @@ import { Input, Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
-import { useGetUsersQuery, useCreateEnquiryMutation } from '../../store/api';
+import { useGetUsersQuery, useCreateEnquiryMutation, useGetStoneTypesQuery } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
 import { useStatusOptions } from '../../features/statuses/statusesHooks';
 import { useAuth } from '../../context/AuthContext';
@@ -43,7 +43,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       clientName: '',
       priority: 'Normal',
       category: 'Ring',
-      metalColor: 'White Gold',
+      metalColor: '', // Empty by default - optional field
       metalQuality: '10K',
       stoneType: 'NaturalRegular',
       quantity: '1',
@@ -61,7 +61,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     clientName: '',
     priority: 'Normal',
     category: 'Ring',
-    metalColor: 'White Gold',
+    metalColor: '', // Empty by default - optional field
     metalQuality: '10K',
     stoneType: 'NaturalRegular',
     quantity: '1',
@@ -135,6 +135,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   // Get status options from API (cached)
   const statusOptionsFromAPI = useStatusOptions();
+  
+  // Fetch stone types from API
+  const { data: stoneTypesData = [] } = useGetStoneTypesQuery();
   
   // Filter out "All Status" option for create/edit forms (only needed in filters)
   const statusOptions = statusOptionsFromAPI.filter(opt => opt.value !== 'all');
@@ -254,9 +257,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       newErrors.metalQuality = 'Metal Quality is required';
     }
 
-    if (!formData.metalColor) {
-      newErrors.metalColor = 'Metal Color is required';
-    }
+    // Metal Color is optional - no validation needed
 
     if (!formData.quantity.trim()) {
       newErrors.quantity = 'Quantity is required';
@@ -266,7 +267,11 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const renderDropdown = (label, value, options, onSelect, isVisible, onToggle) => (
+  const renderDropdown = (label, value, options, onSelect, isVisible, onToggle) => {
+    const selectedOption = value ? options.find(opt => opt.value === value) : null;
+    const displayText = selectedOption?.label || `Select ${label}`;
+    
+    return (
     <View style={styles.dropdownContainer}>
       <Text style={styles.dropdownLabel}>{label}</Text>
       <TouchableOpacity
@@ -274,8 +279,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         onPress={onToggle}
         activeOpacity={0.7}
       >
-        <Text style={styles.dropdownText}>
-          {options.find(opt => opt.value === value)?.label || `Select ${label}`}
+        <Text style={[styles.dropdownText, !value && styles.dropdownPlaceholder]}>
+          {displayText}
         </Text>
         <IconComponent name="arrow-drop-down" size={24} color={colors.textSecondary} />
       </TouchableOpacity>
@@ -293,16 +298,19 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         >
           <View style={styles.dropdownModal}>
             <ScrollView showsVerticalScrollIndicator={false}  style={{height: '100%'}}   >
-            {options.map((option) => (
+            {options.map((option) => {
+              const isSelected = value === option.value || (!value && option.value === '');
+              return (
               <TouchableOpacity
-                key={option.value}
+                key={option.value || 'none'}
                 activeOpacity={0.7}
                 style={[
                   styles.dropdownOption,
-                  value === option.value && styles.dropdownOptionSelected,
+                  isSelected && styles.dropdownOptionSelected,
                 ]}
                 onPress={() => {
-                  onSelect(option.value);
+                  // If "None" is selected, pass empty string
+                  onSelect(option.value === 'None' ? '' : option.value);
                   onToggle();
                 }}
               >
@@ -310,23 +318,25 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
                 <Text
                   style={[
                     styles.dropdownOptionText,
-                    value === option.value && styles.dropdownOptionTextSelected,
+                    isSelected && styles.dropdownOptionTextSelected,
                   ]}
                 >
                   {option.label}
                 </Text>
-                {value === option.value && (
+                {isSelected && (
                   <IconComponent name="check" size={20} color={colors.primary} />
                 )}
               </TouchableOpacity>
-            ))}
+            );
+            })}
               </ScrollView>
             
           </View>
         </TouchableOpacity>
       </Modal>
     </View>
-  );
+    );
+  };
 
   const handleNext = async () => {
     if (!validateForm()) {
@@ -369,7 +379,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         Priority: mappedPriority,
         Quantity: parseInt(formData.quantity) || 1,
         Metal: {
-          Color: formData.metalColor || 'White Gold',
+          Color: formData.metalColor && formData.metalColor.trim() ? formData.metalColor.trim() : null,
           Quality: formData.metalQuality || '10K',
         },
         StyleNumber: null,
@@ -460,6 +470,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   ];
 
   const metalColorOptions = [
+    { label: 'None', value: '' }, // Option to clear selection
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
     { label: 'Yellow Gold', value: 'Yellow Gold' },
@@ -477,15 +488,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Platinum', value: 'Platinum' },
   ];
 
-  const stoneTypeOptions = [
-    { label: 'LabGrown', value: 'LabGrown' },
-    { label: 'CVDLabGrown', value: 'CVDLabGrown' },
-    { label: 'NaturalRegular', value: 'NaturalRegular' },
-    { label: 'NaturalLower', value: 'NaturalLower' },
-    { label: 'Synthetic', value: 'Synthetic' },
-    { label: 'LabTreatedDiamond', value: 'LabTreatedDiamond' },
-    { label: 'ColoredLabTreatedNat', value: 'ColoredLabTreatedNat' },
-  ];
+  // Stone type options from API
+  const stoneTypeOptions = stoneTypesData || [];
 
   return (
     <ScrollView style={styles.container}>
@@ -665,15 +669,12 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
           <View style={styles.formField}>
             {renderDropdown(
-              'Metal Color*',
+              'Metal Color',
               formData.metalColor,
               metalColorOptions,
               (value) => handleInputChange('metalColor', value),
               showMetalColorDropdown,
               () => setShowMetalColorDropdown(!showMetalColorDropdown)
-            )}
-            {errors.metalColor && (
-              <Text style={styles.errorText}>{errors.metalColor}</Text>
             )}
           </View>
         </View>
@@ -853,6 +854,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     flex: 1,
+  },
+  dropdownPlaceholder: {
+    color: colors.textSecondary,
   },
   modalOverlay: {
     flex: 1,

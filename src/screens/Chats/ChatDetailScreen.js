@@ -587,28 +587,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
           <TouchableOpacity 
             style={styles.headerIconButton}
             onPress={() => {
-              // TODO: Add call functionality
-              alert.info('Info', 'Call functionality coming soon');
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="phone" size={20} color={colors.textWhite} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.headerIconButton}
-            onPress={() => {
-              // TODO: Add video call functionality
-              alert.info('Info', 'Video call functionality coming soon');
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="videocam" size={20} color={colors.textWhite} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.headerIconButton}
-            onPress={() => {
               // TODO: Add chat info/options
               alert.info('Chat Info', `Chat: ${title}\nClient: ${clientName}`);
             }}
@@ -661,14 +639,15 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   return (
-    <ImageBackground 
-      source={require('../../assets/images/doodle.png')} 
-      style={styles.container}
-      resizeMode="cover"
-    >
-      <View style={styles.backgroundOverlay}>
-        <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
-        {renderChatHeader()}
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <ImageBackground 
+        source={require('../../assets/images/doodle.png')} 
+        style={styles.container}
+        resizeMode="cover"
+      >
+        <View style={styles.backgroundOverlay}>
+          <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
+          {renderChatHeader()}
 
         <KeyboardAvoidingView
           style={styles.keyboardContainer}
@@ -819,10 +798,15 @@ const ChatDetailScreen = ({ route, navigation }) => {
         </TouchableOpacity>
       </Modal>
     </ImageBackground>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.primary,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.backgroundSecondary,

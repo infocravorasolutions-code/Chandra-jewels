@@ -30,19 +30,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   // Fetch and cache users for name resolution
   useUsers();
   
-  // Log when Step 2 screen loads
-  useEffect(() => {
-    console.log('📋 Received Form Data from Step 1:', JSON.stringify(formData, null, 2));
-    console.log('📋 Enquiry ID from Step 1:', enquiryId);
-    console.log('📋 Form Data Summary:', {
-      'Title': formData?.title,
-      'ClientId': formData?.clientId,
-      'Priority': formData?.priority,
-      'Category': formData?.category,
-      'StoneType': formData?.stoneType,
-      'EnquiryId': enquiryId,
-    });
-  }, []);
   
   // Redux mutations
   const [uploadReferenceImages, { isLoading: isUploading }] = useUploadReferenceImagesMutation();
@@ -187,8 +174,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   };
 
   const handleSubmit = async () => {
-    console.log('Timestamp:', new Date().toISOString());
-    console.log('Form Data from Step 1:', JSON.stringify(formData, null, 2));
     
     if (!user?.id) {
       Alert.alert('Error', 'User not found. Please login again.');
@@ -217,24 +202,19 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       
       const mappedPriority = priorityMap[formData.priority?.toLowerCase()] || priorityMap[formData.priority] || formData.priority || 'Medium';
       
-      console.log('📋 Priority Mapping:', {
-        'Input Priority': formData.priority,
-        'Mapped Priority': mappedPriority,
-      });
-      
       // For new enquiries: Upload reference images and then show success
       if (!isEditMode && enquiryId) {
         // Upload images if any are selected
       if (selectedImages.length > 0) {
-          console.log('📤 Uploading reference images to enquiry:', enquiryId);
           try {
             await uploadReferenceImages({
               enquiryId,
               images: selectedImages,
             }).unwrap();
-            console.log('✅ Reference images uploaded successfully');
           } catch (uploadError) {
-            console.error('❌ Error uploading reference images:', uploadError);
+            if (__DEV__) {
+              console.error('❌ Error uploading reference images:', uploadError);
+            }
             Alert.alert(
               'Image Upload Failed',
               uploadError?.data?.message || uploadError?.data?.error || 'Failed to upload images. The enquiry was created but images could not be uploaded.',
@@ -249,8 +229,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
             );
             return;
           }
-        } else {
-          console.log('ℹ️ No reference images selected - enquiry created without images');
         }
 
         // Success - show Lottie animation instead of Alert
@@ -265,9 +243,10 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
             enquiryId: enquiryToEdit.id,
             images: selectedImages,
           }).unwrap();
-          console.log('✅ Reference images uploaded successfully for edit');
         } catch (uploadError) {
-          console.error('❌ Error uploading reference images:', uploadError);
+          if (__DEV__) {
+            console.error('❌ Error uploading reference images:', uploadError);
+          }
           // Continue with update even if image upload fails
         }
       }
@@ -334,20 +313,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       
       // Note: ReferenceImages are now uploaded separately via uploadReferenceImages endpoint
       // No need to include them in enquiryData
-
-      console.log('📤 Final Enquiry Data to be sent:', JSON.stringify(enquiryData, null, 2));
-      console.log('📊 Enquiry Data Summary:', {
-        'Name': enquiryData.Name,
-        'ClientId': enquiryData.ClientId,
-        'Priority': enquiryData.Priority,
-        'Category': enquiryData.Category,
-        'StoneType': enquiryData.StoneType,
-        'Quantity': enquiryData.Quantity,
-        'Metal Color': enquiryData.Metal?.Color,
-        'Metal Quality': enquiryData.Metal?.Quality,
-        'Has Metal Weight': !!(enquiryData.MetalWeight?.From || enquiryData.MetalWeight?.To || enquiryData.MetalWeight?.Exact),
-        'Has Diamond Weight': !!(enquiryData.DiamondWeight?.From || enquiryData.DiamondWeight?.To || enquiryData.DiamondWeight?.Exact),
-      });
 
       // Only proceed with update if in edit mode
       if (isEditMode && enquiryToEdit?.id) {
@@ -428,30 +393,24 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         );
       } else {
         // This should not happen - new enquiries should return early above
-        console.error('⚠️ Unexpected: Reached else block for new enquiry');
         Alert.alert(
           'Error',
           'Unexpected error occurred. Please try again.'
         );
       }
     } catch (error) {
-      console.error('❌ Timestamp:', new Date().toISOString());
-      console.error('❌ Error Data:', JSON.stringify(error.data, null, 2));
-      console.error('❌ Full Error Object:', JSON.stringify(error, null, 2));
-      
-      if (enquiryData) {
-        console.error('📤 Enquiry data that was sent:', JSON.stringify(enquiryData, null, 2));
-        console.error('📊 Enquiry Data Summary:', {
-          'Name': enquiryData.Name,
-          'ClientId': enquiryData.ClientId,
-          'Priority': enquiryData.Priority,
-          'Category': enquiryData.Category,
-          'Has Images': !!enquiryData.ReferenceImages,
-          'Images Count': enquiryData.ReferenceImages?.length || 0,
-        });
-      } else {
-        console.error('⚠️ Enquiry data was not prepared (error occurred before data preparation)');
-        console.error('⚠️ Form Data available:', JSON.stringify(formData, null, 2));
+      if (__DEV__) {
+        console.error('❌ Error creating/updating enquiry:', error);
+        if (enquiryData) {
+          console.error('📤 Enquiry data that was sent:', {
+            'Name': enquiryData.Name,
+            'ClientId': enquiryData.ClientId,
+            'Priority': enquiryData.Priority,
+            'Category': enquiryData.Category,
+            'Has Images': !!enquiryData.ReferenceImages,
+            'Images Count': enquiryData.ReferenceImages?.length || 0,
+          });
+        }
       }
       
       

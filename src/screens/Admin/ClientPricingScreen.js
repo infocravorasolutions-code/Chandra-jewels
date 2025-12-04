@@ -1,23 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Text,
   Alert,
-  TextInput,
   ActivityIndicator,
   Platform,
   PermissionsAndroid,
+  FlatList,
 } from 'react-native';
-import { Input, Button } from '../../components/common';
+import { Input } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useGetClientByIdQuery, useUpdateClientPricingMutation } from '../../store/api';
-import RNFS from 'react-native-fs';
-import * as XLSX from 'xlsx';
+import DiamondRow from './components/DiamondRow';
+import DiamondEditModal from './components/DiamondEditModal';
 
 // DocumentPicker is optional
 let DocumentPicker;
@@ -37,15 +36,52 @@ const ClientPricingScreen = ({ route, navigation }) => {
   const [loading, setLoading] = useState(false);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const fileLibsRef = useRef({ RNFS: null, XLSX: null });
+  const diamondIdRef = useRef(0);
+  const [expandedType, setExpandedType] = useState(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [selectedDiamondIndex, setSelectedDiamondIndex] = useState(null);
+  const [selectedDiamondData, setSelectedDiamondData] = useState({});
 
-  // Fetch client data
+  // Fetch client data - refetch when screen comes into focus to get latest pricing
   const { data: clientData, isLoading: isLoadingClient, refetch } = useGetClientByIdQuery(clientId, {
     skip: !clientId,
+    refetchOnFocus: true, // Refetch when screen comes into focus to get latest pricing updates
+    refetchOnMountOrArgChange: true, // Refetch when clientId changes
   });
 
   const [updateClientPricing, { isLoading: isUpdating }] = useUpdateClientPricingMutation();
 
-  // Initialize form data when client data is loaded
+  const ensureFileLibraries = useCallback(async () => {
+    try {
+      if (!fileLibsRef.current.RNFS) {
+        const rnfsModule = await import('react-native-fs');
+        fileLibsRef.current.RNFS = rnfsModule.default || rnfsModule;
+      }
+      if (!fileLibsRef.current.XLSX) {
+        const xlsxModule = await import('xlsx');
+        fileLibsRef.current.XLSX = xlsxModule.default || xlsxModule;
+      }
+      return fileLibsRef.current;
+    } catch (error) {
+      console.error('Failed to load file helpers:', error);
+      throw new Error('Unable to load file helpers. Please try again.');
+    }
+  }, []);
+
+  const createDiamondEntry = useCallback((diamond = {}, index = 0) => {
+    const fallbackId = `diamond-${Date.now()}-${diamondIdRef.current++}-${index}`;
+    return {
+      localId: diamond.localId || diamond._id || diamond.id || fallbackId,
+      Type: diamond.Type || diamond.type || '',
+      Shape: diamond.Shape || diamond.shape || '',
+      Carat: typeof diamond.Carat === 'number' ? diamond.Carat : parseFloat(diamond.Carat) || 0,
+      MmSize: typeof diamond.MmSize === 'number' ? diamond.MmSize : parseFloat(diamond.MmSize) || 0,
+      SieveSize: diamond.SieveSize || diamond.sieveSize || '',
+      Price: typeof diamond.Price === 'number' ? diamond.Price : parseFloat(diamond.Price) || 0,
+    };
+  }, []);
+
   useEffect(() => {
     if (clientData) {
       const pricing = clientData.Pricing || clientData.pricing || {};
@@ -55,25 +91,48 @@ const ClientPricingScreen = ({ route, navigation }) => {
       setDuties(pricing.Duties?.toString() || pricing.duties?.toString() || '0');
       
       const diamondsData = pricing.Diamonds || pricing.diamonds || [];
-      setDiamonds(diamondsData.length > 0 ? diamondsData : []);
+      setDiamonds(
+        diamondsData.length > 0
+          ? diamondsData.map((diamond, index) => createDiamondEntry(diamond, index))
+          : []
+      );
     }
-  }, [clientData]);
+  }, [clientData, createDiamondEntry]);
 
-  const handleAddDiamond = () => {
-    setDiamonds([
-      ...diamonds,
-      {
-        Type: '',
-        Shape: '',
-        Carat: 0,
-        MmSize: 0,
-        SieveSize: '',
-        Price: 0,
-      },
+  // Memoize grouped diamonds with deep comparison
+  const groupedDiamonds = useMemo(() => {
+    const groups = new Map();
+    diamonds.forEach((diamond, index) => {
+      const type = diamond.Type || 'Other';
+      if (!groups.has(type)) {
+        groups.set(type, []);
+      }
+      groups.get(type).push({ diamond, index });
+    });
+    return Array.from(groups.entries());
+  }, [diamonds]);
+
+  const initialExpandedSet = useRef(false);
+
+  useEffect(() => {
+    if (!initialExpandedSet.current && groupedDiamonds.length > 0) {
+      setExpandedType(groupedDiamonds[0][0]);
+      initialExpandedSet.current = true;
+    }
+  }, [groupedDiamonds]);
+
+  const toggleType = useCallback((type) => {
+    setExpandedType(prev => (prev === type ? null : type));
+  }, []);
+
+  const handleAddDiamond = useCallback(() => {
+    setDiamonds(prevDiamonds => [
+      ...prevDiamonds,
+      createDiamondEntry({}, prevDiamonds.length),
     ]);
-  };
+  }, [createDiamondEntry]);
 
-  const handleDeleteDiamond = (index) => {
+  const handleDeleteDiamond = useCallback((index) => {
     Alert.alert(
       'Delete Diamond',
       'Are you sure you want to delete this diamond entry?',
@@ -83,69 +142,92 @@ const ClientPricingScreen = ({ route, navigation }) => {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            const newDiamonds = diamonds.filter((_, i) => i !== index);
-            setDiamonds(newDiamonds);
+            setDiamonds(prevDiamonds => prevDiamonds.filter((_, i) => i !== index));
+            if (selectedDiamondIndex === index) {
+              setEditModalVisible(false);
+              setSelectedDiamondIndex(null);
+            }
           },
         },
       ]
     );
-  };
+  }, [selectedDiamondIndex]);
 
-  const handleDiamondChange = (index, field, value) => {
-    const newDiamonds = diamonds.map((diamond, i) => {
-      if (i === index) {
-        // Create a new object for the modified diamond
-        const updatedDiamond = { ...diamond };
-        if (field === 'Carat' || field === 'MmSize' || field === 'Price') {
-          updatedDiamond[field] = parseFloat(value) || 0;
-        } else {
-          updatedDiamond[field] = value;
-        }
-        return updatedDiamond;
-      }
-      return diamond;
+  const openEditModal = useCallback((index, diamond) => {
+    setSelectedDiamondIndex(index);
+    setSelectedDiamondData({
+      Type: diamond.Type || '',
+      Shape: diamond.Shape || '',
+      Carat: diamond.Carat?.toString() || '',
+      MmSize: diamond.MmSize?.toString() || '',
+      SieveSize: diamond.SieveSize || '',
+      Price: diamond.Price?.toString() || '',
     });
-    setDiamonds(newDiamonds);
-  };
+    setEditModalVisible(true);
+  }, []);
+
+  const closeEditModal = useCallback(() => {
+    setEditModalVisible(false);
+    setSelectedDiamondIndex(null);
+    setSelectedDiamondData({});
+  }, []);
+
+  const handleDiamondSave = useCallback((updatedDiamond) => {
+    setDiamonds(prevDiamonds =>
+      prevDiamonds.map((diamond, i) => {
+        if (i !== selectedDiamondIndex) return diamond;
+        return {
+          ...diamond,
+          Type: updatedDiamond.Type || '',
+          Shape: updatedDiamond.Shape || '',
+          Carat: updatedDiamond.Carat || 0,
+          MmSize: updatedDiamond.MmSize || 0,
+          SieveSize: updatedDiamond.SieveSize || '',
+          Price: updatedDiamond.Price || 0,
+        };
+      })
+    );
+    closeEditModal();
+  }, [closeEditModal, selectedDiamondIndex]);
+
+  const diamondKeyExtractor = useCallback((item) => {
+    const diamond = item.diamond;
+    return diamond.localId || diamond._id || diamond.id || `diamond-${item.index}`;
+  }, []);
+
+  // Memoize the render function
+  const renderDiamondRow = useCallback(({ item }) => (
+    <DiamondRow
+      diamond={item.diamond}
+      index={item.index}
+      onPress={openEditModal}
+      onDelete={handleDeleteDiamond}
+    />
+  ), [handleDeleteDiamond, openEditModal]);
 
   const handleDownloadExcelFormat = async () => {
     try {
       setIsDownloadingExcel(true);
+      const { RNFS, XLSX } = await ensureFileLibraries();
 
-      // Create Excel data with headers
       const excelData = [
         ['Type', 'Shape', 'Carat', 'Mm Size', 'Sieve Size', 'Price'],
       ];
-
-      // Add sample row
       excelData.push(['LabGrown', 'RD', 0.5, 5.0, '0000-000', 100]);
 
-      // Create workbook and worksheet
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(excelData);
-
-      // Set column widths
       ws['!cols'] = [
-        { wch: 15 }, // Type
-        { wch: 10 }, // Shape
-        { wch: 12 }, // Carat
-        { wch: 12 }, // Mm Size
-        { wch: 15 }, // Sieve Size
-        { wch: 12 }, // Price
+        { wch: 15 }, { wch: 10 }, { wch: 12 }, 
+        { wch: 12 }, { wch: 15 }, { wch: 12 }
       ];
-
-      // Add worksheet to workbook
       XLSX.utils.book_append_sheet(wb, ws, 'Diamonds');
 
-      // Generate Excel file buffer
       const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-
-      // Create filename
       const clientNameForFile = (clientData?.Name || clientData?.name || clientName || 'Client').replace(/[^a-zA-Z0-9]/g, '_');
       const excelFilename = `Diamond_Format_${clientNameForFile}.xlsx`;
       const downloadPath = `${RNFS.DownloadDirectoryPath}/${excelFilename}`;
 
-      // Convert array buffer to base64
       const bytes = new Uint8Array(excelBuffer);
       const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
       let base64 = '';
@@ -155,23 +237,18 @@ const ClientPricingScreen = ({ route, navigation }) => {
         const a = bytes[i++];
         const b = i < bytes.length ? bytes[i++] : 0;
         const c = i < bytes.length ? bytes[i++] : 0;
-        
         const bitmap = (a << 16) | (b << 8) | c;
-        
         base64 += base64Chars.charAt((bitmap >> 18) & 63);
         base64 += base64Chars.charAt((bitmap >> 12) & 63);
         base64 += i - 2 < bytes.length ? base64Chars.charAt((bitmap >> 6) & 63) : '=';
         base64 += i - 1 < bytes.length ? base64Chars.charAt(bitmap & 63) : '=';
       }
-      
-      const base64String = base64;
 
-      // Write Excel file
-      await RNFS.writeFile(downloadPath, base64String, 'base64');
+      await RNFS.writeFile(downloadPath, base64, 'base64');
 
       Alert.alert(
         'Success',
-        `Excel format downloaded successfully!\n\nSaved to: Downloads/${excelFilename}\n\nYou can now fill in the diamond data and import it.`,
+        `Excel format downloaded successfully!\n\nSaved to: Downloads/${excelFilename}`,
         [{ text: 'OK' }]
       );
     } catch (error) {
@@ -183,29 +260,14 @@ const ClientPricingScreen = ({ route, navigation }) => {
   };
 
   const requestStoragePermission = async () => {
-    if (Platform.OS !== 'android') {
-      return true;
-    }
-
+    if (Platform.OS !== 'android') return true;
     try {
       const androidVersion = Platform.Version;
-      
-      // For Android 13+ (API 33+), document picker doesn't require explicit storage permissions
-      // The system handles file access through the picker
-      if (androidVersion >= 33) {
-        return true;
-      }
-
-      // For Android 12 and below, check if permission is already granted
+      if (androidVersion >= 33) return true;
       const checkResult = await PermissionsAndroid.check(
         PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
       );
-      
-      if (checkResult) {
-        return true;
-      }
-
-      // Request permission
+      if (checkResult) return true;
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
         {
@@ -216,13 +278,10 @@ const ClientPricingScreen = ({ route, navigation }) => {
           buttonPositive: 'OK',
         }
       );
-      
       return granted === PermissionsAndroid.RESULTS.GRANTED;
     } catch (err) {
-      // On newer Android versions or if permission system fails, allow to proceed
-      // Document picker might work without explicit permissions
       console.warn('Permission request error:', err);
-      return true; // Allow to proceed - document picker might handle it
+      return true;
     }
   };
 
@@ -236,54 +295,32 @@ const ClientPricingScreen = ({ route, navigation }) => {
       return;
     }
 
-    // Request permission (but don't block if it fails on newer Android)
     const hasPermission = await requestStoragePermission();
     if (!hasPermission && Platform.OS === 'android' && Platform.Version < 33) {
-      Alert.alert(
-        'Permission Denied',
-        'Storage permission is required to import Excel files. Please grant permission in app settings.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Open Settings',
-            onPress: () => {
-              // You can use Linking.openSettings() if needed
-            },
-          },
-        ]
-      );
+      Alert.alert('Permission Denied', 'Storage permission is required to import Excel files.');
       return;
     }
 
     try {
       setIsImportingExcel(true);
+      const { RNFS, XLSX } = await ensureFileLibraries();
 
-      // Use pickSingle for better compatibility and to avoid permission issues
       const result = await DocumentPicker.pickSingle({
         type: [DocumentPicker.types.xls, DocumentPicker.types.xlsx, DocumentPicker.types.csv],
-        copyTo: 'cachesDirectory', // Copy file to cache for better access
+        copyTo: 'cachesDirectory',
       });
 
       if (result) {
-        const file = result;
-        
-        // Get the file URI - use copyUri if available (from copyTo), otherwise use uri
-        const fileUri = file.copyUri || file.uri;
-        
+        const fileUri = result.copyUri || result.uri;
         if (!fileUri) {
           Alert.alert('Error', 'Could not access the selected file');
           return;
         }
         
-        // Read file
         const fileContent = await RNFS.readFile(fileUri, 'base64');
         const workbook = XLSX.read(fileContent, { type: 'base64' });
-        
-        // Get first sheet
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
-        // Convert to JSON
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
         if (jsonData.length < 2) {
@@ -291,19 +328,20 @@ const ClientPricingScreen = ({ route, navigation }) => {
           return;
         }
 
-        // Skip header row and parse data
         const importedDiamonds = [];
         for (let i = 1; i < jsonData.length; i++) {
           const row = jsonData[i];
           if (row && row.length > 0) {
-            importedDiamonds.push({
-              Type: row[0]?.toString() || '',
-              Shape: row[1]?.toString() || '',
-              Carat: parseFloat(row[2]) || 0,
-              MmSize: parseFloat(row[3]) || 0,
-              SieveSize: row[4]?.toString() || '',
-              Price: parseFloat(row[5]) || 0,
-            });
+            importedDiamonds.push(
+              createDiamondEntry({
+                Type: row[0]?.toString() || '',
+                Shape: row[1]?.toString() || '',
+                Carat: parseFloat(row[2]) || 0,
+                MmSize: parseFloat(row[3]) || 0,
+                SieveSize: row[4]?.toString() || '',
+                Price: parseFloat(row[5]) || 0,
+              }, importedDiamonds.length)
+            );
           }
         }
 
@@ -312,18 +350,17 @@ const ClientPricingScreen = ({ route, navigation }) => {
           return;
         }
 
-        // Replace existing diamonds with imported ones
         setDiamonds(importedDiamonds);
 
         Alert.alert(
           'Success',
-          `Imported ${importedDiamonds.length} diamond(s) from Excel.\n\nPlease click on Save after importing to persist the changes.`,
+          `Imported ${importedDiamonds.length} diamond(s) from Excel.\n\nPlease click on Save after importing.`,
           [{ text: 'OK' }]
         );
       }
     } catch (error) {
       if (DocumentPicker && DocumentPicker.isCancel && DocumentPicker.isCancel(error)) {
-        return; // User cancelled
+        return;
       }
       console.error('Error importing Excel:', error);
       Alert.alert('Error', `Failed to import Excel file: ${error.message}`);
@@ -383,67 +420,39 @@ const ClientPricingScreen = ({ route, navigation }) => {
     }
   };
 
-  if (isLoadingClient) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading client pricing...</Text>
-      </View>
-    );
-  }
-
-  return (
-    <ScrollView style={styles.container}>
+  // Render header component
+  const ListHeaderComponent = useMemo(() => (
+    <View>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Pricing for {clientData?.Name || clientData?.name || clientName || 'Client'}</Text>
+        <Text style={styles.headerTitle}>
+          Pricing for {clientData?.Name || clientData?.name || clientName || 'Client'}
+        </Text>
       </View>
 
       <View style={styles.form}>
-        {/* Pricing Input Fields */}
         <View style={styles.pricingFields}>
           <View style={styles.fieldRow}>
             <View style={styles.field}>
               <Text style={styles.label}>Loss*</Text>
-              <Input
-                value={loss}
-                onChangeText={setLoss}
-                keyboardType="numeric"
-                placeholder="0"
-              />
+              <Input value={loss} onChangeText={setLoss} keyboardType="numeric" placeholder="0" />
             </View>
             <View style={styles.field}>
               <Text style={styles.label}>Labour*</Text>
-              <Input
-                value={labour}
-                onChangeText={setLabour}
-                keyboardType="numeric"
-                placeholder="0"
-              />
+              <Input value={labour} onChangeText={setLabour} keyboardType="numeric" placeholder="0" />
             </View>
           </View>
           <View style={styles.fieldRow}>
             <View style={styles.field}>
               <Text style={styles.label}>Extra Charges*</Text>
-              <Input
-                value={extraCharges}
-                onChangeText={setExtraCharges}
-                keyboardType="numeric"
-                placeholder="0"
-              />
+              <Input value={extraCharges} onChangeText={setExtraCharges} keyboardType="numeric" placeholder="0" />
             </View>
             <View style={styles.field}>
               <Text style={styles.label}>Duties*</Text>
-              <Input
-                value={duties}
-                onChangeText={setDuties}
-                keyboardType="numeric"
-                placeholder="0"
-              />
+              <Input value={duties} onChangeText={setDuties} keyboardType="numeric" placeholder="0" />
             </View>
           </View>
         </View>
 
-        {/* Excel Download and Import Buttons */}
         <View style={styles.excelButtonsContainer}>
           <TouchableOpacity
             style={[styles.excelButton, styles.downloadButton]}
@@ -476,154 +485,120 @@ const ClientPricingScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Import Message */}
         <View style={styles.importMessage}>
           <Text style={styles.importMessageText}>
             Please Click on Save after importing to persist the changes.
           </Text>
         </View>
 
-        {/* Diamond Data Section */}
         <View style={styles.diamondSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Diamond Data</Text>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={handleAddDiamond}
-            >
+            <TouchableOpacity style={styles.addButton} onPress={handleAddDiamond}>
               <Icon name="add" size={20} color={colors.textWhite} />
               <Text style={styles.addButtonText}>Add Diamond</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Diamond Table */}
-          {diamonds.length > 0 ? (
-            <View style={styles.tableContainer}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                <View>
-                  {/* Table Header */}
-                  <View style={styles.tableHeader}>
-                    <View style={[styles.tableCell, styles.headerCell]}>
-                      <Text style={styles.headerText}>Type</Text>
-                    </View>
-                    <View style={[styles.tableCell, styles.headerCell]}>
-                      <Text style={styles.headerText}>Shape</Text>
-                    </View>
-                    <View style={[styles.tableCell, styles.headerCell]}>
-                      <Text style={styles.headerText}>Carat</Text>
-                    </View>
-                    <View style={[styles.tableCell, styles.headerCell]}>
-                      <Text style={styles.headerText}>Mm Size</Text>
-                    </View>
-                    <View style={[styles.tableCell, styles.headerCell]}>
-                      <Text style={styles.headerText}>Sieve Size</Text>
-                    </View>
-                    <View style={[styles.tableCell, styles.headerCell]}>
-                      <Text style={styles.headerText}>Price</Text>
-                    </View>
-                    <View style={[styles.tableCell, styles.headerCell, styles.actionsCell]}>
-                      <Text style={styles.headerText}>Actions</Text>
-                    </View>
-                  </View>
-
-                  {/* Table Rows */}
-                  {diamonds.map((diamond, index) => (
-                    <View
-                      key={index}
-                      style={[
-                        styles.tableRow,
-                        index % 2 === 0 ? styles.evenRow : styles.oddRow,
-                      ]}
-                    >
-                      <View style={styles.tableCell}>
-                        <TextInput
-                          style={styles.tableInput}
-                          value={diamond.Type || ''}
-                          onChangeText={(value) => handleDiamondChange(index, 'Type', value)}
-                          placeholder="Type"
-                        />
-                      </View>
-                      <View style={styles.tableCell}>
-                        <TextInput
-                          style={styles.tableInput}
-                          value={diamond.Shape || ''}
-                          onChangeText={(value) => handleDiamondChange(index, 'Shape', value)}
-                          placeholder="Shape"
-                        />
-                      </View>
-                      <View style={styles.tableCell}>
-                        <TextInput
-                          style={styles.tableInput}
-                          value={diamond.Carat?.toString() || '0'}
-                          onChangeText={(value) => handleDiamondChange(index, 'Carat', value)}
-                          keyboardType="numeric"
-                          placeholder="0"
-                        />
-                      </View>
-                      <View style={styles.tableCell}>
-                        <TextInput
-                          style={styles.tableInput}
-                          value={diamond.MmSize?.toString() || '0'}
-                          onChangeText={(value) => handleDiamondChange(index, 'MmSize', value)}
-                          keyboardType="numeric"
-                          placeholder="0"
-                        />
-                      </View>
-                      <View style={styles.tableCell}>
-                        <TextInput
-                          style={styles.tableInput}
-                          value={diamond.SieveSize || ''}
-                          onChangeText={(value) => handleDiamondChange(index, 'SieveSize', value)}
-                          placeholder="Sieve Size"
-                        />
-                      </View>
-                      <View style={styles.tableCell}>
-                        <TextInput
-                          style={styles.tableInput}
-                          value={diamond.Price?.toString() || '0'}
-                          onChangeText={(value) => handleDiamondChange(index, 'Price', value)}
-                          keyboardType="numeric"
-                          placeholder="0"
-                        />
-                      </View>
-                      <View style={[styles.tableCell, styles.actionsCell]}>
-                        <TouchableOpacity
-                          style={styles.deleteButton}
-                          onPress={() => handleDeleteDiamond(index)}
-                        >
-                          <Icon name="delete" size={18} color={colors.error} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              </ScrollView>
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>No diamonds added yet</Text>
-              <Text style={styles.emptyStateSubtext}>Click "Add Diamond" to add diamond entries</Text>
-            </View>
-          )}
         </View>
-
-        {/* Save Button */}
-        <TouchableOpacity
-          style={[styles.saveButton, (loading || isUpdating) && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={loading || isUpdating}
-        >
-          {loading || isUpdating ? (
-            <ActivityIndicator size="small" color={colors.textWhite} />
-          ) : (
-            <>
-              <Icon name="save" size={20} color={colors.textWhite} />
-              <Text style={styles.saveButtonText}>Save</Text>
-            </>
-          )}
-        </TouchableOpacity>
       </View>
-    </ScrollView>
+    </View>
+  ), [clientData, clientName, loss, labour, extraCharges, duties, isDownloadingExcel, isImportingExcel, handleAddDiamond]);
+
+  // Render type sections
+  const renderTypeSection = useCallback(({ item: [type, rows] }) => {
+    const isExpanded = expandedType === type;
+    return (
+      <View style={styles.typeSection}>
+        <TouchableOpacity
+          style={styles.typeHeader}
+          onPress={() => toggleType(type)}
+          activeOpacity={0.85}
+        >
+          <View>
+            <Text style={styles.typeTitle}>{type}</Text>
+            <Text style={styles.typeSubtitle}>{rows.length} entries</Text>
+          </View>
+          <Icon
+            name={isExpanded ? 'expand-less' : 'expand-more'}
+            size={24}
+            color={colors.textPrimary}
+          />
+        </TouchableOpacity>
+        {isExpanded && (
+          <View style={styles.typeContent}>
+            <FlatList
+              data={rows}
+              keyExtractor={diamondKeyExtractor}
+              renderItem={renderDiamondRow}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              removeClippedSubviews={true}
+              scrollEnabled={false}
+            />
+          </View>
+        )}
+      </View>
+    );
+  }, [expandedType, toggleType, diamondKeyExtractor, renderDiamondRow]);
+
+  // Render footer with save button
+  const ListFooterComponent = useMemo(() => (
+    <View style={styles.form}>
+      {groupedDiamonds.length === 0 && (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>No diamonds added yet</Text>
+          <Text style={styles.emptyStateSubtext}>Click "Add Diamond" to add diamond entries</Text>
+        </View>
+      )}
+      <TouchableOpacity
+        style={[styles.saveButton, (loading || isUpdating) && styles.saveButtonDisabled]}
+        onPress={handleSave}
+        disabled={loading || isUpdating}
+      >
+        {loading || isUpdating ? (
+          <ActivityIndicator size="small" color={colors.textWhite} />
+        ) : (
+          <>
+            <Icon name="save" size={20} color={colors.textWhite} />
+            <Text style={styles.saveButtonText}>Save</Text>
+          </>
+        )}
+      </TouchableOpacity>
+    </View>
+  ), [groupedDiamonds, loading, isUpdating, handleSave]);
+
+  if (isLoadingClient) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Loading client pricing...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <FlatList
+        style={styles.container}
+        data={groupedDiamonds}
+        keyExtractor={([type]) => type}
+        renderItem={renderTypeSection}
+        ListHeaderComponent={ListHeaderComponent}
+        ListFooterComponent={ListFooterComponent}
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        windowSize={5}
+        removeClippedSubviews={true}
+        extraData={expandedType}
+      />
+      <DiamondEditModal
+        visible={editModalVisible}
+        diamond={selectedDiamondData}
+        onClose={closeEditModal}
+        onSave={handleDiamondSave}
+      />
+    </>
   );
 };
 
@@ -702,54 +677,35 @@ const styles = StyleSheet.create({
     fontSize: fonts.sm,
     fontFamily: fonts.medium,
   },
-  tableContainer: {
+  typeSection: {
+    marginBottom: 16,
+    marginHorizontal: 20,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 12,
     overflow: 'hidden',
   },
-  tableHeader: {
+  typeHeader: {
     flexDirection: 'row',
-    backgroundColor: colors.primary,
-  },
-  tableRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  evenRow: {
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     backgroundColor: colors.white,
   },
-  oddRow: {
-    backgroundColor: colors.background,
-  },
-  tableCell: {
-    padding: 12,
-    minWidth: 100,
-    borderRightWidth: 1,
-    borderRightColor: colors.border,
-  },
-  headerCell: {
-    backgroundColor: colors.primary,
-  },
-  headerText: {
-    fontSize: fonts.sm,
+  typeTitle: {
+    fontSize: fonts.base,
     fontFamily: fonts.bold,
-    color: colors.textWhite,
-  },
-  tableInput: {
-    fontSize: fonts.sm,
     color: colors.textPrimary,
-    padding: 0,
-    minHeight: 20,
   },
-  actionsCell: {
-    minWidth: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
+  typeSubtitle: {
+    fontSize: fonts.sm,
+    color: colors.textSecondary,
   },
-  deleteButton: {
-    padding: 4,
+  typeContent: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.background,
   },
   emptyState: {
     padding: 40,
@@ -758,6 +714,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: 24,
   },
   emptyStateText: {
     fontSize: fonts.base,
@@ -829,4 +786,3 @@ const styles = StyleSheet.create({
 });
 
 export default ClientPricingScreen;
-

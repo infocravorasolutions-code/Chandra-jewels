@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -18,14 +18,30 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
 import { formatCurrency, formatDate } from '../../utils/helpers';
+import { API_BASE_URL } from '../../config/apiConfig';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MetalPricesScreen = () => {
+  const isMountedRef = useRef(true);
   const [refreshing, setRefreshing] = useState(false);
   const [editingPrices, setEditingPrices] = useState({});
   const [editingDates, setEditingDates] = useState({}); // Store dates for editing
   const [isEditing, setIsEditing] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [showMetalTypeDropdown, setShowMetalTypeDropdown] = useState(false);
+  
+  // Track component mount state and cleanup timeouts
+  const timeoutRefs = useRef([]);
+  
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Clean up any pending timeouts
+      timeoutRefs.current.forEach(timeoutId => clearTimeout(timeoutId));
+      timeoutRefs.current = [];
+    };
+  }, []);
   const [newMetalPrice, setNewMetalPrice] = useState({
     metalType: 'gold',
     price: '',
@@ -76,11 +92,12 @@ const MetalPricesScreen = () => {
   }, [metalPrices]);
 
   const handlePriceChange = (metal, value) => {
+    const parsedValue = parseFloat(value) || 0;
     setEditingPrices(prev => ({
       ...prev,
       [metal]: {
         ...prev[metal],
-        price: parseFloat(value) || 0,
+        price: parsedValue,
       },
     }));
   };
@@ -94,6 +111,39 @@ const MetalPricesScreen = () => {
 
   const handleSavePrices = async () => {
     try {
+      
+      // First, fetch the full document to get the actual dates of latest entries
+      let latestEntryDates = {};
+      try {
+        const token = await AsyncStorage.getItem('token');
+        if (token) {
+          const fullEndpointResponse = await fetch(`${API_BASE_URL}/api/metal-prices`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          if (fullEndpointResponse.ok) {
+            const fullData = await fullEndpointResponse.json();
+            
+            // Extract the latest entry date for each metal
+            ['gold', 'silver', 'platinum'].forEach(metalKey => {
+              const metalArray = fullData[metalKey];
+              if (Array.isArray(metalArray) && metalArray.length > 0) {
+                const sortedByDate = [...metalArray].sort((a, b) => {
+                  const dateA = new Date(a.date || a.Date || 0);
+                  const dateB = new Date(b.date || b.Date || 0);
+                  return dateB - dateA; // Descending order (latest first)
+                });
+                const latestEntry = sortedByDate[0];
+                latestEntryDates[metalKey] = latestEntry.date || latestEntry.Date;
+              }
+            });
+          }
+        }
+      } catch (fetchError) {
+        // Silently handle fetch error
+      }
+      
       // Update all changed prices
       const updatePromises = [];
       const metals = ['gold', 'silver', 'platinum'];
@@ -105,29 +155,56 @@ const MetalPricesScreen = () => {
         
         // Only update if price has changed
         if (currentPrice !== newPrice && newPrice !== undefined && newPrice !== null) {
-          // Always use today's date when updating (the day of the update)
-          const today = new Date().toISOString().split('T')[0];
+          // Use the date from the latest existing entry, or today's date if no entry exists
+          const dateToUse = latestEntryDates[metal] || new Date().toISOString().split('T')[0];
+          
+          // Convert to ISO format if needed
+          let finalDate = dateToUse;
+          if (finalDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            finalDate = `${finalDate}T00:00:00.000Z`;
+          } else if (!finalDate.includes('T')) {
+            finalDate = new Date(finalDate).toISOString();
+          }
+          
+          // Capture finalDate in a const for use in the promise
+          const dateForUpdate = finalDate;
           
           updatePromises.push(
-            updateMetalPrice({ metal, date: today, price: newPrice || 0 }).unwrap().then(response => ({ metal, response, newPrice, date: today }))
+            updateMetalPrice({ metal, date: dateForUpdate, price: newPrice || 0 }).unwrap().then(response => {
+              // 204 No Content (null response) is still a success
+              // The real test is if the update persists after refetch
+              return { metal, response, newPrice, date: dateForUpdate, success: true };
+            }).catch(error => {
+              if (__DEV__) {
+                console.error(`❌ ${metal.toUpperCase()} Update FAILED:`, error?.message || error);
+              }
+              throw error;
+            })
           );
         }
       }
       
       if (updatePromises.length > 0) {
-        const results = await Promise.all(updatePromises);
+        let results;
+        try {
+          results = await Promise.all(updatePromises);
+        } catch (error) {
+          if (__DEV__) {
+            console.error('❌ PUT REQUEST FAILED:', error);
+          }
+          throw error;
+        }
         
         // Process the PUT response directly to update UI immediately
         // The PUT response contains the full document with arrays: { gold: [{date, price}, ...], ... }
         const updatedPrices = { ...metalPrices };
         
-        // Get the last response (should contain all metals with their arrays)
-        const lastResponse = results[results.length - 1]?.response;
-        
-        if (lastResponse && typeof lastResponse === 'object') {
-          // Process all metals from the response
+        // Process each response - each PUT returns the full document with all metals
+        results.forEach(({ metal, response, newPrice, date }) => {
+          if (response && typeof response === 'object' && (response.gold || response.silver || response.platinum)) {
+            // Backend returns full document with arrays for all metals
           ['gold', 'silver', 'platinum'].forEach(metalKey => {
-            const metalArray = lastResponse[metalKey];
+              const metalArray = response[metalKey];
             if (Array.isArray(metalArray) && metalArray.length > 0) {
               // Get the latest entry (most recent date)
               const sortedByDate = [...metalArray].sort((a, b) => {
@@ -136,19 +213,29 @@ const MetalPricesScreen = () => {
                 return dateB - dateA; // Descending order (latest first)
               });
               const latestEntry = sortedByDate[0];
+                
               updatedPrices[metalKey] = {
                 price: latestEntry.price || latestEntry.Price || 0,
                 unit: 'per gram',
                 lastUpdated: latestEntry.date || latestEntry.Date || new Date().toISOString(),
               };
-            }
-          });
-        }
+              }
+            });
+          } else if (response === null || response === undefined) {
+            // Response is null - backend might have returned 204 No Content or empty response
+            // Use the values we sent as fallback
+            updatedPrices[metal] = {
+              price: newPrice,
+              unit: 'per gram',
+              lastUpdated: date,
+            };
+          }
+        });
         
-        // Also update any metals that were in the results but might not be in the response
+        // Final check: ensure all updated metals have the correct values
         results.forEach(({ metal, newPrice, date }) => {
-          // If this metal wasn't processed from response, use the values we sent
-          if (!updatedPrices[metal] || updatedPrices[metal].price === metalPrices[metal]?.price) {
+          // If this metal wasn't processed from response or price doesn't match, use sent values
+          if (!updatedPrices[metal] || updatedPrices[metal].price !== newPrice) {
             updatedPrices[metal] = {
               price: newPrice,
               unit: 'per gram',
@@ -164,9 +251,81 @@ const MetalPricesScreen = () => {
         
         // Redux will automatically refetch and update the cache
         // Also reload from API in the background to ensure sync
-        setTimeout(() => {
-          refetch().catch(err => console.error('Background reload error:', err));
+        // Wait longer to ensure backend has processed the update
+        const timeoutId = setTimeout(async () => {
+          // Remove from refs when executed
+          timeoutRefs.current = timeoutRefs.current.filter(id => id !== timeoutId);
+          
+          // Check if component is still mounted
+          if (!isMountedRef.current) {
+            return;
+          }
+          
+          try {
+            // Wait a bit more to ensure backend has saved the update
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Check again if component is still mounted
+            if (!isMountedRef.current) {
+              return;
+            }
+            
+            // Only refetch if component is still mounted, query is initialized and refetch function exists
+            let refetchedPrices = {};
+            if (isMountedRef.current && refetch && typeof refetch === 'function') {
+              try {
+                const refetchResult = await refetch();
+                refetchedPrices = refetchResult?.data?.prices || refetchResult?.data || {};
+              } catch (refetchError) {
+                // Use current metalPrices as fallback
+                refetchedPrices = metalPrices || {};
+              }
+            } else {
+              refetchedPrices = metalPrices || {};
+            }
+            
+            // Verify that updates actually persisted
+            const updateVerification = [];
+            results.forEach(({ metal, newPrice }) => {
+              const refetchedPrice = refetchedPrices[metal]?.price;
+              const updatePersisted = refetchedPrice === newPrice;
+              
+              if (!updatePersisted) {
+                updateVerification.push({
+                  metal,
+                  expected: newPrice,
+                  actual: refetchedPrice,
+                });
+              }
+            });
+            
+            if (updateVerification.length > 0) {
+              const failedMetals = updateVerification.map(v => v.metal).join(', ');
+              const errorMessage = `⚠️ Warning: The following metal prices may not have been saved correctly: ${failedMetals}. ` +
+                `Please check the backend API or try updating again.`;
+              
+              if (__DEV__) {
+                console.error('❌ Update Verification Failed:', updateVerification);
+              }
+              
+              // Show alert to user
+              Alert.alert(
+                'Update Warning',
+                errorMessage + '\n\n' +
+                updateVerification.map(v => 
+                  `${v.metal}: Expected ${v.expected}, but got ${v.actual || 'N/A'}`
+                ).join('\n'),
+                [{ text: 'OK' }]
+              );
+            }
+          } catch (err) {
+            if (__DEV__) {
+              console.error('❌ Background reload error:', err);
+            }
+          }
         }, 500);
+        // Store timeout ID for cleanup
+        timeoutRefs.current.push(timeoutId);
       } else {
         Alert.alert('Info', 'No changes to save');
       }
@@ -217,7 +376,6 @@ const MetalPricesScreen = () => {
     // Use a fresh Date object to ensure we get the current date
     const today = new Date();
     const todayString = today.toISOString().split('T')[0];
-    
     
     const resetDates = {};
     ['gold', 'silver', 'platinum'].forEach(metal => {

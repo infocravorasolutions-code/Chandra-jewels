@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -357,12 +357,20 @@ const DashboardScreen = ({ navigation }) => {
     });
   }, [clientsData, dashboardData?.clientAggregateData, enquiriesData, user?.role]);
 
-  // Safety check - don't render if user is not loaded
+  const loading = dashboardLoading || clientsLoading || enquiriesLoading || statusStatisticsLoading;
+
+  const navigateWithDashboardFilter = useCallback((params = {}) => {
+    navigation.navigate('Enquiries', {
+      ...params,
+      filterSource: 'dashboard',
+      filterAppliedAt: Date.now(),
+    });
+  }, [navigation]);
+
+  // Safety check - don't render if user is not loaded (must be after all hooks)
   if (!user) {
     return <AnimatedLogoLoader size={60} />;
   }
-
-  const loading = dashboardLoading || clientsLoading || enquiriesLoading || statusStatisticsLoading;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -448,7 +456,7 @@ const DashboardScreen = ({ navigation }) => {
                   color={statusColor}
                   borderColor={statusColor}
                   style={styles.enquiryStatusItem}
-                  onPress={() => navigation.navigate('Enquiries', { filter: statusName.toLowerCase() })}
+                  onPress={() => navigateWithDashboardFilter({ filter: statusName.toLowerCase() })}
                 />
               );
             })
@@ -469,7 +477,7 @@ const DashboardScreen = ({ navigation }) => {
             color="#F97316"
             borderColor="#F97316"
             style={styles.enquiryStatusItem}
-            onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
+            onPress={() => navigateWithDashboardFilter({ filter: 'pending' })}
           />
           <EnquiryStatusCard
             status="Approval Pending"
@@ -477,7 +485,7 @@ const DashboardScreen = ({ navigation }) => {
             color="#EF4444"
             borderColor="#EF4444"
             style={styles.enquiryStatusItem}
-            onPress={() => navigation.navigate('Enquiries', { filter: 'approval_pending' })}
+            onPress={() => navigateWithDashboardFilter({ filter: 'approval_pending' })}
           />
           <EnquiryStatusCard
             status="Completed"
@@ -485,7 +493,7 @@ const DashboardScreen = ({ navigation }) => {
             color="#14B8A6"
             borderColor="#14B8A6"
             style={styles.enquiryStatusItem}
-            onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
+            onPress={() => navigateWithDashboardFilter({ filter: 'completed' })}
           />
             </>
           )}
@@ -534,7 +542,7 @@ const DashboardScreen = ({ navigation }) => {
                   key={client.id}
                   client={client}
                   imageUrl={imageUrl}
-                  onPress={() => navigation.navigate('Enquiries', { 
+                  onPress={() => navigateWithDashboardFilter({ 
                     filterType: 'client', 
                     filter: client.name,
                     clientId: client.id || client._id 
@@ -587,7 +595,7 @@ const DashboardScreen = ({ navigation }) => {
         icon={<Icon name="schedule" size={20} color={colors.textWhite} />}
         color={colors.primary}
         valueColor={colors.primary}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'pending' })}
+        onPress={() => navigateWithDashboardFilter({ filter: 'pending' })}
       />
       <StatusCard
         title="Approval Pending"
@@ -595,7 +603,7 @@ const DashboardScreen = ({ navigation }) => {
         icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
         color={colors.primary}
         valueColor={colors.primary}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'approval_pending' })}
+        onPress={() => navigateWithDashboardFilter({ filter: 'approval_pending' })}
       />
       <StatusCard
         title="Completed Orders"
@@ -603,43 +611,150 @@ const DashboardScreen = ({ navigation }) => {
         icon={<Icon name="check-circle" size={20} color={colors.textWhite} />}
         color={colors.primary}
         valueColor={colors.primary}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
+        onPress={() => navigateWithDashboardFilter({ filter: 'completed' })}
       />
     </View>
   );
 
-  const renderDesignerDashboard = (role) => (
-    <View style={styles.statsGrid}>
-      <StatusCard
-        title="Assigned Enquiries"
-        value={dashboardData?.assignedEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
-        icon={<Icon name="work" size={20} color={colors.textWhite} />}
-        color={colors.primary}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'assigned' })}
-      />
-      <StatusCard
-        title="Pending Designs"
-        value={dashboardData?.pendingDesigns || dashboardData?.categorizedCounts?.['Pending'] || '0'}
-        icon={<Icon name="pending" size={20} color={colors.textWhite} />}
-        color={colors.primaryDark}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'coral' })}
-      />
-      <StatusCard
-        title="Approval Pending"
-        value={dashboardData?.approvalPendingDesigns || dashboardData?.categorizedCounts?.['Approval Pending'] || '0'}
-        icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
-        color={colors.primaryLight}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'approval_pending' })}
-      />
-      <StatusCard
-        title="Completed Designs"
-        value={dashboardData?.completedDesigns || dashboardData?.categorizedCounts?.['Completed'] || '0'}
-        icon={<Icon name="palette" size={20} color={colors.textWhite} />}
-        color={colors.primary}
-        onPress={() => navigation.navigate('Enquiries', { filter: 'completed' })}
-      />
-    </View>
-  );
+  const renderDesignerDashboard = (role) => {
+    // For CAD role, show specific 4 cards
+    if (role === 'cad') {
+      // Get counts from dashboard data or specific status counts
+      const totalCount = dashboardData?.assignedEnquiries || dashboardData?.categorizedCounts?.['All'] || dashboardData?.specificStatusCounts?.['All'] || '0';
+      
+      // Get CAD count - check multiple sources
+      // The API returns pendingDesigns for CAD role, which contains the CAD status count
+      const cadFromStatusStats = statusStats.find((s) => {
+        const name = (s.name || s.status || s.Status || '').toLowerCase();
+        return name === 'cad';
+      })?.count || 0;
+      
+      // Check all case variations: CAD, Cad, cad
+      // Also check pendingDesigns which is set by API for CAD role
+      const cadFromPendingDesigns = dashboardData?.pendingDesigns;
+      const cadFromSpecific = dashboardData?.specificStatusCounts?.['CAD'] || 
+                              dashboardData?.specificStatusCounts?.['Cad'] || 
+                              dashboardData?.specificStatusCounts?.['cad'] ||
+                              dashboardData?.statusCounts?.['cad'] ||
+                              dashboardData?.statusCounts?.['CAD'];
+      
+      const cadFromCategorized = dashboardData?.categorizedCounts?.['CAD'] || 
+                                 dashboardData?.categorizedCounts?.['Cad'] || 
+                                 dashboardData?.categorizedCounts?.['cad'];
+      
+      // Priority: pendingDesigns (from API) > specificStatusCounts > categorizedCounts > statusStats
+      const cadCount = cadFromPendingDesigns || cadFromSpecific || cadFromCategorized || cadFromStatusStats || '0';
+      
+      if (__DEV__) {
+        console.log('🔍 [CAD CARD DEBUG] CAD Count Calculation:', {
+          cadFromPendingDesigns,
+          cadFromSpecific,
+          cadFromCategorized,
+          cadFromStatusStats,
+          finalCadCount: cadCount,
+          pendingDesigns: dashboardData?.pendingDesigns,
+          specificStatusCounts: dashboardData?.specificStatusCounts,
+          categorizedCounts: dashboardData?.categorizedCounts,
+          statusStatsLength: statusStats?.length,
+        });
+      }
+      
+      // Get Approved Cad count - check statusStats array as fallback
+      const approvedCadFromStatusStats = statusStats.find((s) => {
+        const name = (s.name || s.status || s.Status || '').toLowerCase();
+        return name === 'approved cad' || name === 'approvedcad';
+      })?.count || 0;
+      const approvedCadCount = dashboardData?.specificStatusCounts?.['Approved Cad'] || dashboardData?.specificStatusCounts?.['ApprovedCad'] || dashboardData?.categorizedCounts?.['Approved Cad'] || dashboardData?.categorizedCounts?.['ApprovedCad'] || approvedCadFromStatusStats || '0';
+      
+      // Get Design Approval Pending count - check statusStats array as fallback
+      const designApprovalPendingFromStatusStats = statusStats.find((s) => {
+        const name = (s.name || s.status || s.Status || '').toLowerCase();
+        return name === 'design approval pending';
+      })?.count || 0;
+      const designApprovalPendingCount = dashboardData?.approvalPendingDesigns || dashboardData?.specificStatusCounts?.['Design Approval Pending'] || dashboardData?.categorizedCounts?.['Approval Pending'] || dashboardData?.categorizedCounts?.['Design Approval Pending'] || designApprovalPendingFromStatusStats || '0';
+      
+      return (
+        <View style={styles.statsGrid}>
+          <StatusCard
+            title="Total"
+            value={totalCount}
+            icon={<Icon name="work" size={20} color={colors.textWhite} />}
+            color={colors.primary}
+            onPress={() => navigation.navigate('Enquiries')}
+          />
+          <StatusCard
+            title="Cad"
+            value={cadCount}
+            icon={<Icon name="pending" size={20} color={colors.textWhite} />}
+            color={colors.primaryDark}
+            onPress={() => navigateWithDashboardFilter({ filter: 'cad' })}
+          />
+          <StatusCard
+            title="Approved Cad"
+            value={approvedCadCount}
+            icon={<Icon name="check-circle" size={20} color={colors.textWhite} />}
+            color={colors.primaryLight}
+            onPress={() => navigateWithDashboardFilter({ filter: 'approved cad' })}
+          />
+          <StatusCard
+            title="Design Approval Pending"
+            value={designApprovalPendingCount}
+            icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
+            color={colors.primary}
+            onPress={() => navigateWithDashboardFilter({ filter: 'design approval pending' })}
+          />
+        </View>
+      );
+    }
+    
+    // For Coral role, keep existing cards
+    // Get counts with statusStats fallback
+    const coralFromStatusStats = statusStats.find((s) => {
+      const name = (s.name || s.status || s.Status || '').toLowerCase();
+      return name === 'coral';
+    })?.count || 0;
+    const pendingDesignsFromStatusStats = statusStats.find((s) => {
+      const name = (s.name || s.status || s.Status || '').toLowerCase();
+      return name === 'coral';
+    })?.count || 0;
+    const approvalPendingFromStatusStats = statusStats.find((s) => {
+      const name = (s.name || s.status || s.Status || '').toLowerCase();
+      return name === 'design approval pending';
+    })?.count || 0;
+    
+    return (
+      <View style={styles.statsGrid}>
+        <StatusCard
+          title="Assigned Enquiries"
+          value={dashboardData?.assignedEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
+          icon={<Icon name="work" size={20} color={colors.textWhite} />}
+          color={colors.primary}
+          onPress={() => navigation.navigate('Enquiries')}
+        />
+        <StatusCard
+          title="Pending Designs"
+          value={dashboardData?.pendingDesigns || dashboardData?.categorizedCounts?.['Pending'] || pendingDesignsFromStatusStats || '0'}
+          icon={<Icon name="pending" size={20} color={colors.textWhite} />}
+          color={colors.primaryDark}
+          onPress={() => navigateWithDashboardFilter({ filter: 'coral' })}
+        />
+        <StatusCard
+          title="Approval Pending"
+          value={dashboardData?.approvalPendingDesigns || dashboardData?.categorizedCounts?.['Approval Pending'] || dashboardData?.categorizedCounts?.['Design Approval Pending'] || approvalPendingFromStatusStats || '0'}
+          icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
+          color={colors.primaryLight}
+          onPress={() => navigateWithDashboardFilter({ filter: 'design approval pending' })}
+        />
+        <StatusCard
+          title="Completed Designs"
+          value={dashboardData?.completedDesigns || dashboardData?.categorizedCounts?.['Completed'] || '0'}
+          icon={<Icon name="palette" size={20} color={colors.textWhite} />}
+          color={colors.primary}
+          onPress={() => navigateWithDashboardFilter({ filter: 'completed' })}
+        />
+      </View>
+    );
+  };
 
   const renderQuickActions = () => {
     const actions = [];

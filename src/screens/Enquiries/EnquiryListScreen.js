@@ -39,15 +39,6 @@ import { API_BASE_URL } from '../../config/apiConfig';
 // Import PDF generator module
 import * as pdfGeneratorModule from '../../utils/pdfGenerator';
 
-// Debug: Log module import status
-if (__DEV__) {
-  console.log('EnquiryListScreen: pdfGeneratorModule imported:', {
-    moduleExists: !!pdfGeneratorModule,
-    moduleType: typeof pdfGeneratorModule,
-    hasDownloadAllEnquiriesPDF: pdfGeneratorModule ? typeof pdfGeneratorModule.downloadAllEnquiriesPDF : 'no module',
-    moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
-  });
-}
 
 const { width } = Dimensions.get('window');
 const PAGE_SIZE = 10;
@@ -96,7 +87,8 @@ const EnquiryListScreen = ({ navigation }) => {
   const clientUserId = (isClient && user?.clientId) ? user.clientId : currentUserId;
   
   const [enquiries, setEnquiries] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [pagination, setPaginationState] = useState({
@@ -107,6 +99,7 @@ const EnquiryListScreen = ({ navigation }) => {
   });
   const requestIdRef = useRef(0);
   const prefetchingPageRef = useRef(null);
+  const hasLoadedOnceRef = useRef(false);
   const [clientNameOverrides, setClientNameOverrides] = useState({});
   const fetchingClientIdsRef = useRef(new Set());
   const flatListRef = useRef(null);
@@ -134,19 +127,9 @@ const EnquiryListScreen = ({ navigation }) => {
     // For Client users (role 4), use ClientId from token
     if ((!normalizedFilters.clientId || normalizedFilters.clientId === 'all') && isClient && clientUserId) {
       normalizedFilters.clientId = clientUserId;
-      if (__DEV__) {
-        console.log('🔐 [ENQUIRY LIST] Client user - using ClientId from token:', clientUserId);
-        console.log('🔐 [ENQUIRY LIST] User object:', {
-          id: user?.id,
-          role: user?.role,
-          roleNumber: user?.roleNumber,
-          clientId: user?.clientId,
-        });
-      }
     } else if (isClient && !clientUserId) {
       if (__DEV__) {
         console.error('❌ [ENQUIRY LIST] ERROR: Client user but clientUserId is missing!');
-        console.error('❌ [ENQUIRY LIST] User object:', user);
       }
     }
     
@@ -202,13 +185,17 @@ const EnquiryListScreen = ({ navigation }) => {
     return params;
   }, [resolvedFilters, searchQuery, sortBy, sortOrder]);
   
-  const fetchEnquiries = useCallback(async ({ pageToLoad = 1, append = false } = {}) => {
+  const fetchEnquiries = useCallback(async ({ pageToLoad = 1, append = false, suppressInlineLoader = false } = {}) => {
     const requestId = ++requestIdRef.current;
     
     if (append) {
       setIsLoadingMore(true);
     } else {
-      setLoading(true);
+      if (!hasLoadedOnceRef.current) {
+        setIsInitialLoading(true);
+      } else if (!suppressInlineLoader) {
+        setIsFetching(true);
+      }
       prefetchingPageRef.current = null;
     }
     
@@ -216,11 +203,6 @@ const EnquiryListScreen = ({ navigation }) => {
       const params = buildQueryString(pageToLoad);
       const token = await AsyncStorage.getItem('token');
       const apiUrl = `${API_BASE_URL}/api/enquiries/search?${params.toString()}`;
-      
-      if (__DEV__ && isClient) {
-        console.log('🔐 [ENQUIRY FETCH] Client user - API URL:', apiUrl);
-        console.log('🔐 [ENQUIRY FETCH] Query params:', params.toString());
-      }
       
       const response = await fetch(apiUrl, {
         headers: {
@@ -307,8 +289,11 @@ const EnquiryListScreen = ({ navigation }) => {
     } finally {
       if (append) {
         setIsLoadingMore(false);
-      } else {
-        setLoading(false);
+      } else if (!hasLoadedOnceRef.current) {
+        setIsInitialLoading(false);
+        hasLoadedOnceRef.current = true;
+      } else if (!suppressInlineLoader) {
+        setIsFetching(false);
       }
     }
   }, [buildQueryString]);
@@ -323,6 +308,7 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Track previous filter values to detect changes
   const prevFiltersRef = useRef({ status: null, priority: null, clientId: null, searchQuery: null });
+  const lastDashboardFilterRef = useRef(null);
   
   // Clear scroll position when filters change (so user starts from top with new filters)
   useEffect(() => {
@@ -357,13 +343,8 @@ const EnquiryListScreen = ({ navigation }) => {
     try {
       scrollPositionRef.current = offsetY;
       await AsyncStorage.setItem(scrollPositionKey, String(offsetY));
-      if (__DEV__) {
-        console.log('💾 [ENQUIRY LIST] Saved scroll position:', offsetY);
-      }
     } catch (error) {
-      if (__DEV__) {
-        console.warn('Failed to save scroll position:', error);
-      }
+      // Silently handle scroll position save error
     }
   }, []);
 
@@ -379,17 +360,12 @@ const EnquiryListScreen = ({ navigation }) => {
           setTimeout(() => {
             if (flatListRef.current) {
               flatListRef.current.scrollToOffset({ offset: offsetY, animated: false });
-              if (__DEV__) {
-                console.log('📍 [ENQUIRY LIST] Restored scroll position:', offsetY);
-              }
             }
           }, 200);
         }
       }
     } catch (error) {
-      if (__DEV__) {
-        console.warn('Failed to restore scroll position:', error);
-      }
+      // Silently handle scroll position restore error
     }
   }, []);
 
@@ -402,11 +378,11 @@ const EnquiryListScreen = ({ navigation }) => {
   // Restore scroll position when data is loaded (only once on mount)
   const hasRestoredScrollRef = useRef(false);
   useEffect(() => {
-    if (!loading && displayEnquiries && Array.isArray(displayEnquiries) && displayEnquiries.length > 0 && !hasRestoredScrollRef.current) {
+    if (!isInitialLoading && displayEnquiries && Array.isArray(displayEnquiries) && displayEnquiries.length > 0 && !hasRestoredScrollRef.current) {
       hasRestoredScrollRef.current = true;
       restoreScrollPosition();
     }
-  }, [loading, displayEnquiries, restoreScrollPosition]);
+  }, [isInitialLoading, displayEnquiries, restoreScrollPosition]);
 
   // Clear all filters when component unmounts (user navigates away)
   useEffect(() => {
@@ -521,13 +497,13 @@ const EnquiryListScreen = ({ navigation }) => {
   }, [enquiries, clientNameMap, clientNameOverrides]);
   
   const handleLoadMore = useCallback(() => {
-    if (!hasMore || loading || isLoadingMore) {
+    if (!hasMore || isInitialLoading || isFetching || isLoadingMore) {
       return;
     }
     
     const nextPage = (pagination?.page || 1) + 1;
     fetchEnquiries({ pageToLoad: nextPage, append: true }).catch(() => {});
-  }, [fetchEnquiries, hasMore, isLoadingMore, loading, pagination?.page]);
+  }, [fetchEnquiries, hasMore, isLoadingMore, isInitialLoading, isFetching, pagination?.page]);
   
   const currentPage = pagination.page;
   const totalPages = pagination.totalPages;
@@ -540,16 +516,6 @@ const EnquiryListScreen = ({ navigation }) => {
   
   const clients = Array.isArray(clientsData) ? clientsData : [];
   
-  // Debug clients API response (in useEffect to avoid hook order issues)
-  useEffect(() => {
-    if (__DEV__ && clientsData) {
-      console.log('Clients API Response:', {
-        dataLength: Array.isArray(clientsData) ? clientsData.length : 'not array',
-        firstClient: Array.isArray(clientsData) && clientsData.length > 0 ? clientsData[0] : null,
-        error: clientsError
-      });
-    }
-  }, [clientsData, clientsError]);
   
   // Local UI state
   const [showFilters, setShowFilters] = useState(false);
@@ -561,9 +527,6 @@ const EnquiryListScreen = ({ navigation }) => {
   const clientNameMap = useMemo(() => {
     const map = new Map();
     if (!clients || clients.length === 0) {
-      if (__DEV__) {
-        console.log('No clients data available yet');
-      }
       return map;
     }
     
@@ -581,11 +544,6 @@ const EnquiryListScreen = ({ navigation }) => {
         map.set(cleanId.trim(), client.name);
       }
     });
-    
-    if (__DEV__) {
-      console.log('Client Name Map created with', map.size, 'entries');
-      console.log('Sample client IDs in map:', Array.from(map.keys()).slice(0, 5));
-    }
     
     return map;
   }, [clients]);
@@ -660,7 +618,7 @@ const EnquiryListScreen = ({ navigation }) => {
   }, [enrichedEnquiries]);
 
   useEffect(() => {
-    if (loading || isLoadingMore) {
+    if (isInitialLoading || isFetching || isLoadingMore) {
       return;
     }
 
@@ -692,7 +650,8 @@ const EnquiryListScreen = ({ navigation }) => {
     displayEnquiries.length,
     hasMore,
     isLoadingMore,
-    loading,
+    isInitialLoading,
+    isFetching,
     pagination?.page,
   ]);
 
@@ -730,27 +689,34 @@ const EnquiryListScreen = ({ navigation }) => {
   useEffect(() => {
     const rawFilter = route.params?.filter;
     const filterType = route.params?.filterType;
+    const filterSource = route.params?.filterSource;
+    const filterAppliedAt = route.params?.filterAppliedAt;
+    const dashboardToken = rawFilter
+      ? `${filterType || 'status'}:${rawFilter}:${filterAppliedAt || 'na'}`
+      : null;
+    let routeFilterHandled = false;
+
+    // When navigating from dashboard, clear all existing filters so only the clicked filter applies
+    if (filterSource === 'dashboard' && rawFilter) {
+      if (lastDashboardFilterRef.current !== dashboardToken) {
+        dispatch(clearFilters());
+        lastDashboardFilterRef.current = dashboardToken;
+      }
+      routeFilterHandled = true;
+    }
 
     if (rawFilter === 'assigned' || rawFilter === 'all') {
       if (filters.status !== 'all') {
         dispatch(setFilters({ status: 'all' }));
         dispatch(setSelectedStatus('All'));
       }
-    }
-
-    if (rawFilter && !filterType && rawFilter !== 'assigned' && rawFilter !== 'all') {
+      routeFilterHandled = routeFilterHandled || Boolean(rawFilter);
+    } else if (rawFilter && !filterType) {
       // Map status filter values from Dashboard to filter format
       // Handle various status name formats from aggregate API
       const statusFilter = rawFilter.toLowerCase();
       const isDesigner = user?.role === 'coral' || user?.role === 'cad';
       let mappedStatus = 'all';
-      
-      if (__DEV__) {
-        console.log('🔍 ========== ROUTE PARAMS FILTER ==========');
-        console.log('🔍 Route params filter:', rawFilter);
-        console.log('🔍 Status filter (lowercase):', statusFilter);
-        console.log('🔍 Is Designer:', isDesigner);
-      }
       
       // Map common status filter values
       // For designers, 'pending' should map to 'Design Approval Pending'
@@ -762,7 +728,7 @@ const EnquiryListScreen = ({ navigation }) => {
       } else if (statusFilter === 'approval_pending' || statusFilter === 'design approval pending' || 
                  (statusFilter.includes('approval') && statusFilter.includes('pending'))) {
         mappedStatus = 'Design Approval Pending';
-      } else if (statusFilter === 'approved cad' || statusFilter === 'approvedcad') {
+      } else if (statusFilter === 'approved cad' || statusFilter === 'approvedcad' || statusFilter === 'approved_cad') {
         mappedStatus = 'Approved Cad';
       } else if (statusFilter === 'order placement' || statusFilter === 'orderplacement') {
         mappedStatus = 'Order Placement';
@@ -793,21 +759,13 @@ const EnquiryListScreen = ({ navigation }) => {
         mappedStatus = matchedStatus || (rawFilter.charAt(0).toUpperCase() + rawFilter.slice(1).toLowerCase());
       }
       
-      if (__DEV__) {
-        console.log('🔍 Mapped status:', mappedStatus);
-        console.log('🔍 Current filters.status:', filters.status);
-        console.log('🔍 =========================================');
-      }
-      
       if (mappedStatus !== filters.status) {
-        if (__DEV__) {
-          console.log('✅ Setting filter status to:', mappedStatus);
-        }
         dispatch(setFilters({ 
           status: mappedStatus === 'all' ? 'all' : mappedStatus,
         }));
         dispatch(setSelectedStatus(mappedStatus === 'all' ? 'All' : mappedStatus));
       }
+      routeFilterHandled = true;
     }
     
     // Handle client filter from route params
@@ -815,7 +773,6 @@ const EnquiryListScreen = ({ navigation }) => {
       const clientName = rawFilter;
       const clientId = route.params?.clientId;
       
-      // Clear status filter when applying client filter
       // Set both client filter and clientId
       if (clientId) {
         dispatch(setFilters({ 
@@ -841,30 +798,41 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       dispatch(setSelectedClient(clientName));
       dispatch(setSelectedStatus('All'));
+      routeFilterHandled = true;
     }
-  }, [route.params?.filterType, route.params?.filter, clients, filters.status, dispatch, user?.role]);
+
+    if (routeFilterHandled) {
+      const clearParams = () => {
+        navigation.setParams({
+          filter: undefined,
+          filterType: undefined,
+          filterSource: undefined,
+          filterAppliedAt: undefined,
+          clientId: undefined,
+        });
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(clearParams);
+      } else {
+        setTimeout(clearParams, 0);
+      }
+    }
+  }, [
+    route.params?.filterType,
+    route.params?.filter,
+    route.params?.filterSource,
+    route.params?.filterAppliedAt,
+    clients,
+    filters.status,
+    dispatch,
+    user?.role,
+    navigation,
+  ]);
   
-  // Debug: Log loading states (only on significant changes, not every render)
-  useEffect(() => {
-    if (__DEV__ && (loading || isLoadingMore)) {
-      const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
-      console.log('📊 Loading States:', {
-        isLoadingMore,
-        loading,
-        hasMore,
-        currentPage,
-        totalPages,
-        enrichedCount: displayEnquiriesLength,
-      });
-    }
-  }, [isLoadingMore, loading, hasMore, currentPage, totalPages, displayEnquiries]);
   
   // Render enquiry card item for FlatList
   const renderEnquiryItem = ({ item: enquiry }) => {
     if (!enquiry || !enquiry.id) {
-      if (__DEV__) {
-        console.warn('Skipping invalid enquiry item:', enquiry);
-      }
       return null;
     }
     
@@ -874,14 +842,8 @@ const EnquiryListScreen = ({ navigation }) => {
           key={enquiry.id}
           enquiry={enquiry}
           onPress={() => {
-            if (__DEV__) {
-              console.log('Navigating to SingleEnquiry with enquiry ID:', enquiry?.id);
-            }
             try {
               if (!enquiry?.id) {
-                if (__DEV__) {
-                  console.warn('Cannot navigate: enquiry missing ID');
-                }
                 Alert.alert('Error', 'Invalid enquiry data. Please refresh the list.');
                 return;
               }
@@ -917,7 +879,7 @@ const EnquiryListScreen = ({ navigation }) => {
       );
     } catch (error) {
       if (__DEV__) {
-        console.error('Error rendering enquiry item:', error, enquiry);
+        console.error('Error rendering enquiry item:', error);
       }
       return null; // Return null on error to prevent crash
     }
@@ -935,7 +897,7 @@ const EnquiryListScreen = ({ navigation }) => {
     
     // Check if currently loading more data
     const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
-    const isCurrentlyLoading = isLoadingMore || (loading && displayEnquiriesLength > 0 && currentPage > 1);
+    const isCurrentlyLoading = isLoadingMore || (isFetching && displayEnquiriesLength > 0 && currentPage > 1);
     
     // Don't show anything if no data at all
     if (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiriesLength === 0) {
@@ -975,7 +937,7 @@ const EnquiryListScreen = ({ navigation }) => {
           <TouchableOpacity
             style={styles.loadMoreButton}
             onPress={handleLoadMore}
-            disabled={isLoadingMore}
+            disabled={isLoadingMore || isFetching}
           >
             <Text style={styles.loadMoreButtonText}>
               {isLoadingMore ? 'Loading…' : 'Load more enquiries'}
@@ -1057,15 +1019,6 @@ const EnquiryListScreen = ({ navigation }) => {
         return;
       }
 
-      // Debug: Log what we're exporting
-      if (__DEV__) {
-        console.log('========== EXPORTING ENQUIRIES TO PDF ==========');
-        console.log('Total enquiries to export:', enquiriesToExport.length);
-        console.log('Is array:', Array.isArray(enquiriesToExport));
-        console.log('First enquiry keys:', enquiriesToExport[0] ? Object.keys(enquiriesToExport[0]) : 'no data');
-        console.log('Sample enquiry:', enquiriesToExport[0] ? JSON.stringify(enquiriesToExport[0]).substring(0, 300) : 'no data');
-        console.log('================================================');
-      }
 
       Alert.alert(
         'Generating PDF',
@@ -1108,7 +1061,7 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       scrollPositionRef.current = 0;
       await AsyncStorage.removeItem(scrollPositionKey);
-      await fetchEnquiries({ pageToLoad: 1, append: false });
+      await fetchEnquiries({ pageToLoad: 1, append: false, suppressInlineLoader: true });
     } catch (error) {
       if (__DEV__) {
         console.error('Error refreshing enquiries:', error);
@@ -1268,11 +1221,20 @@ const EnquiryListScreen = ({ navigation }) => {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) {
+      return 'Recently';
+    }
+
     const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+      return 'Recently';
+    }
+
     const now = new Date();
     const diffTime = Math.abs(now - date);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
+    if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays} days ago`;
     if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
@@ -1302,18 +1264,12 @@ const EnquiryListScreen = ({ navigation }) => {
       // Toggle order if same field
       const newOrder = sortOrder === 'asc' ? 'desc' : 'asc';
       dispatch(setSorting({ sortBy, sortOrder: newOrder }));
-      if (__DEV__) {
-        console.log('Sort order toggled:', newOrder);
-      }
     } else {
       // Default sort order based on field type
       // Date fields default to 'desc' (newest first), others default to 'asc'
       const dateFields = ['AssignedDate', 'CreatedDate', 'ShippingDate'];
       const defaultOrder = dateFields.includes(newSortBy) ? 'desc' : 'asc';
       dispatch(setSorting({ sortBy: newSortBy, sortOrder: defaultOrder }));
-      if (__DEV__) {
-        console.log('Sort changed to:', newSortBy, defaultOrder);
-      }
     }
     setShowSortModal(false);
   };
@@ -1361,10 +1317,6 @@ const EnquiryListScreen = ({ navigation }) => {
               style={styles.compactChip}
               onPress={() => {
                 const filterStatus = status === 'All' ? 'all' : status;
-                if (__DEV__) {
-                  console.log('🔍 Status chip clicked:', status);
-                  console.log('🔍 Setting filter to:', filterStatus);
-                }
                 dispatch(setSelectedStatus(status));
                 dispatch(setFilters({ status: filterStatus }));
               }}
@@ -1532,7 +1484,7 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Show full screen loader only on initial load (when no data yet)
   const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
-  if (loading && displayEnquiriesLength === 0) {
+  if (isInitialLoading && displayEnquiriesLength === 0) {
     return <AnimatedLogoLoader size={80} />;
   }
 
@@ -1574,6 +1526,12 @@ const EnquiryListScreen = ({ navigation }) => {
       {/* Filter chips - moved outside FlatList to remove gap */}
       {renderStatusChips()}
       {user?.role === 'admin' && renderClientChips()}
+      {isFetching && (
+        <View style={styles.inlineLoader}>
+          {/* <ActivityIndicator size="small" color={colors.primary} /> */}
+          {/* <Text style={styles.inlineLoaderText}>Updating results...</Text> */}
+        </View>
+      )}
 
       <FlatList
         ref={flatListRef}
@@ -1584,9 +1542,6 @@ const EnquiryListScreen = ({ navigation }) => {
           if (item?.id) return String(item.id);
           if (item?._id) return String(item._id);
           // Last resort: use index (not ideal but better than Math.random())
-          if (__DEV__) {
-            console.warn('Enquiry item missing ID, using index:', index, item);
-          }
           return `enquiry-${index}`;
         }}
         ListHeaderComponent={null}
@@ -1723,6 +1678,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  inlineLoader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    gap: 8,
+  },
+  inlineLoaderText: {
+    color: colors.textSecondary,
+    fontSize: fonts.sm,
   },
   filterChipText: {
     color: colors.textWhite,

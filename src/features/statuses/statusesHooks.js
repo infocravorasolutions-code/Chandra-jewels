@@ -68,6 +68,26 @@ export const useStatusOptions = () => {
     
     // For designers, filter to only show specific statuses
     if (isDesigner) {
+      // For CAD role, show specific statuses
+      if (user?.role === 'cad') {
+        const cadStatuses = ['Cad', 'CAD', 'Approved Cad', 'ApprovedCad', 'Design Approval Pending'];
+        return [
+          { label: 'All', value: 'all' },
+          ...allOptions.filter(opt => {
+            const optValue = opt.value?.toLowerCase() || '';
+            const optLabel = opt.label?.toLowerCase() || '';
+            return cadStatuses.some(ds => 
+              optValue === ds.toLowerCase() ||
+              optLabel === ds.toLowerCase() ||
+              optValue.includes('cad') && !optValue.includes('approved') ||
+              (optValue.includes('approved') && optValue.includes('cad')) ||
+              optValue.includes('design approval pending')
+            );
+          }),
+        ];
+      }
+      
+      // For Coral role, show existing statuses
       const designerStatuses = ['Design Approval Pending', 'Coral'];
       return [
         { label: 'All Status', value: 'all' },
@@ -111,5 +131,6 @@ export const useStatus = (name) => {
   
   return status || null;
 };
+
 
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -75,6 +75,7 @@ const NotificationsScreen = ({ navigation }) => {
   const { data: unreadCountData = 0, refetch: refetchUnreadCount } = useGetUnreadNotificationsCountQuery();
   const [markNotificationRead] = useMarkNotificationReadMutation();
   const [markAllNotificationsRead, { isLoading: isMarkingAll }] = useMarkAllNotificationsReadMutation();
+
 
   useFocusEffect(
     useCallback(() => {

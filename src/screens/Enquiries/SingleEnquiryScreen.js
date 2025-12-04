@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -12,9 +12,11 @@ import {
   FlatList,
   Dimensions,
 } from 'react-native';
+import { launchImageLibrary } from 'react-native-image-picker';
+import ImageZoom from 'react-native-image-pan-zoom';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
-import { useGetEnquiryByIdQuery, useDeleteEnquiryMutation, useApproveDesignVersionMutation, useRejectDesignVersionMutation } from '../../store/api';
+import { useGetEnquiryByIdQuery, useDeleteEnquiryMutation, useApproveDesignVersionMutation, useRejectDesignVersionMutation, useUploadReferenceImagesMutation } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input, EnquiryImage } from '../../components/common';
@@ -42,6 +44,72 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // Fetch and cache users for name resolution
   useUsers();
   
+  // Automatic cache cleanup on screen mount (runs once per app session)
+  useEffect(() => {
+    let cleanupTimer;
+    const performCleanup = async () => {
+      try {
+        // Clean up expired entries and old cache on screen load
+        const allKeys = await AsyncStorage.getAllKeys();
+        const cacheKeys = allKeys.filter(key => key.startsWith('image_cache_'));
+        
+        if (cacheKeys.length > 0) {
+          const now = Date.now();
+          const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+          const cacheEntries = await AsyncStorage.multiGet(cacheKeys);
+          
+          const expiredKeys = cacheEntries
+            .map(([key, value]) => {
+              try {
+                const data = JSON.parse(value);
+                const age = now - (data.timestamp || 0);
+                return age > maxAge ? key : null;
+              } catch {
+                return key; // Remove invalid entries
+              }
+            })
+            .filter(Boolean);
+          
+          if (expiredKeys.length > 0) {
+            await AsyncStorage.multiRemove(expiredKeys);
+          }
+          
+          // If we still have more than 100 cached images, remove oldest 30%
+          const remainingKeys = cacheKeys.filter(k => !expiredKeys.includes(k));
+          if (remainingKeys.length > 100) {
+            const remainingEntries = cacheEntries
+              .filter(([key]) => !expiredKeys.includes(key))
+              .map(([key, value]) => {
+                try {
+                  const data = JSON.parse(value);
+                  return { key, timestamp: data.timestamp || 0 };
+                } catch {
+                  return { key, timestamp: 0 };
+                }
+              })
+              .sort((a, b) => a.timestamp - b.timestamp);
+            
+            const toRemove = Math.floor(remainingEntries.length * 0.3);
+            const oldestKeys = remainingEntries.slice(0, toRemove).map(e => e.key);
+            
+            if (oldestKeys.length > 0) {
+              await AsyncStorage.multiRemove(oldestKeys);
+            }
+          }
+        }
+      } catch (error) {
+        // Silently handle cache cleanup errors
+      }
+    };
+    
+    // Run cleanup after a short delay to not block initial render
+    cleanupTimer = setTimeout(performCleanup, 2000);
+    
+    return () => {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+    };
+  }, []); // Run once on mount
+  
   // Use route enquiryId or initialEnquiry id
   const enquiryId = routeEnquiryId || initialEnquiry?.id || initialEnquiry?._id;
   
@@ -50,7 +118,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     
   }, [enquiryId]);
   
-  // Redux hooks
+  // Redux hooks - refetch when screen comes into focus to get latest pricing updates
   const { 
     data: enquiryData, 
     isLoading: loading, 
@@ -58,6 +126,8 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     refetch 
   } = useGetEnquiryByIdQuery(enquiryId, {
     skip: !enquiryId,
+    refetchOnFocus: true, // Refetch when screen comes into focus to get latest data (including pricing)
+    refetchOnMountOrArgChange: true, // Refetch when enquiryId changes
   });
   
 
@@ -200,17 +270,19 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const [modalImages, setModalImages] = useState([]); // Store image objects for modal
   const modalFlatListRef = useRef(null);
   const [modalCurrentIndex, setModalCurrentIndex] = useState(0);
+  const [isModalZoomed, setIsModalZoomed] = useState(false);
   
   const handleImagePress = (uri, index, allImages) => {
     if (!uri) {
       return;
     }
     if (__DEV__) {
-      console.log('🖼️ Opening image modal:', { uri, index, allImagesCount: allImages?.length });
     }
-    setSelectedImageUri(uri);
+    const imagesForModal = allImages || [];
     setSelectedImageIndex(index);
-    setModalImages(allImages || []);
+    setModalImages(imagesForModal);
+    setIsModalZoomed(false);
+    setSelectedImageUri(uri);
     setModalCurrentIndex(index);
     setImageModalVisible(true);
   };
@@ -220,37 +292,105 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     setSelectedImageUri(null);
     setModalImages([]);
     setModalCurrentIndex(0);
+    setIsModalZoomed(false);
   };
   
   // Scroll to selected image when modal opens
   useEffect(() => {
-    if (isImageModalVisible && modalImages.length > 1 && modalFlatListRef.current) {
-      setTimeout(() => {
+    if (isImageModalVisible && modalImages.length > 1) {
+      // Ensure selected index image URI is set (prevents flicker)
+      const targetImage = modalImages[modalCurrentIndex];
+      if (targetImage) {
+        setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
+      }
+      
+      if (modalFlatListRef.current) {
+        requestAnimationFrame(() => {
         modalFlatListRef.current?.scrollToIndex({
           index: modalCurrentIndex,
           animated: false,
         });
-      }, 100);
+        });
     }
-  }, [isImageModalVisible, modalCurrentIndex, modalImages.length]);
+    }
+  }, [isImageModalVisible, modalCurrentIndex, modalImages]);
   
   // State for image modal slider - must be at top level of component
   const screenWidth = Dimensions.get('window').width;
+  const screenHeight = Dimensions.get('window').height;
+
+  useEffect(() => {
+    if (!isImageModalVisible) {
+      setIsModalZoomed(false);
+    }
+  }, [isImageModalVisible]);
+  const ZOOM_ON_THRESHOLD = 1.05;
+  const ZOOM_OFF_THRESHOLD = 1.02;
+
+  const handleZoomMove = useCallback((event) => {
+    const scale = event?.scale ?? 1;
+    setIsModalZoomed((prev) => {
+      if (!prev && scale >= ZOOM_ON_THRESHOLD) {
+        return true;
+      }
+      if (prev && scale <= ZOOM_OFF_THRESHOLD) {
+        return false;
+      }
+      return prev;
+    });
+  }, [ZOOM_ON_THRESHOLD, ZOOM_OFF_THRESHOLD]);
   
   // Viewability config for modal FlatList - must be at component level
-  const modalOnViewableItemsChanged = useRef(({ viewableItems }) => {
-    if (viewableItems.length > 0) {
-      setModalCurrentIndex(viewableItems[0].index || 0);
+  const updateModalIndex = useCallback((index, scrollList = true) => {
+    const boundedIndex = Math.max(0, Math.min((modalImages?.length || 1) - 1, index));
+    if (modalFlatListRef.current && scrollList && modalImages.length > 1) {
+      modalFlatListRef.current.scrollToIndex({
+        index: boundedIndex,
+        animated: true,
+      });
     }
-  }).current;
 
-  const modalViewabilityConfig = useRef({
+    requestAnimationFrame(() => {
+      setModalCurrentIndex((prev) => (prev === boundedIndex ? prev : boundedIndex));
+      const targetImage = modalImages?.[boundedIndex];
+      if (targetImage) {
+        setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
+      }
+      setIsModalZoomed(false);
+    });
+  }, [modalImages]);
+
+  const getModalImageKey = useCallback((item, index) => {
+    return item?.imageKey || item?.imageId || item?.imageUri || `modal-image-${index}`;
+  }, []);
+
+  const handleModalPrev = useCallback(() => {
+    if (!modalImages || modalImages.length <= 1) return;
+    updateModalIndex(modalCurrentIndex - 1);
+  }, [modalImages, modalCurrentIndex, updateModalIndex]);
+
+  const handleModalNext = useCallback(() => {
+    if (!modalImages || modalImages.length <= 1) return;
+    updateModalIndex(modalCurrentIndex + 1);
+  }, [modalImages, modalCurrentIndex, updateModalIndex]);
+
+  const modalOnViewableItemsChanged = useCallback(({ viewableItems }) => {
+    if (viewableItems.length > 0) {
+      const nextIndex = viewableItems[0].index || 0;
+      if (nextIndex !== modalCurrentIndex) {
+        updateModalIndex(nextIndex, false);
+    }
+    }
+  }, [modalCurrentIndex, updateModalIndex]);
+
+  const modalViewabilityConfig = useMemo(() => ({
     itemVisiblePercentThreshold: 50,
-  }).current;
+  }), []);
   
   // API mutations
   const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
   const [rejectDesignVersion, { isLoading: isRejecting }] = useRejectDesignVersionMutation();
+  const [uploadReferenceImages, { isLoading: isUploadingReference }] = useUploadReferenceImagesMutation();
 
   // Use enquiry from query if available, otherwise use initialEnquiry
   const enquiry = enquiryData || initialEnquiry || {};
@@ -270,12 +410,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   useEffect(() => {
   }, [enquiry]);
   
-  // Get priority from API (Priority field) - use original value, not normalized
-  // Check _originalData first to get the full priority value (e.g., "Super High" not "high")
+  // Get priority from API (show as badge)
   const priority = originalData?.Priority || enquiry?.Priority || enquiry?.priority || 'Normal';
-  
+
   // Get status from API - use original value, not normalized
-  // Priority order:
+  // Resolution order:
   // 1. Extract from StatusHistory (latest status entry) - most accurate source
   // 2. CurrentStatus from originalData (if API provides it)
   // 3. Status from originalData (direct Status field)
@@ -336,11 +475,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const updatedAt = enquiry?.updatedAt || originalData?.updatedAt || enquiry?.createdAt || createdAt;
 
   // Use ref to track last shouldRefresh value to prevent duplicate refetches
-  const lastShouldRefreshRef = React.useRef(shouldRefresh);
+  const lastShouldRefreshRef = useRef(shouldRefresh);
   
   // Refresh enquiry data when screen comes into focus (if needed)
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       // Always refetch when screen comes into focus to get latest updates
       // This ensures client sees status changes made by admin AND fields added during editing
       if (enquiryId && refetch) {
@@ -365,6 +504,322 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       }
     }, [shouldRefresh, enquiryId, refetch])
   );
+
+  const showAllDetails = user?.role === 'admin';
+
+  const handleOpenChat = useCallback(() => {
+    const currentEnquiry = enquiry || initialEnquiry || {};
+    const currentEnquiryId = enquiryId || currentEnquiry?.id || currentEnquiry?._id;
+
+    if (!currentEnquiryId) {
+      Alert.alert('Error', 'Cannot open chat: Enquiry ID is missing');
+      return;
+    }
+
+    navigation.navigate('ChatGroups', {
+      enquiry: currentEnquiry,
+      enquiryId: currentEnquiryId,
+    });
+  }, [enquiry, initialEnquiry, enquiryId, navigation]);
+
+  const canShowChatFab = user?.role === 'client' ||
+    user?.role === 'admin' ||
+    user?.role === 'coral' ||
+    user?.role === 'cad';
+
+  // In-memory cache as fallback when AsyncStorage is full
+  const memoryCacheRef = useRef(new Map());
+  const storageFullRef = useRef(false);
+  const MAX_MEMORY_CACHE_SIZE = 20; // Keep max 20 images in memory
+
+  // Image cache utility functions - MUST be defined before any conditional returns
+  const getImageCacheKey = useCallback((imageKey, imageId, imageUri) => {
+    // Create a unique cache key from image identifier
+    if (imageKey) return `image_cache_${imageKey}`;
+    if (imageId) return `image_cache_${imageId}`;
+    if (imageUri) {
+      // Use a hash of the URI for cache key
+      const uriHash = imageUri.split('/').pop().split('?')[0];
+      return `image_cache_${uriHash}`;
+    }
+    return null;
+  }, []);
+
+  const getCachedImage = useCallback(async (cacheKey) => {
+    if (!cacheKey) return null;
+    
+    // First check in-memory cache (works even when storage is full)
+    if (memoryCacheRef.current.has(cacheKey)) {
+      const cached = memoryCacheRef.current.get(cacheKey);
+      const cacheAge = Date.now() - (cached.timestamp || 0);
+      const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+      if (cacheAge < maxAge) {
+        return cached.dataUri;
+      } else {
+        memoryCacheRef.current.delete(cacheKey);
+      }
+    }
+    
+    // If storage is known to be full, skip AsyncStorage check
+    if (storageFullRef.current) {
+      return null;
+    }
+    
+    // Try AsyncStorage cache
+    try {
+      const cached = await AsyncStorage.getItem(cacheKey);
+      if (cached) {
+        const cacheData = JSON.parse(cached);
+        // Check if cache is still valid (7 days)
+        const cacheAge = Date.now() - (cacheData.timestamp || 0);
+        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+        if (cacheAge < maxAge) {
+          // Also store in memory cache for faster access
+          memoryCacheRef.current.set(cacheKey, cacheData);
+          // Limit memory cache size
+          if (memoryCacheRef.current.size > MAX_MEMORY_CACHE_SIZE) {
+            const firstKey = memoryCacheRef.current.keys().next().value;
+            memoryCacheRef.current.delete(firstKey);
+          }
+          return cacheData.dataUri;
+        } else {
+          // Cache expired, remove it
+          await AsyncStorage.removeItem(cacheKey);
+        }
+      }
+    } catch (error) {
+      // Silently handle cache read errors
+    }
+    return null;
+  }, []);
+
+  // Automatic cache cleanup function - removes old entries
+  const cleanupImageCache = useCallback(async (aggressive = false) => {
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const cacheKeys = allKeys.filter(key => key.startsWith('image_cache_'));
+      
+      if (cacheKeys.length === 0) {
+        return { removed: 0, remaining: 0 };
+      }
+      
+      // Get all cache entries with timestamps
+      const cacheEntries = await AsyncStorage.multiGet(cacheKeys);
+      const now = Date.now();
+      const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+      
+      const entriesWithTimestamps = cacheEntries
+        .map(([key, value]) => {
+          try {
+            const data = JSON.parse(value);
+            const age = now - (data.timestamp || 0);
+            return { 
+              key, 
+              timestamp: data.timestamp || 0,
+              age,
+              expired: age > maxAge
+            };
+          } catch {
+            return { key, timestamp: 0, age: Infinity, expired: true };
+          }
+        })
+        .sort((a, b) => a.timestamp - b.timestamp); // Oldest first
+      
+      // Determine what to remove
+      let keysToRemove = [];
+      
+      if (aggressive) {
+        // Aggressive cleanup: Remove 50% of oldest entries + all expired
+        const expiredKeys = entriesWithTimestamps.filter(e => e.expired).map(e => e.key);
+        const toRemove = Math.max(1, Math.floor(entriesWithTimestamps.length * 0.5));
+        const oldestKeys = entriesWithTimestamps.slice(0, toRemove).map(e => e.key);
+        keysToRemove = [...new Set([...expiredKeys, ...oldestKeys])];
+      } else {
+        // Normal cleanup: Remove expired entries + 30% of oldest
+        const expiredKeys = entriesWithTimestamps.filter(e => e.expired).map(e => e.key);
+        const toRemove = Math.max(1, Math.floor(entriesWithTimestamps.length * 0.3));
+        const oldestKeys = entriesWithTimestamps.slice(0, toRemove).map(e => e.key);
+        keysToRemove = [...new Set([...expiredKeys, ...oldestKeys])];
+      }
+      
+      if (keysToRemove.length > 0) {
+        await AsyncStorage.multiRemove(keysToRemove);
+        const remaining = cacheKeys.length - keysToRemove.length;
+        return { removed: keysToRemove.length, remaining };
+      }
+      
+      return { removed: 0, remaining: cacheKeys.length };
+    } catch (error) {
+      return { removed: 0, remaining: 0 };
+    }
+  }, []);
+
+  const saveImageToCache = useCallback(async (cacheKey, dataUri) => {
+    if (!cacheKey || !dataUri) return false;
+    try {
+      const cacheData = {
+        dataUri,
+        timestamp: Date.now(),
+      };
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(cacheData));
+      return true; // Success
+    } catch (error) {
+      // Storage is full - try to clean up old cache entries
+      if (error?.code === '13' || error?.message?.includes('SQLITE_FULL')) {
+        if (__DEV__) {
+          console.warn('⚠️ Storage full, attempting aggressive cache cleanup...');
+        }
+        
+        // Get all cache keys first to check how many we have
+        const allKeys = await AsyncStorage.getAllKeys();
+        const cacheKeys = allKeys.filter(key => key.startsWith('image_cache_'));
+        
+        // If we have very few cache entries but storage is full, clear ALL cache
+        // This suggests other data is filling storage, not image cache
+        if (cacheKeys.length <= 5) {
+          if (__DEV__) {
+            console.warn(`⚠️ Storage full but only ${cacheKeys.length} cache entries - clearing ALL image cache`);
+          }
+          if (cacheKeys.length > 0) {
+            await AsyncStorage.multiRemove(cacheKeys);
+            if (__DEV__) {
+              console.log(`🧹 Cleared all ${cacheKeys.length} image cache entries`);
+            }
+          }
+          
+          // Try saving after clearing all cache
+          try {
+            await AsyncStorage.setItem(cacheKey, JSON.stringify({
+              dataUri,
+              timestamp: Date.now(),
+            }));
+            if (__DEV__) {
+              console.log('✅ Cache saved after clearing all image cache');
+            }
+            return true;
+              } catch (clearAllError) {
+                // Storage is consistently full - disable AsyncStorage caching and use memory cache only
+                storageFullRef.current = true;
+                if (__DEV__) {
+                  console.warn('⚠️ Storage STILL full after clearing all image cache - switching to memory-only cache');
+                  console.warn('💡 Consider clearing other AsyncStorage data (tokens, user data, etc.)');
+                }
+                
+                // Store in memory cache as fallback
+                memoryCacheRef.current.set(cacheKey, {
+                  dataUri,
+                  timestamp: Date.now(),
+                });
+                // Limit memory cache size
+                if (memoryCacheRef.current.size > MAX_MEMORY_CACHE_SIZE) {
+                  const firstKey = memoryCacheRef.current.keys().next().value;
+                  memoryCacheRef.current.delete(firstKey);
+                }
+                if (__DEV__) {
+                  console.log('💾 Stored in memory cache (AsyncStorage full):', cacheKey);
+                }
+                return true; // Consider it "saved" in memory cache
+              }
+        }
+        
+        // Try normal cleanup first
+        let cleanupResult = await cleanupImageCache(false);
+        
+        // If still full after normal cleanup, try aggressive cleanup
+        if (cleanupResult.remaining > 0) {
+          try {
+            await AsyncStorage.setItem(cacheKey, JSON.stringify({
+              dataUri,
+              timestamp: Date.now(),
+            }));
+            if (__DEV__) {
+              console.log('✅ Cache saved after normal cleanup');
+            }
+            return true; // Success after normal cleanup
+          } catch (retryError) {
+            if (__DEV__) {
+              console.warn('⚠️ Still full after normal cleanup, trying aggressive cleanup...');
+            }
+            // Try aggressive cleanup (removes 50%)
+            cleanupResult = await cleanupImageCache(true);
+            
+            // Try saving again after aggressive cleanup
+            try {
+              await AsyncStorage.setItem(cacheKey, JSON.stringify({
+                dataUri,
+                timestamp: Date.now(),
+              }));
+              if (__DEV__) {
+                console.log('✅ Cache saved after aggressive cleanup');
+              }
+              return true; // Success after aggressive cleanup
+            } catch (finalError) {
+              // Last resort: clear ALL remaining cache
+              const remainingCacheKeys = allKeys.filter(key => key.startsWith('image_cache_'));
+              if (remainingCacheKeys.length > 0) {
+                if (__DEV__) {
+                  console.warn(`⚠️ Last resort: clearing ALL ${remainingCacheKeys.length} remaining cache entries`);
+                }
+                await AsyncStorage.multiRemove(remainingCacheKeys);
+                try {
+                  await AsyncStorage.setItem(cacheKey, JSON.stringify({
+                    dataUri,
+                    timestamp: Date.now(),
+                  }));
+                  if (__DEV__) {
+                    console.log('✅ Cache saved after clearing all remaining cache');
+                  }
+                  return true;
+                } catch (lastError) {
+                  // Storage is consistently full - use memory cache
+                  storageFullRef.current = true;
+                  if (__DEV__) {
+                    console.warn('⚠️ Storage still full after clearing ALL cache - switching to memory-only cache');
+                  }
+                  
+                  // Store in memory cache as fallback
+                  memoryCacheRef.current.set(cacheKey, {
+                    dataUri,
+                    timestamp: Date.now(),
+                  });
+                  // Limit memory cache size
+                  if (memoryCacheRef.current.size > MAX_MEMORY_CACHE_SIZE) {
+                    const firstKey = memoryCacheRef.current.keys().next().value;
+                    memoryCacheRef.current.delete(firstKey);
+                  }
+                  if (__DEV__) {
+                    console.log('💾 Stored in memory cache (all cleanup failed):', cacheKey);
+                  }
+                  return true; // Consider it "saved" in memory cache
+                }
+              }
+            }
+          }
+        }
+      } else if (__DEV__) {
+        console.warn('⚠️ Error saving image cache:', error);
+      }
+      
+      // If storage is known to be full, use memory cache as fallback
+      if (storageFullRef.current) {
+        memoryCacheRef.current.set(cacheKey, {
+          dataUri,
+          timestamp: Date.now(),
+        });
+        // Limit memory cache size
+        if (memoryCacheRef.current.size > MAX_MEMORY_CACHE_SIZE) {
+          const firstKey = memoryCacheRef.current.keys().next().value;
+          memoryCacheRef.current.delete(firstKey);
+        }
+        if (__DEV__) {
+          console.log('💾 Stored in memory cache (AsyncStorage disabled):', cacheKey);
+        }
+        return true;
+      }
+      
+      return false; // Failed
+    }
+  }, [cleanupImageCache]);
 
   // Handle error state
   const error = queryError ? (queryError.data?.error || queryError.message || 'Failed to load enquiry') : null;
@@ -559,24 +1014,109 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     });
   };
 
-  const renderDetailItem = (icon, label, value, showIfEmpty = false) => {
-    // Check if value exists (not null, undefined, or empty string after trim)
-    const hasValue = value !== null && value !== undefined && String(value).trim() !== '';
-    
-    // Only render if value exists OR showIfEmpty is true
-    if (!hasValue && !showIfEmpty) return null;
-    
+  const handleUploadReferenceImages = () => {
+    const currentEnquiryId = enquiry.id || enquiry._id;
+    if (!currentEnquiryId) {
+      Alert.alert('Error', 'Unable to find this enquiry. Please refresh and try again.');
+      return;
+    }
+
+    const pickerOptions = {
+      mediaType: 'photo',
+      selectionLimit: 10,
+      includeBase64: false,
+    };
+
+    launchImageLibrary(pickerOptions, async (response) => {
+      if (response.didCancel) {
+        return;
+      }
+
+      if (response.errorCode) {
+        Alert.alert('Image Picker Error', response.errorMessage || 'Failed to open gallery. Please try again.');
+        return;
+      }
+
+      const assets = response.assets?.filter((asset) => asset?.uri) || [];
+      if (assets.length === 0) {
+        Alert.alert('No Images Selected', 'Please choose at least one reference image to upload.');
+        return;
+      }
+
+      const imagesPayload = assets.map((asset, index) => ({
+        uri: asset.uri,
+        type: asset.type || 'image/jpeg',
+        name: asset.fileName || `reference_${Date.now()}_${index}.jpg`,
+      }));
+
+      try {
+        await uploadReferenceImages({
+          enquiryId: currentEnquiryId,
+          images: imagesPayload,
+        }).unwrap();
+
+        Alert.alert('Success', 'Reference images uploaded successfully.');
+        refetch();
+      } catch (error) {
+        const message =
+          error?.data?.message ||
+          error?.data?.error ||
+          error?.data ||
+          error?.error ||
+          'Failed to upload reference images. Please try again.';
+        Alert.alert('Upload Failed', message);
+      }
+    });
+  };
+
+  const hasDetailValue = (cell) => {
+    if (!cell) return false;
+    const value = cell.value;
+    return value !== null && value !== undefined && String(value).trim() !== '';
+  };
+
+  const renderDetailCell = (cell) => {
+    if (!cell) {
+      return <View style={styles.detailCellPlaceholder} />;
+    }
+
+    const valueExists = hasDetailValue(cell);
+    if (!valueExists && !cell.showIfEmpty && !showAllDetails) {
+      return <View style={styles.detailCellPlaceholder} />;
+    }
+
     return (
-      <View style={styles.detailRow}>
-        <Icon name={icon} size={16} color={colors.primary} />
-        <View style={styles.detailTextContainer}>
-          <Text style={[styles.detailLabel, { color: colors.textSecondary, fontSize: 11 }]}>
-            {label}
-          </Text>
-          <Text style={[styles.detailText, { color: colors.textPrimary, fontSize: 13 }]}>
-            {hasValue ? value : 'N/A'}
-          </Text>
+      <View style={styles.detailCell}>
+        <View style={styles.detailCellLabelRow}>
+          {cell.icon && (
+            <Icon name={cell.icon} size={14} color={colors.primary} style={styles.detailCellIcon} />
+          )}
+          <Text style={styles.detailCellLabel}>{cell.label}</Text>
         </View>
+        <Text style={styles.detailCellValue}>
+          {valueExists ? cell.value : (cell.placeholder ?? 'N/A')}
+        </Text>
+      </View>
+    );
+  };
+
+  const renderDetailRow = (leftCell, rightCell, options = {}) => {
+    const shouldRender =
+      hasDetailValue(leftCell) ||
+      hasDetailValue(rightCell) ||
+      leftCell?.showIfEmpty ||
+      rightCell?.showIfEmpty ||
+      showAllDetails ||
+      options.showIfEmpty;
+
+    if (!shouldRender) {
+      return null;
+    }
+
+    return (
+      <View style={styles.detailRowTwoColumn}>
+        {renderDetailCell(leftCell)}
+        {renderDetailCell(rightCell)}
       </View>
     );
   };
@@ -639,16 +1179,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                      enquiry?.quantity ||
                      originalData?.quantity ||
                      null;
-    const priority = originalData?.Priority || 
-                     enquiry?.Priority || 
-                     enquiry?.priority ||
-                     originalData?.priority ||
-                     null;
     const shippingDate = originalData?.ShippingDate || 
                          enquiry?.ShippingDate || 
                          enquiry?.deadline ||
                          originalData?.deadline ||
                          null;
+    // Extract AssignedTo - check ALL possible locations with comprehensive fallback
+    const assignedToId = originalData?.AssignedTo || 
+                        enquiry?.AssignedTo || 
+                        enquiry?.assignedTo ||
+                        originalData?.assignedTo ||
+                        null;
+    const assignedTo = getUserName(assignedToId);
     
     // Format metal weight - only return value if exists, otherwise null (so field won't display)
     let metalWeightText = null;
@@ -706,16 +1248,14 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           </View>
 
           <View style={styles.detailsGrid}>
-            {renderDetailItem('person', 'Client', clientName)}
-            {renderDetailItem('schedule', 'Created', formatDate(createdAt))}
-            {renderDetailItem('update', 'Last Updated', formatDate(updatedAt))}
-            {renderDetailItem('flag', 'Priority', priority)}
-            {renderDetailItem('calendar-today', 'Shipping Date', shippingDate ? formatDate(shippingDate) : null)}
-            {/* Budget field removed - not in API response */}
+            {renderDetailRow(
+              { icon: 'person', label: 'Client', value: clientName },
+              { icon: 'supervisor-account', label: 'Assigned To', value: assignedTo, showIfEmpty: true }
+            )}
           </View>
         </Card>
 
-        {/* Description Card - Always show */}
+        {/* Description Card - remarks + stamping */}
         <Card style={styles.detailsCard}>
           <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
             Description
@@ -723,20 +1263,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           <Text style={[styles.descriptionText, { color: colors.textSecondary, fontSize: 13, lineHeight: 20 }]}>
             {originalData?.Remarks || enquiry?.Remarks || enquiry?.description || 'No description available'}
           </Text>
-        </Card>
-
-        {/* Product Details Card */}
-        <Card style={styles.detailsCard}>
-          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
-            Product Details
-          </Text>
-          <View style={styles.detailsGrid}>
-            {renderDetailItem('category', 'Category', category)}
-            {renderDetailItem('inventory', 'Quantity', quantity ? `${quantity}` : null)}
-            {renderDetailItem('grain', 'Stone Type', stoneType)}
-            {renderDetailItem('label', 'Style Number', styleNumber)}
-            {renderDetailItem('receipt', 'Gati Order Number', gatiOrderNumber, true)}
-          </View>
+          {renderDetailRow(
+            { icon: 'label', label: 'Stamping', value: stamping, showIfEmpty: true },
+            null,
+            { showIfEmpty: !!stamping }
+          )}
         </Card>
 
         {/* Metal Details Card */}
@@ -745,24 +1276,71 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             Metal Details
           </Text>
           <View style={styles.detailsGrid}>
-            {renderDetailItem('palette', 'Metal Color', metalColor)}
-            {renderDetailItem('verified', 'Metal Quality', metalQuality)}
-            {renderDetailItem('scale', 'Metal Weight', metalWeightText)}
-            {renderDetailItem('grain', 'Diamond Weight', diamondWeightText)}
-            {renderDetailItem('label', 'Stamping', stamping)}
+            {renderDetailRow(
+              { icon: 'palette', label: 'Metal Color', value: metalColor },
+              { icon: 'verified', label: 'Metal Quality', value: metalQuality }
+            )}
+          </View>
+        </Card>
+
+        {/* Product Details Card */}
+        <Card style={styles.detailsCard}>
+          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
+            Product Details
+          </Text>
+          <View style={styles.detailsGrid}>
+            {renderDetailRow(
+              { icon: 'category', label: 'Category', value: category },
+              { icon: 'inventory', label: 'Quantity', value: quantity ? `${quantity}` : null }
+            )}
+            {renderDetailRow(
+              { icon: 'grain', label: 'Stone Type', value: stoneType },
+              { icon: 'label', label: 'Style Number', value: styleNumber }
+            )}
+            {renderDetailRow(
+              { icon: 'scale', label: 'Metal Weight', value: metalWeightText },
+              { icon: 'grain', label: 'Diamond Weight', value: diamondWeightText }
+            )}
+            {renderDetailRow(
+              { icon: 'label', label: 'Stamping', value: stamping, showIfEmpty: true },
+              { icon: 'receipt', label: 'Gati Order Number', value: gatiOrderNumber, showIfEmpty: true },
+              { showIfEmpty: !!stamping || !!gatiOrderNumber }
+            )}
+          </View>
+        </Card>
+
+        {/* Dates Card */}
+        <Card style={styles.detailsCard}>
+          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
+            Dates
+          </Text>
+          <View style={styles.detailsGrid}>
+            {renderDetailRow(
+              { icon: 'schedule', label: 'Created', value: formatDate(createdAt) },
+              { icon: 'update', label: 'Last Updated', value: formatDate(updatedAt) }
+            )}
+            {renderDetailRow(
+              { icon: 'calendar-today', label: 'Shipping Date', value: shippingDate ? formatDate(shippingDate) : null },
+              null
+            )}
           </View>
         </Card>
 
         {/* Assignment & Codes Card (for admin/viewing) */}
-        {(enquiry?.AssignedTo || enquiry?.CoralCode || enquiry?.CadCode) && (
+        {(assignedToId || enquiry?.CoralCode || enquiry?.CadCode || originalData?.CoralCode || originalData?.CadCode) && (
           <Card style={styles.detailsCard}>
             <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
               Assignment & Codes
             </Text>
             <View style={styles.detailsGrid}>
-            {renderDetailItem('person', 'Assigned To', getUserName(enquiry?.AssignedTo))}
-            {renderDetailItem('description', 'Coral Code', enquiry?.CoralCode || enquiry?.coralVersion)}
-            {renderDetailItem('description', 'CAD Code', enquiry?.CadCode || enquiry?.cadVersion)}
+              {renderDetailRow(
+                { icon: 'person', label: 'Assigned To', value: assignedTo, showIfEmpty: true },
+                { icon: 'description', label: 'Coral Code', value: enquiry?.CoralCode || enquiry?.coralVersion || originalData?.CoralCode || originalData?.coralVersion }
+              )}
+              {renderDetailRow(
+                { icon: 'description', label: 'CAD Code', value: enquiry?.CadCode || enquiry?.cadVersion },
+                null
+              )}
             </View>
           </Card>
         )}
@@ -770,24 +1348,41 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     );
   };
 
-  // Component to render image with fetch authentication (same approach as DesignViewerScreen)
-  const ImageWithFallback = ({ image, imageKey, imageId, imageUri, index, onPress }) => {
-    const [imageDataUri, setImageDataUri] = useState(null);
+  // Component to render image with fetch authentication and caching
+  const ImageWithFallback = React.memo(({ image, imageKey, imageId, imageUri, index, onPress, initialDataUri }) => {
+    const [imageDataUri, setImageDataUri] = useState(initialDataUri || null);
     const [imageLoading, setImageLoading] = useState(false);
     const [imageError, setImageError] = useState(false);
+    const lastImageKeyRef = useRef(null);
+    const isFetchingRef = useRef(false);
+    const mountedRef = useRef(true);
     
-    // Fetch image with authentication
-    const fetchImageWithAuth = async (imageUrl) => {
+    // Reset mounted flag on mount
+    useEffect(() => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+      };
+    }, []);
+    
+    useEffect(() => {
+      if (initialDataUri && initialDataUri !== imageDataUri) {
+        setImageDataUri(initialDataUri);
+      }
+    }, [initialDataUri, imageDataUri]);
+    
+    // Fetch image with authentication and caching
+    const fetchImageWithAuth = useCallback(async (imageUrl, cacheKey) => {
       if (!imageUrl) {
-        
         return;
       }
       
-      // Don't fetch if we already have the data URI
-      if (imageDataUri) {
-        
+      // Don't fetch if we already have the data URI or if already fetching
+      if (imageDataUri || isFetchingRef.current) {
         return;
       }
+      
+      isFetchingRef.current = true;
       
       try {
         setImageLoading(true);
@@ -865,6 +1460,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
             
+            // Save to cache (fire-and-forget, don't block on storage errors)
+            if (cacheKey) {
+              memoryCacheRef.current.set(cacheKey, {
+                dataUri,
+                timestamp: Date.now(),
+              });
+              if (memoryCacheRef.current.size > MAX_MEMORY_CACHE_SIZE) {
+                const firstKey = memoryCacheRef.current.keys().next().value;
+                memoryCacheRef.current.delete(firstKey);
+              }
+              saveImageToCache(cacheKey, dataUri).catch(() => {
+                // Silently fail - cache is optional
+              });
+            }
+            
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
@@ -895,6 +1505,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             const imageContentType = contentType || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
             
+            // Save to cache (fire-and-forget, don't block on storage errors)
+            if (cacheKey) {
+              saveImageToCache(cacheKey, dataUri).catch(() => {
+                // Silently fail - cache is optional
+              });
+            }
+            
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
@@ -906,55 +1523,99 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       } catch (error) {
         setImageError(true);
         setImageLoading(false);
+      } finally {
+        isFetchingRef.current = false;
       }
-    };
+    }, [imageDataUri, getCachedImage, saveImageToCache]);
     
     useEffect(() => {
-      // Reset state when image props change
-      setImageDataUri(null);
-      setImageLoading(false);
-      setImageError(false);
+      // Generate unique key for this image
+      const currentImageKey = imageKey || imageId || imageUri || `image_${index}`;
       
-      // Generate image URL - prioritize full URL, then key, then ID
+      // If a preloaded URI is provided, use it immediately and skip further work
+      if (initialDataUri) {
+        lastImageKeyRef.current = currentImageKey;
+        setImageDataUri(initialDataUri);
+        setImageLoading(false);
+        setImageError(false);
+        return;
+      }
+      
+      // Generate image URL and cache key first
       let imageUrl = null;
+      const cacheKey = getImageCacheKey(imageKey, imageId, imageUri);
       
       if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
-        // Full URL provided - use it directly
         imageUrl = imageUri;
-        
       } else if (imageKey) {
         const encodedKey = encodeURIComponent(imageKey);
         imageUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
-        
       } else if (imageId) {
         imageUrl = `${API_BASE_URL}/api/enquiries/files/${imageId}`;
-        
       }
       
-      if (__DEV__ && onPress === null) {
-        console.log('🖼️ Modal ImageWithFallback fetching:', { imageKey, imageId, imageUri, imageUrl, index });
-      }
-      
-      if (imageUrl) {
-        // Check if it's an S3 URL (public, no auth needed) - try direct load first
-        if (imageUrl.includes('amazonaws.com') || imageUrl.includes('s3.')) {
-          
-          // Try direct Image component load first for S3 (no auth needed)
-          // If that fails, fall back to fetch
-          setImageLoading(true);
-          // For S3 URLs, we'll still use fetch to convert to data URI for consistency
-          fetchImageWithAuth(imageUrl);
-        } else {
-          // Use fetch directly on both platforms for consistency and authentication
-          fetchImageWithAuth(imageUrl);
-        }
-      } else {
-        if (__DEV__ && onPress === null) {
-          console.warn('🖼️ Modal ImageWithFallback: No image URL found', { imageKey, imageId, imageUri });
-        }
+      if (!imageUrl) {
         setImageError(true);
+        return;
       }
-    }, [imageKey, imageId, imageUri, index, onPress]);
+      
+      // Check if this is the same image we already loaded
+      if (lastImageKeyRef.current === currentImageKey && imageDataUri) {
+        // Same image already loaded, don't reload
+        return;
+      }
+      
+      // Check memory cache FIRST (synchronously, before any async operations)
+      if (cacheKey && memoryCacheRef.current.has(cacheKey)) {
+        const cached = memoryCacheRef.current.get(cacheKey);
+        const cacheAge = Date.now() - (cached.timestamp || 0);
+        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+        if (cacheAge < maxAge) {
+          lastImageKeyRef.current = currentImageKey;
+          setImageDataUri(cached.dataUri);
+          setImageLoading(false);
+          setImageError(false);
+          return; // Exit early - found in memory cache
+      } else {
+          memoryCacheRef.current.delete(cacheKey);
+        }
+      }
+      
+      // Check cache (AsyncStorage) and fetch if needed
+      const loadImage = async () => {
+        if (!mountedRef.current) return;
+        
+        // Try AsyncStorage cache (if not in memory-only mode)
+        if (cacheKey && !storageFullRef.current) {
+          try {
+            const cached = await getCachedImage(cacheKey);
+            if (cached && mountedRef.current) {
+              // Cache hit - set directly without loading state
+              lastImageKeyRef.current = currentImageKey;
+              setImageDataUri(cached);
+              setImageLoading(false);
+              setImageError(false);
+              return;
+            }
+          } catch (error) {
+            // Cache read failed, continue with fetch
+          }
+        }
+        
+        // Cache miss - reset state and fetch
+        if (!mountedRef.current) return;
+        
+        lastImageKeyRef.current = currentImageKey;
+        setImageDataUri(null);
+        setImageError(false);
+        isFetchingRef.current = false;
+        setImageLoading(true);
+        
+        fetchImageWithAuth(imageUrl, cacheKey);
+      };
+      
+      loadImage();
+    }, [imageKey, imageId, imageUri, index, onPress, initialDataUri, getImageCacheKey, getCachedImage, fetchImageWithAuth]);
     
     // Use modal styles if onPress is null (modal context)
     const containerStyle = onPress === null ? styles.modalImageWrapper : styles.imageContainer;
@@ -990,7 +1651,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       );
     }
     
-    // If onPress is null, render without TouchableOpacity (for modal)
+    // If onPress is null, render without TouchableOpacity (for modal - zoom handled by parent ScrollView)
     if (onPress === null) {
       return (
         <View style={styles.modalImageWrapper}>
@@ -1028,7 +1689,16 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         />
       </TouchableOpacity>
     );
-  };
+  }, (prevProps, nextProps) => {
+    // Custom comparison to prevent unnecessary re-renders
+    return (
+      prevProps.imageKey === nextProps.imageKey &&
+      prevProps.imageId === nextProps.imageId &&
+      prevProps.imageUri === nextProps.imageUri &&
+      prevProps.index === nextProps.index &&
+      prevProps.onPress === nextProps.onPress
+    );
+  });
 
   const renderImages = () => {
     // Safety check for images array - prioritize enquiry.images since it's the normalized data
@@ -1066,9 +1736,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       );
     }
 
-    // If only one image, show it without slider
-    if (images.length === 1) {
-      const image = images[0];
+    const buildImageMeta = (image) => {
       let imageKey = null;
       let imageId = null;
       let imageUri = null;
@@ -1084,6 +1752,19 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           imageKey = image;
         }
     }
+
+      const cacheKey = getImageCacheKey(imageKey, imageId, imageUri);
+      let cachedUri = null;
+      if (cacheKey && memoryCacheRef.current.has(cacheKey)) {
+        cachedUri = memoryCacheRef.current.get(cacheKey)?.dataUri || null;
+      }
+
+      return { image, imageKey, imageId, imageUri, cacheKey, cachedUri };
+    };
+
+    // If only one image, show it without slider
+    if (images.length === 1) {
+      const meta = buildImageMeta(images[0]);
 
     return (
       <Card style={styles.imagesCard}>
@@ -1091,36 +1772,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           Reference Images
           </Text>
           <ImageWithFallback
-            image={image}
-            imageKey={imageKey}
-            imageId={imageId}
-            imageUri={imageUri}
+            image={meta.image}
+            imageKey={meta.imageKey}
+            imageId={meta.imageId}
+            imageUri={meta.imageUri}
             index={0}
+            initialDataUri={meta.cachedUri}
+            onPress={(uri) => handleImagePress(uri, 0, [meta])}
           />
         </Card>
       );
     }
 
     // Build array of image data for the modal slider
-    const imageDataForModal = images.map((image) => {
-      let imageKey = null;
-      let imageId = null;
-      let imageUri = null;
-      
-      if (typeof image === 'object' && image !== null) {
-        imageKey = image.Key || image.key || image.KeyName || image.keyName || '';
-        imageId = image.Id || image.id || image._id || image.FileId || image.fileId || '';
-        imageUri = image.Url || image.url || image.URI || image.uri || image.Location || image.location || image.UrlPath || image.urlPath || '';
-      } else if (typeof image === 'string') {
-        if (image.startsWith('http') || image.startsWith('https')) {
-          imageUri = image;
-        } else {
-          imageKey = image;
-        }
-      }
-      
-      return { image, imageKey, imageId, imageUri };
-    });
+    const imageDataForModal = images.map(buildImageMeta);
 
     return (
       <Card style={styles.imagesCard}>
@@ -1129,35 +1794,16 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {images.map((image, index) => {
-            // Handle image - could be a string URL, image object with Key/Id, or need to construct URL
-            let imageKey = null;
-            let imageId = null;
-            let imageUri = null;
-            
-            // Extract key/ID from image object if it's an object
-            if (typeof image === 'object' && image !== null) {
-              imageKey = image.Key || image.key || image.KeyName || image.keyName || '';
-              imageId = image.Id || image.id || image._id || image.FileId || image.fileId || '';
-              imageUri = image.Url || image.url || image.URI || image.uri || image.Location || image.location || image.UrlPath || image.urlPath || '';
-            } else if (typeof image === 'string') {
-              // If it's already a full URL, use it
-              if (image.startsWith('http') || image.startsWith('https')) {
-                imageUri = image;
-              } else {
-                imageKey = image;
-              }
-            }
-            
-            // Always use ImageWithFallback component for consistent authentication handling
-            // It can handle both full URLs and key/ID-based lookups
+            const meta = imageDataForModal[index] || buildImageMeta(image);
             return (
               <ImageWithFallback
                 key={index}
-                image={image}
-                imageKey={imageKey}
-                imageId={imageId}
-                imageUri={imageUri}
+                image={meta.image}
+                imageKey={meta.imageKey}
+                imageId={meta.imageId}
+                imageUri={meta.imageUri}
                 index={index}
+                initialDataUri={meta.cachedUri}
                 onPress={(uri) => {
                   // Pass all image data to modal for slider
                   handleImagePress(uri, index, imageDataForModal);
@@ -1336,6 +1982,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         style={[styles.actionButton, styles.editButton]}
       />
 
+      {/* Reference upload for clients */}
+      <View style={styles.adminActionsRow}>
+        <TouchableOpacity
+          style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+          activeOpacity={0.85}
+          onPress={handleUploadReferenceImages}
+          disabled={isUploadingReference}
+        >
+          <Icon name="cloud-upload" size={18} color={colors.textWhite} />
+          <Text style={styles.adminActionText}>
+            {isUploadingReference ? 'Uploading...' : 'Upload Reference Image'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Hide enquiry history for clients (role 4) */}
       {(user?.roleId !== 4 && user?.roleNumber !== 4 && user?.role !== 'client') && (
         <Button
@@ -1346,29 +2007,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       )}
 
       {/* Approve and Reject buttons removed for clients - clients don't have permission for these actions */}
-
-      <TouchableOpacity
-        style={styles.chatButton}
-        onPress={() => {
-          const currentEnquiry = enquiry || initialEnquiry || {};
-          const currentEnquiryId = enquiryId || currentEnquiry?.id || currentEnquiry?._id;
-          
-          if (!currentEnquiryId) {
-            
-            Alert.alert('Error', 'Cannot open chat: Enquiry ID is missing');
-            return;
-          }
-          
-          navigation.navigate('ChatGroups', { 
-            enquiry: currentEnquiry, 
-            enquiryId: currentEnquiryId 
-          });
-        }}>
-        <Icon name="chat" size={16} color={colors.primary} />
-        <Text style={[styles.chatButtonText, { color: colors.textPrimary, fontSize: 13 }]}>
-          Open Chat
-        </Text>
-      </TouchableOpacity>
     </Card>
   );
 
@@ -1392,19 +2030,6 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       </View>
 
       {/* Enquiry History button removed for coral and CAD designers - only visible for admin */}
-
-      <View style={styles.adminActionsRow}>
-        <TouchableOpacity
-          style={[styles.adminActionButton, styles.adminActionButtonOutline]}
-          onPress={() => navigation.navigate('ChatGroups', { enquiry, enquiryId: enquiry?.id || enquiry?._id })}
-          activeOpacity={0.85}
-        >
-          <Icon name="chat" size={18} color={colors.primary} />
-          <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>
-            Open Chat
-          </Text>
-        </TouchableOpacity>
-      </View>
     </Card>
   );
 
@@ -1464,7 +2089,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Upload Design Buttons for Admin */}
+        {/* Upload Buttons for Admin */}
           <View style={styles.adminActionsRow}>
             <TouchableOpacity
               style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
@@ -1487,23 +2112,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
         <View style={styles.adminActionsRow}>
           <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+            activeOpacity={0.85}
+            onPress={handleUploadReferenceImages}
+            disabled={isUploadingReference}
+          >
+            <Icon name="photo-library" size={18} color={colors.textWhite} />
+            <Text style={styles.adminActionText}>
+              {isUploadingReference ? 'Uploading...' : 'Upload Reference Image'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.adminActionsRow}>
+          <TouchableOpacity
             style={[styles.adminActionButton, styles.adminActionButtonDanger]}
             activeOpacity={0.85}
             onPress={handleDeleteEnquiry}
           >
             <Icon name="delete-outline" size={18} color={colors.textWhite} />
             <Text style={styles.adminActionText}>Delete Enquiry</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.adminActionsRow}>
-          <TouchableOpacity
-            style={[styles.adminActionButton, styles.adminActionButtonOutline]}
-            activeOpacity={0.85}
-            onPress={() =>  navigation.navigate('ChatGroups', { enquiry, enquiryId: enquiry?.id || enquiry?._id })}
-          >
-            <Icon name="chat" size={18} color={colors.primary} />
-            <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>Open Chat</Text>
           </TouchableOpacity>
         </View>
       </Card>
@@ -1583,7 +2211,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           onRequestClose={closeImageModal}
         >
           <View style={styles.fullscreenImageBackdrop}>
-            <TouchableOpacity style={styles.fullscreenImageCloseButton} onPress={closeImageModal}>
+            {/* Close button - positioned with high z-index */}
+            <TouchableOpacity 
+              style={styles.fullscreenImageCloseButton} 
+              onPress={closeImageModal}
+              activeOpacity={0.7}
+            >
               <Icon name="close" size={24} color={colors.textWhite} />
             </TouchableOpacity>
             
@@ -1596,23 +2229,36 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                   </Text>
                 </View>
                 
-                {/* Slider for multiple images */}
+                {/* Slider for multiple images with zoom */}
                 <FlatList
                   ref={modalFlatListRef}
                   data={modalImages}
                   renderItem={({ item, index }) => (
                     <View style={styles.modalImageContainer}>
+                      <ImageZoom
+                        cropWidth={screenWidth}
+                        cropHeight={screenHeight}
+                        imageWidth={screenWidth}
+                        imageHeight={screenHeight}
+                        enableCenterFocus
+                        useNativeDriver
+                        enableSwipeDown={false}
+                        pinchToZoom
+                        panToMove={isModalZoomed}
+                        onMove={handleZoomMove}
+                      >
                       <ImageWithFallback
                         image={item.image}
                         imageKey={item.imageKey}
                         imageId={item.imageId}
                         imageUri={item.imageUri}
                         index={index}
+                          initialDataUri={item.cachedUri}
                         onPress={null} // No click handler in modal
                       />
+                      </ImageZoom>
                     </View>
                   )}
-                  keyExtractor={(item, index) => `modal-image-${index}`}
                   horizontal
                   pagingEnabled
                   showsHorizontalScrollIndicator={false}
@@ -1624,7 +2270,36 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                     offset: screenWidth * index,
                     index,
                   })}
+                  scrollEnabled={!isModalZoomed}
+                  onMomentumScrollEnd={() => setIsModalZoomed(false)}
+                  onScrollBeginDrag={() => setIsModalZoomed(false)}
+                  keyExtractor={getModalImageKey}
+                  removeClippedSubviews={false}
+                  windowSize={3}
+                  initialNumToRender={3}
+                  maxToRenderPerBatch={3}
                 />
+
+                {modalImages.length > 1 && (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.modalNavButton, styles.modalNavButtonLeft, modalCurrentIndex === 0 && styles.modalNavButtonDisabled]}
+                      onPress={handleModalPrev}
+                      disabled={modalCurrentIndex === 0}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="chevron-left" size={28} color={colors.textWhite} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalNavButton, styles.modalNavButtonRight, modalCurrentIndex === modalImages.length - 1 && styles.modalNavButtonDisabled]}
+                      onPress={handleModalNext}
+                      disabled={modalCurrentIndex === modalImages.length - 1}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="chevron-right" size={28} color={colors.textWhite} />
+                    </TouchableOpacity>
+                  </>
+                )}
                 
                 {/* Pagination Dots */}
                 <View style={styles.modalPaginationContainer}>
@@ -1640,13 +2315,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 </View>
               </>
             ) : (
-              /* Single image - no slider */
+              /* Single image with zoom */
               <View style={styles.modalImageContainer}>
+                <ImageZoom
+                  cropWidth={screenWidth}
+                  cropHeight={screenHeight}
+                  imageWidth={screenWidth}
+                  imageHeight={screenHeight}
+                  enableCenterFocus
+                  useNativeDriver
+                  enableSwipeDown={false}
+                  pinchToZoom
+                  panToMove={isModalZoomed}
+                  onMove={handleZoomMove}
+                >
             <Image
               source={{ uri: selectedImageUri }}
               style={styles.fullscreenImage}
               resizeMode="contain"
             />
+                </ImageZoom>
               </View>
             )}
           </View>
@@ -1660,6 +2348,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         onClose={() => setShowHistoryModal(false)}
         enquiry={enquiry}
       />
+
+      {canShowChatFab && (
+        <TouchableOpacity style={styles.chatFab} onPress={handleOpenChat} activeOpacity={0.85}>
+          <Icon name="chat" size={20} color={colors.textWhite} />
+          <Text style={styles.chatFabText}>Open Chat</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -1712,22 +2407,37 @@ const styles = StyleSheet.create({
   detailsGrid: {
     gap: 12,
   },
-  detailRow: {
+  detailRowTwoColumn: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    gap: 12,
     marginBottom: 12,
   },
-  detailTextContainer: {
-    marginLeft: 12,
+  detailCell: {
     flex: 1,
+    paddingVertical: 4,
   },
-  detailLabel: {
-    marginBottom: 2,
+  detailCellPlaceholder: {
+    flex: 1,
+    paddingVertical: 4,
+  },
+  detailCellLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 4,
+  },
+  detailCellIcon: {
+    marginRight: 4,
+  },
+  detailCellLabel: {
+    fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+    color: colors.textSecondary,
   },
-  detailText: {
-    flex: 1,
+  detailCellValue: {
+    fontSize: 13,
+    color: colors.textPrimary,
   },
   descriptionText: {
     textAlign: 'left',
@@ -1854,16 +2564,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.info || '#2196F3',
     marginBottom: 16,
   },
-  chatButton: {
+  chatFab: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.xl,
+    backgroundColor: colors.primary,
+    borderRadius: 28,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 10,
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
   },
-  chatButtonText: {
+  chatFabText: {
+    color: colors.textWhite,
     marginLeft: 8,
+    fontFamily: fonts.medium,
   },
   modalOverlay: {
     position: 'absolute',
@@ -1900,6 +2620,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.95)',
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
   },
   fullscreenImage: {
     width: '100%',
@@ -1913,16 +2634,42 @@ const styles = StyleSheet.create({
   },
   modalImageWrapper: {
     width: Dimensions.get('window').width,
-    flex: 1,
+    height: Dimensions.get('window').height,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
+  },
+  zoomScrollView: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+  },
+  zoomScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalImagePlaceholder: {
     width: '100%',
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  modalNavButton: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -28,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 28,
+    zIndex: 15,
+  },
+  modalNavButtonLeft: {
+    left: 12,
+  },
+  modalNavButtonRight: {
+    right: 12,
+  },
+  modalNavButtonDisabled: {
+    opacity: 0.35,
   },
   modalImageCounter: {
     position: 'absolute',
@@ -1966,9 +2713,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 40,
     right: 20,
-    padding: 10,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    padding: 12,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 1000,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
   },
   adminActionsCard: {
     borderWidth: 1,

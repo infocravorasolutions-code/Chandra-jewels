@@ -14,7 +14,7 @@ import { Heading, CustomText } from '../../components/common/Text';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
-import { useGetEnquiryByIdQuery, useGetUsersQuery, useUpdateEnquiryMutation } from '../../store/api';
+import { useGetEnquiryByIdQuery, useGetUsersQuery, useUpdateEnquiryMutation, useGetStoneTypesQuery } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
 import { useAuth } from '../../context/AuthContext';
 import { useStatusOptions } from '../../features/statuses/statusesHooks';
@@ -55,6 +55,17 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     label: client.name || 'Unknown Client',
     value: client.id || client._id,
   })), [clients]);
+
+  // Get status options from API (cached) - moved earlier so we can use it in getInitialFormData
+  const statusOptionsFromAPI = useStatusOptions();
+  
+  // Fetch stone types from API
+  const { data: stoneTypesData = [] } = useGetStoneTypesQuery();
+  
+  // Filter out "All Status" option for create/edit forms (only needed in filters)
+  const statusOptions = useMemo(() => {
+    return statusOptionsFromAPI.filter(opt => opt.value !== 'all');
+  }, [statusOptionsFromAPI]);
 
   // Map enquiry data to form format
   const getInitialFormData = () => {
@@ -145,48 +156,163 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       }
     };
     
-    if (__DEV__) {
-      console.log('  Full enquiry object:', JSON.stringify(enquiry, null, 2));
-      console.log('  Original data:', JSON.stringify(originalData, null, 2));
-    }
     
     // Priority mapping - check all possible sources
     const rawPriority = originalData?.Priority || enquiry.Priority || enquiry.priority || 'Normal';
     const mappedPriority = priorityMap[rawPriority] || priorityMap[rawPriority?.toLowerCase()] || 'Normal';
     
-    // Get status from enquiry - normalize to match statusOptions
-    const rawStatus = originalData?.Status || enquiry?.Status || enquiry?.status || enquiry?.CurrentStatus || 'Enquiry Created';
-    // Normalize status to match statusOptions values (case-insensitive match)
-    let enquiryStatus = 'Enquiry Created'; // default
-    const statusLower = String(rawStatus).toLowerCase();
-    if (statusLower.includes('completed') || statusLower === 'completed') {
-      enquiryStatus = 'Completed';
-    } else if (statusLower.includes('approval') && statusLower.includes('pending')) {
-      enquiryStatus = 'Design Approval Pending';
-    } else if (statusLower.includes('approved cad') || statusLower === 'approved cad') {
-      enquiryStatus = 'Approved Cad';
-    } else if (statusLower.includes('order placement') || statusLower === 'order placement') {
-      enquiryStatus = 'Order Placement';
-    } else if (statusLower.includes('cam pending') || statusLower === 'cam pending') {
-      enquiryStatus = 'CAM Pending';
-    } else if (statusLower.includes('production') || statusLower === 'production') {
-      enquiryStatus = 'Production';
-    } else if (statusLower === 'cad' || (statusLower.includes('cad') && !statusLower.includes('approved'))) {
-      enquiryStatus = 'CAD';
-    } else if (statusLower === 'coral' || statusLower.includes('coral')) {
-      enquiryStatus = 'Coral';
-    } else if (statusLower.includes('rejected') || statusLower === 'rejected') {
-      enquiryStatus = 'Rejected';
-    } else if (statusLower.includes('created') || (statusLower.includes('pending') && !statusLower.includes('approval') && !statusLower.includes('cam'))) {
-      enquiryStatus = 'Enquiry Created';
-    } else {
-      // Try to match exactly if it's already in the correct format
-      enquiryStatus = rawStatus;
+    // Get status from enquiry - check StatusHistory first (most accurate), then other sources
+    // StatusHistory contains the chronological status changes, latest entry is current status
+    const statusHistory = originalData?.StatusHistory || enquiry?.StatusHistory || [];
+    let rawStatus = null;
+    
+    // Get latest status from StatusHistory (sorted by timestamp, latest is last)
+    if (Array.isArray(statusHistory) && statusHistory.length > 0) {
+      // Sort by timestamp to get the latest entry
+      const sortedHistory = [...statusHistory].sort((a, b) => {
+        const dateA = new Date(a.Timestamp || a.timestamp || 0);
+        const dateB = new Date(b.Timestamp || b.timestamp || 0);
+        return dateB - dateA; // Descending order (latest first)
+      });
+      rawStatus = sortedHistory[0]?.Status || sortedHistory[0]?.status;
     }
     
-    // Get AssignedTo from enquiry - ensure it's a string ID
-    const rawAssignedTo = originalData?.AssignedTo || enquiry?.AssignedTo || enquiry?.assignedTo || '';
-    const enquiryAssignedTo = rawAssignedTo ? String(rawAssignedTo).trim() : '';
+    // Fallback to other sources if StatusHistory doesn't have status
+    if (!rawStatus) {
+      rawStatus = originalData?.Status || enquiry?.Status || enquiry?.status || enquiry?.CurrentStatus || 'Enquiry Created';
+    }
+    
+    
+    let enquiryStatus = 'Enquiry Created'; // default
+    
+    // First, try to find exact match in statusOptions (case-insensitive)
+    if (statusOptions && statusOptions.length > 0) {
+      const statusStr = String(rawStatus || '').trim();
+      
+      // Try exact match first (case-sensitive)
+      let exactMatch = statusOptions.find(opt => 
+        String(opt.value).trim() === statusStr
+      );
+      
+      // Try case-insensitive match
+      if (!exactMatch) {
+        exactMatch = statusOptions.find(opt => 
+          String(opt.value).toLowerCase().trim() === statusStr.toLowerCase().trim()
+        );
+      }
+      
+      // Try match after normalizing spaces
+      if (!exactMatch) {
+        const normalizedStatus = statusStr.replace(/\s+/g, ' ').trim();
+        exactMatch = statusOptions.find(opt => {
+          const normalizedOpt = String(opt.value).replace(/\s+/g, ' ').trim();
+          return normalizedOpt.toLowerCase() === normalizedStatus.toLowerCase();
+        });
+      }
+      
+      if (exactMatch) {
+        enquiryStatus = exactMatch.value;
+      } else {
+        // If no exact match, try normalization
+        const statusLower = statusStr.toLowerCase();
+        if (statusLower.includes('completed') || statusLower === 'completed') {
+          enquiryStatus = 'Completed';
+        } else if (statusLower.includes('approval') && statusLower.includes('pending')) {
+          enquiryStatus = 'Design Approval Pending';
+        } else if (statusLower.includes('approved cad') || statusLower === 'approved cad') {
+          enquiryStatus = 'Approved Cad';
+        } else if (statusLower.includes('order placement') || statusLower === 'order placement') {
+          enquiryStatus = 'Order Placement';
+        } else if (statusLower.includes('cam pending') || statusLower === 'cam pending') {
+          enquiryStatus = 'CAM Pending';
+        } else if (statusLower.includes('production') || statusLower === 'production') {
+          enquiryStatus = 'Production';
+        } else if (statusLower === 'cad' || (statusLower.includes('cad') && !statusLower.includes('approved'))) {
+          enquiryStatus = 'CAD';
+        } else if (statusLower === 'coral' || statusLower.includes('coral')) {
+          enquiryStatus = 'Coral';
+        } else if (statusLower.includes('rejected') || statusLower === 'rejected') {
+          enquiryStatus = 'Rejected';
+        } else if (statusLower.includes('created') || (statusLower.includes('pending') && !statusLower.includes('approval') && !statusLower.includes('cam'))) {
+          enquiryStatus = 'Enquiry Created';
+        } else {
+          // Try to find partial match in statusOptions
+          const partialMatch = statusOptions.find(opt => 
+            String(opt.value).toLowerCase().includes(statusLower) ||
+            statusLower.includes(String(opt.value).toLowerCase())
+          );
+          if (partialMatch) {
+            enquiryStatus = partialMatch.value;
+          } else {
+            enquiryStatus = rawStatus; // Fallback to raw value
+          }
+        }
+      }
+    } else {
+      // Fallback normalization if statusOptions not loaded yet
+      const statusLower = String(rawStatus).toLowerCase();
+      if (statusLower.includes('completed')) {
+        enquiryStatus = 'Completed';
+      } else if (statusLower.includes('approval') && statusLower.includes('pending')) {
+        enquiryStatus = 'Design Approval Pending';
+      } else if (statusLower.includes('created') || statusLower.includes('pending')) {
+        enquiryStatus = 'Enquiry Created';
+      } else {
+        enquiryStatus = rawStatus;
+      }
+    }
+    
+    // Get AssignedTo from enquiry - check StatusHistory first (most accurate), then other sources
+    // StatusHistory contains the chronological status changes, latest entry has current AssignedTo
+    let rawAssignedTo = null;
+    
+    // Get latest AssignedTo from StatusHistory (sorted by timestamp, latest is first)
+    if (Array.isArray(statusHistory) && statusHistory.length > 0) {
+      // Use the same sorted history from status lookup
+      const sortedHistory = [...statusHistory].sort((a, b) => {
+        const dateA = new Date(a.Timestamp || a.timestamp || 0);
+        const dateB = new Date(b.Timestamp || b.timestamp || 0);
+        return dateB - dateA; // Descending order (latest first)
+      });
+      // Find the latest entry that has AssignedTo
+      for (const entry of sortedHistory) {
+        if (entry.AssignedTo || entry.assignedTo) {
+          rawAssignedTo = entry.AssignedTo || entry.assignedTo;
+          break;
+        }
+      }
+    }
+    
+    // Fallback to other sources if StatusHistory doesn't have AssignedTo
+    if (!rawAssignedTo) {
+      rawAssignedTo = originalData?.AssignedTo || enquiry?.AssignedTo || enquiry?.assignedTo || '';
+    }
+    
+    
+    let enquiryAssignedTo = '';
+    
+    if (rawAssignedTo) {
+      const assignedToStr = String(rawAssignedTo).trim();
+      // Try to find matching user by ID (handle various ID formats)
+      if (users && Array.isArray(users) && users.length > 0) {
+        const foundUser = users.find(u => {
+          const userId = String(u.id || u._id || '').trim();
+          return userId === assignedToStr ||
+                 userId.replace(/\s/g, '') === assignedToStr.replace(/\s/g, '') ||
+                 String(userId).toLowerCase() === assignedToStr.toLowerCase();
+        });
+        if (foundUser) {
+          enquiryAssignedTo = String(foundUser.id || foundUser._id).trim();
+        } else {
+          // If no match found, use the raw value (might be valid but users not loaded yet)
+          enquiryAssignedTo = assignedToStr;
+        }
+      } else {
+        // Users not loaded yet, use raw value
+        enquiryAssignedTo = assignedToStr;
+      }
+    }
+    
     
     // Extract weight data
     const metalWeight = originalData?.MetalWeight || enquiry.MetalWeight || enquiry.metalWeight || {};
@@ -262,22 +388,10 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     const currentEnquiryId = finalEnquiryToEdit?.id || finalEnquiryToEdit?._id || enquiryId;
     
     if (currentEnquiryId && finalEnquiryToEdit) {
-      if (__DEV__) {
-        console.log('EditEnquiryStep1 - Enquiry keys:', Object.keys(finalEnquiryToEdit || {}));
-        console.log('EditEnquiryStep1 - Original data keys:', finalEnquiryToEdit._originalData ? Object.keys(finalEnquiryToEdit._originalData) : []);
-      }
-      
       const initialData = getInitialFormData();
       setFormData(initialData);
-      
-      if (__DEV__) {
-        console.log('  - Status Options:', statusOptions.map(o => o.value));
-        console.log('  - Assigned To Options:', assignedToOptions.map(o => ({ label: o.label, value: o.value })));
-      }
     }
-    // Removed 'clients' from dependencies - use clientsData.length instead to track when clients are loaded
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalEnquiryToEdit?.id, finalEnquiryToEdit?._id, enquiryId, fetchingEnquiry, clientsData?.length]);
+  }, [finalEnquiryToEdit?.id, finalEnquiryToEdit?._id, enquiryId, fetchingEnquiry, clientsData?.length, statusOptions, users]);
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -343,27 +457,76 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   };
 
   const renderDropdown = (label, value, options, onSelect, isVisible, onToggle, usersList = []) => {
-    // Find matching option - handle case-insensitive matching for status
+    // Find matching option - handle case-insensitive matching for status and robust ID matching for AssignedTo
     const findOption = (val) => {
       if (!val) return null;
+      const valStr = String(val).trim();
+      
       // Exact match first
-      let option = options.find(opt => opt.value === val);
+      let option = options.find(opt => {
+        const optVal = String(opt.value).trim();
+        return optVal === valStr;
+      });
       if (option) return option;
       
       // Case-insensitive match (for status field)
       if (label.includes('Status')) {
-        option = options.find(opt => 
-          String(opt.value).toLowerCase() === String(val).toLowerCase()
-        );
+        option = options.find(opt => {
+          const optVal = String(opt.value).toLowerCase().trim();
+          const valLower = valStr.toLowerCase().trim();
+          return optVal === valLower;
+        });
+        if (option) return option;
+        
+        // Try partial match for status
+        option = options.find(opt => {
+          const optVal = String(opt.value).toLowerCase();
+          const valLower = valStr.toLowerCase();
+          return optVal.includes(valLower) || valLower.includes(optVal);
+        });
         if (option) return option;
       }
       
-      // For Assigned To, try to find by ID even if format differs
+      // For Assigned To, try to find by ID with various matching strategies
       if (label.includes('Assigned')) {
-        option = options.find(opt => 
-          String(opt.value).trim() === String(val).trim()
-        );
+        // Try exact match with trimmed values
+        option = options.find(opt => {
+          const optVal = String(opt.value).trim();
+          return optVal === valStr;
+        });
         if (option) return option;
+        
+        // Try match without spaces
+        const valNoSpaces = valStr.replace(/\s/g, '');
+        option = options.find(opt => {
+          const optVal = String(opt.value).trim().replace(/\s/g, '');
+          return optVal === valNoSpaces;
+        });
+        if (option) return option;
+        
+        // Try case-insensitive match
+        option = options.find(opt => {
+          const optVal = String(opt.value).toLowerCase().trim();
+          return optVal === valStr.toLowerCase().trim();
+        });
+        if (option) return option;
+        
+        // Try to find in usersList if provided (fallback)
+        if (usersList && usersList.length > 0) {
+          const foundUser = usersList.find(u => {
+            const userId = String(u.id || u._id || '').trim();
+            return userId === valStr ||
+                   userId.replace(/\s/g, '') === valStr.replace(/\s/g, '') ||
+                   userId.toLowerCase() === valStr.toLowerCase();
+          });
+          if (foundUser) {
+            // Create a temporary option for display
+            return {
+              label: foundUser.name || foundUser.email || String(foundUser.id || foundUser._id),
+              value: String(foundUser.id || foundUser._id).trim(),
+            };
+          }
+        }
       }
       
       return null;
@@ -375,11 +538,23 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     let displayText = selectedOption?.label;
     if (!displayText && value) {
       if (label.includes('Assigned')) {
-        // For Assigned To, try to find user name from users list
-        const user = usersList.find(u => 
-          String(u.id || u._id).trim() === String(value).trim()
-        );
-        displayText = user ? (user.name || user.email || String(value)) : String(value);
+        // For Assigned To, try to find user name from users list with robust matching
+        const valStr = String(value).trim();
+        const user = usersList.find(u => {
+          const userId = String(u.id || u._id || '').trim();
+          return userId === valStr ||
+                 userId.replace(/\s/g, '') === valStr.replace(/\s/g, '') ||
+                 userId.toLowerCase() === valStr.toLowerCase();
+        });
+        if (user) {
+          displayText = user.name || user.email || `User ${user.id || user._id}`;
+        } else {
+          // If user not found, show the ID value
+          displayText = `User ID: ${valStr}`;
+        }
+      } else if (label.includes('Status')) {
+        // For Status, try to show the value even if not in options
+        displayText = String(value);
       } else {
         // For other fields, just show the value
         displayText = String(value);
@@ -389,15 +564,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       displayText = `Select ${label}`;
     }
     
-    if (__DEV__ && (label.includes('Status') || label.includes('Assigned'))) {
-      console.log(`🔍 Dropdown "${label}":`, {
-        value,
-        displayText,
-        hasMatch: !!selectedOption,
-        optionsCount: options.length,
-        allOptionValues: options.slice(0, 5).map(o => o.value), // Show first 5 for debugging
-      });
-    }
     
     return (
     <View style={styles.dropdownContainer}>
@@ -556,46 +722,68 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   // - If status is "CAD", show only users with role === 3
   // - If status is "Coral", show only users with role === 2
   // - Otherwise, show all non-client users
+  // Always include currently assigned user even if they don't match status filter (for display)
   const assignedToOptions = useMemo(() => {
     const statusLower = String(formData.status || '').toLowerCase();
+    const currentAssignedToId = String(formData.assignedTo || '').trim();
     
-    const options = users
-      .filter(user => {
-        const roleString = String(user.role || '').toLowerCase();
-        const roleNumber = typeof user.role === 'number' ? user.role : parseInt(user.role);
+    // First, get all valid users based on status
+    const validUsers = users.filter(user => {
+      const roleString = String(user.role || '').toLowerCase();
+      const roleNumber = typeof user.role === 'number' ? user.role : parseInt(user.role);
+      
+      // Always exclude clients
+      if (roleString === 'client' || roleNumber === 4) {
+        return false;
+      }
+      
+      // Filter based on status
+      if (statusLower === 'cad') {
+        // Show only users with role === 3 for CAD status
+        return roleNumber === 3;
+      } else if (statusLower === 'coral') {
+        // Show only users with role === 2 for Coral status
+        return roleNumber === 2;
+      }
+      
+      // For other statuses, show all non-client users
+      return true;
+    });
+    
+    // If there's a currently assigned user, make sure they're included even if filtered out
+    let finalUsers = [...validUsers];
+    if (currentAssignedToId) {
+      const assignedUser = users.find(u => {
+        const userId = String(u.id || u._id || '').trim();
+        return userId === currentAssignedToId ||
+               userId.replace(/\s/g, '') === currentAssignedToId.replace(/\s/g, '') ||
+               userId.toLowerCase() === currentAssignedToId.toLowerCase();
+      });
+      
+      if (assignedUser) {
+        // Check if already in validUsers
+        const alreadyIncluded = validUsers.some(u => {
+          const userId = String(u.id || u._id || '').trim();
+          const assignedId = String(assignedUser.id || assignedUser._id || '').trim();
+          return userId === assignedId;
+        });
         
-        // Always exclude clients
-        if (roleString === 'client' || roleNumber === 4) {
-          return false;
+        if (!alreadyIncluded) {
+          // Add the assigned user to the list
+          finalUsers.push(assignedUser);
         }
-        
-        // Filter based on status
-        if (statusLower=='cad') {
-          // Show only users with role === 3 for CAD status
-          return roleNumber === 3;
-        } else if (statusLower=='coral') {
-          // Show only users with role === 2 for Coral status
-          return roleNumber === 2;
-        }
-        
-        // For other statuses, show all non-client users
-        return true;
-      })
-      .map(user => ({
-        label: user.name || user.email || 'Unknown',
-        value: String(user.id || user._id).trim(), // Ensure value is a string
-      }));
+      }
+    }
+    
+    // Map to options format
+    const options = finalUsers.map(user => ({
+      label: user.name || user.email || 'Unknown',
+      value: String(user.id || user._id).trim(), // Ensure value is a string
+    }));
     
     return options;
-  }, [users, formData.status]);
+  }, [users, formData.status, formData.assignedTo]);
 
-  // Get status options from API (cached)
-  const statusOptionsFromAPI = useStatusOptions();
-  
-  // Filter out "All Status" option for create/edit forms (only needed in filters)
-  const statusOptions = useMemo(() => {
-    return statusOptionsFromAPI.filter(opt => opt.value !== 'all');
-  }, [statusOptionsFromAPI]);
 
   const categoryOptions = [
     { label: 'Necklace', value: 'Necklace' },
@@ -628,15 +816,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Platinum', value: 'Platinum' },
   ];
 
-  const stoneTypeOptions = [
-    { label: 'LabGrown', value: 'LabGrown' },
-    { label: 'CVDLabGrown', value: 'CVDLabGrown' },
-    { label: 'NaturalRegular', value: 'NaturalRegular' },
-    { label: 'NaturalLower', value: 'NaturalLower' },
-    { label: 'Synthetic', value: 'Synthetic' },
-    { label: 'LabTreatedDiamond', value: 'LabTreatedDiamond' },
-    { label: 'ColoredLabTreatedNat', value: 'ColoredLabTreatedNat' },
-  ];
+  // Stone type options from API
+  const stoneTypeOptions = stoneTypesData || [];
 
   if (fetchingEnquiry) {
     return (

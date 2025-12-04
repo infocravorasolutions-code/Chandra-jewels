@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -15,11 +15,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/cards/Cards';
 import { Input } from '../../components/common';
 import { CustomText, Heading } from '../../components/common/Text';
-import Icon from '../../components/common/Icon';
+import Icon from '../../components/common/Icon'; 
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatCurrency } from '../../utils/helpers';
-import { useGetMetalPricesQuery, useCalculatePricingMutation, useSavePricingMutation, useGetEnquiryByIdQuery } from '../../store/api';
+import { useGetMetalPricesQuery, useCalculatePricingMutation, useSavePricingMutation, useGetEnquiryByIdQuery, useGetStoneTypesQuery } from '../../store/api';
 import { API_BASE_URL } from '../../config/apiConfig';
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
@@ -38,6 +38,9 @@ const PricingScreen = ({ route, navigation }) => {
     refetchOnFocus: true, // Refetch when screen comes into focus
     refetchOnMountOrArgChange: true, // Refetch when enquiryId changes
   });
+
+  // Fetch stone types from API
+  const { data: stoneTypesData = [] } = useGetStoneTypesQuery();
   
   // Use fetched enquiry if available, otherwise fall back to route params
   const enquiry = fetchedEnquiry || routeEnquiry;
@@ -51,53 +54,49 @@ const PricingScreen = ({ route, navigation }) => {
   }, [designType, originalData, enquiry]);
   
   // Memoize latest design to ensure it updates when designData changes
+  // Priority: Find version with pricing data, otherwise use latest version
   const latestDesign = useMemo(() => {
-    return designData && designData.length > 0 
-    ? designData[designData.length - 1] 
-    : null;
+    if (!designData || designData.length === 0) return null;
+    
+    // First, try to find the latest version that has pricing data
+    for (let i = designData.length - 1; i >= 0; i--) {
+      const design = designData[i];
+      const pricing = design?.Pricing || design?.pricing;
+      
+      // Check if this version has pricing data
+      if (pricing && (
+        (Array.isArray(pricing) && pricing.length > 0) ||
+        (typeof pricing === 'object' && Object.keys(pricing).length > 0)
+      )) {
+        return design;
+      }
+    }
+    
+    // If no version has pricing, fall back to the latest version
+    return designData[designData.length - 1];
   }, [designData]);
   
   // Memoize pricing extraction to ensure it updates when latestDesign changes
   const rawPricing = useMemo(() => {
-    return latestDesign?.Pricing || latestDesign?.pricing || {};
+    const pricing = latestDesign?.Pricing || latestDesign?.pricing || {};
+    return pricing;
   }, [latestDesign]);
   
-  const existingPricing = useMemo(() => {
-    return Array.isArray(rawPricing) && rawPricing.length > 0 
-    ? rawPricing[rawPricing.length - 1] // Get the latest pricing if it's an array
-    : rawPricing; // Use as-is if it's an object
+  // Get all pricing entries as an array
+  const allPricingEntries = useMemo(() => {
+    if (Array.isArray(rawPricing) && rawPricing.length > 0) {
+      return rawPricing; // Return all pricing entries
+    } else if (rawPricing && typeof rawPricing === 'object' && Object.keys(rawPricing).length > 0) {
+      return [rawPricing]; // Convert single object to array
+    }
+    return []; // Return empty array if no pricing
   }, [rawPricing]);
   
-  // Debug logging when enquiry data changes
-  useEffect(() => {
-    if (__DEV__ && enquiry) {
-      if (latestDesign) {
-        console.log('🔄 Latest Design Pricing Type:', Array.isArray(latestDesign?.Pricing || latestDesign?.pricing) ? 'Array' : typeof (latestDesign?.Pricing || latestDesign?.pricing));
-      }
-      console.log('🔄 Raw Pricing Type:', Array.isArray(rawPricing) ? 'Array' : typeof rawPricing);
-      if (existingPricing && typeof existingPricing === 'object') {
-        console.log('🔄 Pricing Keys:', Object.keys(existingPricing));
-      }
-    }
-  }, [enquiry, fetchedEnquiry, designType, designData, latestDesign, rawPricing, existingPricing, originalData]);
-
-  // Form state - initialize with existing pricing data
-  const [formData, setFormData] = useState({
-    metalPrice: (existingPricing?.MetalPrice || existingPricing?.metalPrice || 0).toString(),
-    diamondPrice: (existingPricing?.DiamondPrice || existingPricing?.DiamondsPrice || existingPricing?.diamondPrice || 0).toString(),
-    totalPrice: (existingPricing?.TotalPrice || existingPricing?.totalPrice || 0).toString(),
-    metalWeight: (existingPricing?.MetalWeight || existingPricing?.metalWeight || 0).toString(),
-    diamondWeight: (existingPricing?.DiamondWeight || existingPricing?.diamondWeight || 0).toString(),
-    totalPieces: (existingPricing?.TotalPieces || existingPricing?.totalPieces || 0).toString(),
-    lossPercent: (existingPricing?.LossPercent || existingPricing?.lossPercent || existingPricing?.Loss || 0).toString(),
-    labour: (existingPricing?.Labour || existingPricing?.labour || 0).toString(),
-    duties: (existingPricing?.Duties || existingPricing?.duties || 0).toString(),
-    extraCharges: (existingPricing?.ExtraCharges || existingPricing?.extraCharges || 0).toString(),
-    undercutPrice: (existingPricing?.UndercutPrice || existingPricing?.undercutPrice || 0).toString(),
-    clientPricingMessage: existingPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
-  });
-
-  const [undercutEnabled, setUndercutEnabled] = useState(!!(existingPricing?.UndercutPrice || existingPricing?.undercutPrice));
+  // Use the latest (last) pricing entry since new saves are appended to the array
+  const existingPricing = useMemo(() => {
+    return allPricingEntries.length > 0 ? allPricingEntries[allPricingEntries.length - 1] : {};
+  }, [allPricingEntries]);
+  
   
   // Normalize stones data - map API field names to UI field names
   const normalizeStones = (rawStones) => {
@@ -115,10 +114,99 @@ const PricingScreen = ({ route, navigation }) => {
     }));
   };
   
-  const [stones, setStones] = useState(() => {
-    const rawStones = existingPricing?.Stones || existingPricing?.stones || latestDesign?.Stones || latestDesign?.stones || [];
-    return normalizeStones(rawStones);
+  // Initialize state for all pricing entries - each entry has its own formData and stones
+  const initializePricingEntryState = (pricingEntry) => {
+    return {
+      formData: {
+        metalPrice: (pricingEntry?.MetalPrice || pricingEntry?.metalPrice || 0).toString(),
+        diamondPrice: (pricingEntry?.DiamondPrice || pricingEntry?.DiamondsPrice || pricingEntry?.diamondPrice || 0).toString(),
+        totalPrice: (pricingEntry?.TotalPrice || pricingEntry?.totalPrice || 0).toString(),
+        metalWeight: (pricingEntry?.Metal?.Weight || pricingEntry?.MetalWeight || pricingEntry?.metalWeight || 0).toString(),
+        diamondWeight: (pricingEntry?.DiamondWeight || pricingEntry?.diamondWeight || 0).toString(),
+        totalPieces: (pricingEntry?.TotalPieces || pricingEntry?.totalPieces || 0).toString(),
+        lossPercent: (pricingEntry?.LossPercent || pricingEntry?.lossPercent || pricingEntry?.Loss || 0).toString(),
+        labour: (pricingEntry?.Labour || pricingEntry?.labour || 0).toString(),
+        duties: (pricingEntry?.Duties || pricingEntry?.duties || 0).toString(),
+        extraCharges: (pricingEntry?.ExtraCharges || pricingEntry?.extraCharges || 0).toString(),
+        undercutPrice: (pricingEntry?.UndercutPrice || pricingEntry?.undercutPrice || 0).toString(),
+        clientPricingMessage: pricingEntry?.ClientPricingMessage || '',
+      },
+      stones: normalizeStones(pricingEntry?.Stones || pricingEntry?.stones || []),
+      undercutEnabled: !!(pricingEntry?.UndercutPrice || pricingEntry?.undercutPrice),
+    };
+  };
+
+  // State for all pricing entries - array of { formData, stones, undercutEnabled }
+  const [pricingEntriesState, setPricingEntriesState] = useState(() => {
+    if (allPricingEntries.length > 0) {
+      return allPricingEntries.map(entry => initializePricingEntryState(entry));
+    }
+    // If no existing entries, create one empty entry for new pricing
+    return [{
+      formData: {
+        metalPrice: '0',
+        diamondPrice: '0',
+        totalPrice: '0',
+        metalWeight: '0',
+        diamondWeight: '0',
+        totalPieces: '0',
+        lossPercent: '0',
+        labour: '0',
+        duties: '0',
+        extraCharges: '0',
+        undercutPrice: '0',
+        clientPricingMessage: '',
+      },
+      stones: [],
+      undercutEnabled: false,
+    }];
   });
+
+  // For backward compatibility, keep existing formData and stones for the latest/new entry
+  const latestEntryIndex = pricingEntriesState.length - 1;
+  const formData = pricingEntriesState[latestEntryIndex]?.formData || {
+    metalPrice: '0', diamondPrice: '0', totalPrice: '0', metalWeight: '0',
+    diamondWeight: '0', totalPieces: '0', lossPercent: '0', labour: '0',
+    duties: '0', extraCharges: '0', undercutPrice: '0', clientPricingMessage: '',
+  };
+  const stones = pricingEntriesState[latestEntryIndex]?.stones || [];
+  const undercutEnabled = pricingEntriesState[latestEntryIndex]?.undercutEnabled || false;
+
+  // Helper to update formData (updates latest entry)
+  const setFormData = (newFormData) => {
+    setPricingEntriesState(prev => {
+      const updated = [...prev];
+      updated[latestEntryIndex] = {
+        ...updated[latestEntryIndex],
+        formData: typeof newFormData === 'function' ? newFormData(updated[latestEntryIndex].formData) : newFormData,
+      };
+      return updated;
+    });
+  };
+
+  // Helper to update stones (updates latest entry)
+  const setStones = (newStones) => {
+    setPricingEntriesState(prev => {
+      const updated = [...prev];
+      updated[latestEntryIndex] = {
+        ...updated[latestEntryIndex],
+        stones: typeof newStones === 'function' ? newStones(updated[latestEntryIndex].stones) : newStones,
+      };
+      return updated;
+    });
+  };
+
+  // Helper to set undercut enabled (updates latest entry)
+  const setUndercutEnabled = (value) => {
+    setPricingEntriesState(prev => {
+      const updated = [...prev];
+      updated[latestEntryIndex] = {
+        ...updated[latestEntryIndex],
+        undercutEnabled: typeof value === 'function' ? value(updated[latestEntryIndex].undercutEnabled) : value,
+      };
+      return updated;
+    });
+  };
 
   // Refetch enquiry data when screen comes into focus (after saving)
   useFocusEffect(
@@ -131,60 +219,31 @@ const PricingScreen = ({ route, navigation }) => {
     }, [finalEnquiryId, refetchEnquiry])
   );
 
-  // Update form data when pricing data changes
+  // Update all pricing entries state when pricing data changes
   useEffect(() => {
-    if (existingPricing && typeof existingPricing === 'object' && Object.keys(existingPricing).length > 0) {
-      
-      
-        const updatedFormData = {
-        metalPrice: (existingPricing?.MetalPrice || existingPricing?.metalPrice || 0).toString(),
-        diamondPrice: (existingPricing?.DiamondPrice || existingPricing?.DiamondsPrice || existingPricing?.diamondPrice || 0).toString(),
-        totalPrice: (existingPricing?.TotalPrice || existingPricing?.totalPrice || 0).toString(),
-        metalWeight: (existingPricing?.Metal?.Weight || existingPricing?.MetalWeight || existingPricing?.metalWeight || 0).toString(),
-        diamondWeight: (existingPricing?.DiamondWeight || existingPricing?.diamondWeight || 0).toString(),
-        totalPieces: (existingPricing?.TotalPieces || existingPricing?.totalPieces || 0).toString(),
-        lossPercent: (existingPricing?.LossPercent || existingPricing?.lossPercent || existingPricing?.Loss || 0).toString(),
-        labour: (existingPricing?.Labour || existingPricing?.labour || 0).toString(),
-        duties: (existingPricing?.Duties || existingPricing?.duties || 0).toString(),
-        extraCharges: (existingPricing?.ExtraCharges || existingPricing?.extraCharges || 0).toString(),
-        undercutPrice: (existingPricing?.UndercutPrice || existingPricing?.undercutPrice || 0).toString(),
-        clientPricingMessage: existingPricing?.ClientPricingMessage || latestDesign?.ClientPricingMessage || '',
-        };
-      
-      
-        
-        setFormData(prevFormData => {
-        // Always update to ensure latest data is shown
-          const hasChanges = Object.keys(updatedFormData).some(
-            key => updatedFormData[key] !== prevFormData[key]
-          );
-        
-        
-          
-          return hasChanges ? updatedFormData : prevFormData;
-        });
-        
-        // Update stones if they exist - normalize field names
-      const rawStones = existingPricing?.Stones || existingPricing?.stones || latestDesign?.Stones || latestDesign?.stones || [];
-        const updatedStones = normalizeStones(rawStones);
-        if (updatedStones.length > 0) {
-          setStones(prevStones => {
-          const stonesChanged = JSON.stringify(updatedStones) !== JSON.stringify(prevStones);
-          
-          return stonesChanged ? updatedStones : prevStones;
-          });
+    if (allPricingEntries.length > 0) {
+      const updatedEntries = allPricingEntries.map(entry => initializePricingEntryState(entry));
+      setPricingEntriesState(prev => {
+        // Only update if the data has actually changed
+        const hasChanges = JSON.stringify(updatedEntries) !== JSON.stringify(prev);
+        if (hasChanges) {
+          return updatedEntries;
         }
-        
-        // Update undercut enabled
-      const hasUndercut = !!(existingPricing?.UndercutPrice || existingPricing?.undercutPrice);
-      setUndercutEnabled(prev => {
-        if (hasUndercut !== prev && __DEV__) {
-          // Debug log if needed
-        }
-        return hasUndercut;
+        return prev;
       });
+    } else if (pricingEntriesState.length === 0) {
+      // If no existing entries, create one empty entry for new pricing
+      setPricingEntriesState([{
+        formData: {
+          metalPrice: '0', diamondPrice: '0', totalPrice: '0', metalWeight: '0',
+          diamondWeight: '0', totalPieces: '0', lossPercent: '0', labour: '0',
+          duties: '0', extraCharges: '0', undercutPrice: '0', clientPricingMessage: '',
+        },
+        stones: [],
+        undercutEnabled: false,
+      }]);
     }
-  }, [existingPricing, latestDesign]);
+  }, [allPricingEntries]);
 
   // Fetch latest metal prices - API is called automatically when component mounts
   const { data: metalPricesData, isLoading: loadingMetalPrices, refetch: refetchMetalPrices } = useGetMetalPricesQuery(false);
@@ -217,6 +276,10 @@ const PricingScreen = ({ route, navigation }) => {
   
   // Latest Metal Rate - always from current API call
   const latestMetalRate = apiMetalRate || 0;
+
+  // Duties considered for quotation - provided by backend pricing (falls back to 0)
+  const dutiesConsidered =
+    parseFloat(existingPricing?.Duties ?? existingPricing?.duties ?? formData?.duties ?? 0) || 0;
   
   // Refetch metal prices when screen loads (when Pricing button is pressed)
   useEffect(() => {
@@ -238,14 +301,6 @@ const PricingScreen = ({ route, navigation }) => {
   // Debug: Log pricing data structure (after all useState hooks)
   useEffect(() => {
     if (__DEV__) {
-      const rawPricing = latestDesign?.Pricing || latestDesign?.pricing || {};
-      const pricingObj = Array.isArray(rawPricing) && rawPricing.length > 0 
-        ? rawPricing[rawPricing.length - 1]
-        : rawPricing;
-      
-      console.log('Raw Pricing Type:', Array.isArray(rawPricing) ? 'Array' : 'Object');
-      console.log('Pricing Keys:', Object.keys(pricingObj || {}));
-      console.log('Full Pricing Object:', JSON.stringify(pricingObj, null, 2));
     }
   }, [latestDesign, designType]);
 
@@ -254,9 +309,9 @@ const PricingScreen = ({ route, navigation }) => {
     ? (originalData?.CoralCode || enquiry?.CoralCode || enquiry?.coralCode || '')
     : (originalData?.CadCode || enquiry?.CadCode || enquiry?.cadCode || '');
 
-  const handleInputChange = (field, value) => {
+  const handleInputChange = useCallback((field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-  };
+  }, []);
 
   const handleCalculate = async () => {
     let payload = null; // Declare outside try block for error logging
@@ -352,12 +407,6 @@ const PricingScreen = ({ route, navigation }) => {
                        originalData?.ClientId ||
                        null;
 
-      // Debug: Log enquiry structure to find clientId
-      if (__DEV__ && !clientId) {
-        console.warn('Enquiry object keys:', Object.keys(enquiry || {}));
-        console.warn('Original data keys:', Object.keys(originalData || {}));
-        console.warn('Full enquiry object:', JSON.stringify(enquiry, null, 2).substring(0, 500));
-      }
 
       // Validate required fields before sending
       if (!clientId) {
@@ -378,10 +427,6 @@ const PricingScreen = ({ route, navigation }) => {
         return;
       }
 
-      // Additional validation: Log client ID for debugging
-      if (__DEV__) {
-        console.log('Client ID format valid:', /^[0-9a-fA-F]{24}$/.test(clientId));
-      }
 
       if (metalWeight <= 0 && transformedStones.length === 0) {
         Alert.alert(
@@ -481,9 +526,6 @@ const PricingScreen = ({ route, navigation }) => {
         return;
       }
 
-      if (__DEV__) {
-        console.log('Pricing Calculate Payload:', JSON.stringify(payload, null, 2));
-      }
 
       // Call API
       const response = await calculatePricing(payload).unwrap();
@@ -568,22 +610,16 @@ const PricingScreen = ({ route, navigation }) => {
           setFormData(prev => ({ ...prev, ...updates }));
         }
 
-        if (__DEV__) {
-          console.log('Response summary:', {
-            MetalPrice: response.MetalPrice,
-            DiamondsPrice: response.DiamondsPrice,
-            TotalPrice: response.TotalPrice,
-            StonesCount: response.Stones?.length || 0,
-          });
-        }
 
         Alert.alert('Success', 'Pricing calculated successfully');
       } else {
         Alert.alert('Success', 'Calculation completed');
       }
     } catch (error) {
-      console.error('Full error:', JSON.stringify(error, null, 2));
-      console.error('Payload that was sent:', JSON.stringify(payload, null, 2));
+      if (__DEV__) {
+        console.error('Full error:', JSON.stringify(error, null, 2));
+        console.error('Payload that was sent:', JSON.stringify(payload, null, 2));
+      }
       
       // Provide more detailed error message with actionable suggestions
       let errorMessage = 'Failed to calculate pricing.';
@@ -690,9 +726,7 @@ const PricingScreen = ({ route, navigation }) => {
           ...(payload && error.status === 500 ? [{
             text: 'View Payload',
             onPress: () => {
-              if (__DEV__) {
-                console.log('Full payload that caused error:', JSON.stringify(payload, null, 2));
-              }
+              // Payload details available in error message
               Alert.alert(
                 'Payload Details',
                 `Check console for full payload details.\n\nClient ID: ${payload.clientId}\nMetal Weight: ${payload.details.Metal.Weight}\nStones: ${payload.details.Stones.length}\nQuantity: ${payload.details.Quantity}`,
@@ -705,17 +739,65 @@ const PricingScreen = ({ route, navigation }) => {
     }
   };
 
-  // Stone type options
-  const stoneTypeOptions = [
-    { label: 'Natural Regular', value: 'NaturalRegular' },
-    { label: 'Natural Lower', value: 'NaturalLower' },
-    { label: 'CVD Lab Grown', value: 'CVDLabGrown' },
-    { label: 'HPHT Lab Grown', value: 'HPHTLabGrown' },
-    { label: 'Moissanite', value: 'Moissanite' },
-    { label: 'Other', value: 'Other' },
-  ];
+  // Stone type options from API
+  const stoneTypeOptions = stoneTypesData || [];
 
-  const handleAddDiamond = () => {
+  // Individual stone filters for each pricing entry - { entryIndex: filterValue }
+  const [entryStoneFilters, setEntryStoneFilters] = useState({});
+  // Individual dropdown visibility for each pricing entry - { entryIndex: isVisible }
+  const [entryFilterDropdowns, setEntryFilterDropdowns] = useState({});
+  // Modal state for editing pricing entry
+  const [editingEntryIndex, setEditingEntryIndex] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  // Modal state for adding new pricing entry
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  const stoneFilterOptions = useMemo(
+    () => [{ label: 'All Stone Types', value: 'all' }, ...(stoneTypeOptions || [])],
+    [stoneTypeOptions]
+  );
+
+  // Helper to get filter value for a specific entry
+  const getEntryFilter = (entryIndex) => {
+    return entryStoneFilters[entryIndex] || 'all';
+  };
+
+  // Helper to set filter value for a specific entry
+  const setEntryFilter = (entryIndex, filterValue) => {
+    setEntryStoneFilters(prev => ({
+      ...prev,
+      [entryIndex]: filterValue,
+    }));
+  };
+
+  // Helper to toggle dropdown for a specific entry
+  const toggleEntryFilterDropdown = (entryIndex) => {
+    setEntryFilterDropdowns(prev => ({
+      ...prev,
+      [entryIndex]: !prev[entryIndex],
+    }));
+  };
+
+  // Helper to get filtered stones for a given stones array and filter value
+  const getFilteredStones = (stonesArray, filterValue = 'all') => {
+    if (filterValue === 'all') {
+      return stonesArray.map((stone, index) => ({ stone, originalIndex: index }));
+    }
+    return stonesArray
+      .map((stone, index) => ({ stone, originalIndex: index }))
+      .filter(({ stone }) => {
+        const typeValue = (stone?.Type || '').toString().toLowerCase();
+        return typeValue === filterValue.toLowerCase();
+      });
+  };
+
+  // For the latest entry (backward compatibility)
+  const stonesToRender = useMemo(() => {
+    const latestFilter = getEntryFilter(pricingEntriesState.length - 1);
+    return getFilteredStones(stones, latestFilter);
+  }, [stones, entryStoneFilters, pricingEntriesState.length]);
+
+  const handleAddDiamond = useCallback(() => {
     // Add a new stone row with default values
     const newStone = {
       Type: '',
@@ -728,19 +810,21 @@ const PricingScreen = ({ route, navigation }) => {
       CaratWeight: '0',
       Price: '0',
     };
-    setStones([...stones, newStone]);
-  };
+    setStones(prev => [...prev, newStone]);
+  }, []);
 
-  const handleUpdateStone = (index, field, value) => {
-    const updatedStones = [...stones];
+  const handleUpdateStone = useCallback((index, field, value) => {
+    setStones(prev => {
+      const updatedStones = [...prev];
     updatedStones[index] = {
       ...updatedStones[index],
       [field]: value,
     };
-    setStones(updatedStones);
-  };
+      return updatedStones;
+    });
+  }, []);
 
-  const handleDeleteStone = (index) => {
+  const handleDeleteStone = useCallback((index) => {
     Alert.alert(
       'Delete Stone',
       'Are you sure you want to delete this stone?',
@@ -750,32 +834,42 @@ const PricingScreen = ({ route, navigation }) => {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            const newStones = stones.filter((_, i) => i !== index);
-            setStones(newStones);
+            setStones(prev => prev.filter((_, i) => i !== index));
           },
         },
       ]
     );
-  };
+  }, []);
 
   // State for dropdown modals - one per row
   const [openDropdowns, setOpenDropdowns] = useState({});
 
-  const toggleDropdown = (index) => {
+  const toggleDropdown = useCallback((index) => {
     setOpenDropdowns(prev => ({
       ...prev,
       [index]: !prev[index],
     }));
-  };
+  }, []);
 
-  const renderTypeDropdown = (index, selectedValue) => {
-    const isOpen = openDropdowns[index] || false;
+  const renderTypeDropdown = useCallback((identifier, selectedValue, entryIndex = null, stoneIndex = null) => {
+    const isOpen = openDropdowns[identifier] || false;
+    // If entryIndex and stoneIndex are provided, this is for a specific pricing entry
+    // Otherwise, it's for the latest entry (backward compatibility)
+    const handleTypeChange = (value) => {
+      if (entryIndex !== null && stoneIndex !== null) {
+        updatePricingEntryStone(entryIndex, stoneIndex, 'Type', value);
+      } else {
+        // Backward compatibility - update latest entry
+        const latestIndex = pricingEntriesState.length - 1;
+        handleUpdateStone(stoneIndex !== null ? stoneIndex : parseInt(identifier), 'Type', value);
+      }
+    };
 
     return (
       <View>
         <TouchableOpacity
           style={styles.dropdownButton}
-          onPress={() => toggleDropdown(index)}
+          onPress={() => toggleDropdown(identifier)}
         >
           <Text style={styles.dropdownButtonText} numberOfLines={1}>
             {selectedValue || 'Select Type'}
@@ -786,34 +880,40 @@ const PricingScreen = ({ route, navigation }) => {
           visible={isOpen}
           transparent
           animationType="fade"
-          onRequestClose={() => toggleDropdown(index)}
+          onRequestClose={() => toggleDropdown(identifier)}
         >
           <TouchableOpacity
             style={styles.modalOverlay}
             activeOpacity={1}
-            onPress={() => toggleDropdown(index)}
+            onPress={() => toggleDropdown(identifier)}
           >
             <View style={styles.dropdownModal}>
+              <ScrollView 
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+                style={styles.dropdownScrollView}
+              >
               {stoneTypeOptions.map((option) => (
                 <TouchableOpacity
                   key={option.value}
                   style={styles.dropdownOption}
                   onPress={() => {
-                    handleUpdateStone(index, 'Type', option.value);
-                    toggleDropdown(index);
+                      handleTypeChange(option.value);
+                      toggleDropdown(identifier);
                   }}
                 >
                   <Text style={styles.dropdownOptionText}>{option.label}</Text>
                 </TouchableOpacity>
               ))}
+              </ScrollView>
             </View>
           </TouchableOpacity>
         </Modal>
       </View>
     );
-  };
+  }, [openDropdowns, stoneTypeOptions, updatePricingEntryStone, handleUpdateStone, pricingEntriesState, toggleDropdown]);
 
-  const handleSave = async () => {
+  const handleSave = async (shouldNavigateBack = true) => {
     try {
       // Get enquiry ID
       const enquiryId = enquiry?.id || enquiry?._id;
@@ -836,34 +936,36 @@ const PricingScreen = ({ route, navigation }) => {
       const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
       const metalQuality = originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '14K';
       
-      // Get metal rate - prioritize existing pricing rate, then metalRateConsidered, then calculate
-      const metalWeight = parseFloat(formData.metalWeight) || 0;
-      const metalPrice = parseFloat(formData.metalPrice) || 0;
-      
-      // Try to get rate from existing pricing first
-      let metalRate = existingPricing?.Metal?.Rate || existingPricing?.MetalRate || 0;
-      
-      // If not found, use metalRateConsidered (from form state)
-      if (!metalRate || metalRate === 0) {
-        metalRate = parseFloat(metalRateConsidered) || 0;
+      // Get default metal rate for fallback (from latest entry or metalRateConsidered)
+      const defaultMetalWeight = parseFloat(formData.metalWeight) || 0;
+      const defaultMetalPrice = parseFloat(formData.metalPrice) || 0;
+      let defaultMetalRate = existingPricing?.Metal?.Rate || existingPricing?.MetalRate || 0;
+      if (!defaultMetalRate || defaultMetalRate === 0) {
+        defaultMetalRate = parseFloat(metalRateConsidered) || 0;
+      }
+      if (!defaultMetalRate || defaultMetalRate === 0) {
+        defaultMetalRate = defaultMetalWeight > 0 ? defaultMetalPrice / defaultMetalWeight : 0;
       }
       
-      // If still not found, calculate from price/weight (fallback)
-      if (!metalRate || metalRate === 0) {
-        metalRate = metalWeight > 0 ? metalPrice / metalWeight : 0;
-      }
-      
-      if (__DEV__) {
-        console.log('💰 Metal Rate Calculation:', {
-          fromExistingPricing: existingPricing?.Metal?.Rate || existingPricing?.MetalRate,
-          fromMetalRateConsidered: metalRateConsidered,
-          calculated: metalWeight > 0 ? metalPrice / metalWeight : 0,
-          finalRate: metalRate,
-        });
+      // Convert all pricing entries from state to API format
+      const pricingArray = pricingEntriesState.map((entryState, entryIndex) => {
+        const entryFormData = entryState.formData;
+        const entryStones = entryState.stones;
+        const entryUndercutEnabled = entryState.undercutEnabled;
+        
+        // Get metal rate for this entry (try to preserve from original if exists)
+        const originalEntry = allPricingEntries[entryIndex];
+        let entryMetalRate = originalEntry?.Metal?.Rate || originalEntry?.MetalRate || 0;
+        
+        // If not found, calculate from price/weight, or use default
+        if (!entryMetalRate || entryMetalRate === 0) {
+          const entryMetalWeight = parseFloat(entryFormData.metalWeight) || 0;
+          const entryMetalPrice = parseFloat(entryFormData.metalPrice) || 0;
+          entryMetalRate = entryMetalWeight > 0 ? entryMetalPrice / entryMetalWeight : defaultMetalRate;
       }
       
       // Format stones data according to API structure
-      const formattedStones = stones.map(stone => ({
+        const formattedStones = entryStones.map(stone => ({
         Type: stone.Type || '',
         Color: stone.Color || '',
         Shape: stone.Shape || '',
@@ -876,50 +978,28 @@ const PricingScreen = ({ route, navigation }) => {
       }));
 
       // Build pricing object according to API structure
-      const pricingObject = {
-        MetalPrice: parseFloat(formData.metalPrice) || 0,
-        DiamondsPrice: parseFloat(formData.diamondPrice) || 0,
-        TotalPrice: parseFloat(formData.totalPrice) || 0,
-        DiamondWeight: parseFloat(formData.diamondWeight) || 0,
-        TotalPieces: parseInt(formData.totalPieces) || 0,
+        return {
+          MetalPrice: parseFloat(entryFormData.metalPrice) || 0,
+          DiamondsPrice: parseFloat(entryFormData.diamondPrice) || 0,
+          TotalPrice: parseFloat(entryFormData.totalPrice) || 0,
+          DiamondWeight: parseFloat(entryFormData.diamondWeight) || 0,
+          TotalPieces: parseInt(entryFormData.totalPieces) || 0,
         Metal: {
-          Weight: parseFloat(formData.metalWeight) || 0,
+            Weight: parseFloat(entryFormData.metalWeight) || 0,
           Quality: metalQuality,
-          Rate: metalRate,
-        },
-        ExtraCharges: parseFloat(formData.extraCharges) || 0,
-        Duties: parseFloat(formData.duties) || 0,
-        Loss: parseFloat(formData.lossPercent) || 0,
-        Labour: parseFloat(formData.labour) || 0,
-        UndercutPrice: undercutEnabled ? (parseFloat(formData.undercutPrice) || 0) : 0,
+            Rate: entryMetalRate,
+          },
+          ExtraCharges: parseFloat(entryFormData.extraCharges) || 0,
+          Duties: parseFloat(entryFormData.duties) || 0,
+          Loss: parseFloat(entryFormData.lossPercent) || 0,
+          Labour: parseFloat(entryFormData.labour) || 0,
+          UndercutPrice: entryUndercutEnabled ? (parseFloat(entryFormData.undercutPrice) || 0) : 0,
         Stones: formattedStones,
-        ClientPricingMessage: formData.clientPricingMessage || '',
-      };
+          ClientPricingMessage: entryFormData.clientPricingMessage || '',
+        };
+      });
+      
 
-      // API expects an array of pricing objects
-      // For now, we'll send a single pricing object in an array
-      // If there are multiple pricing sets (regular + client), they can be added later
-      const pricingArray = [pricingObject];
-
-      if (__DEV__) {
-        console.log('Version (formatted):', version);
-        console.log('Version (raw from design):', latestDesign?.Version || latestDesign?.version);
-        console.log('Metal Details:', {
-          Color: metalColor,
-          Quality: metalQuality,
-          Weight: formData.metalWeight,
-          Rate: metalRate,
-          Price: formData.metalPrice,
-        });
-        console.log('Pricing Object Structure:', {
-          MetalPrice: pricingObject.MetalPrice,
-          DiamondsPrice: pricingObject.DiamondsPrice,
-          TotalPrice: pricingObject.TotalPrice,
-          Metal: pricingObject.Metal,
-          StonesCount: pricingObject.Stones?.length || 0,
-        });
-        console.log('Full Pricing Data:', JSON.stringify(pricingArray, null, 2));
-      }
 
       // Call API to save pricing
       await savePricing({
@@ -941,8 +1021,10 @@ const PricingScreen = ({ route, navigation }) => {
           {
             text: 'OK',
             onPress: () => {
-              // Navigate back - data will be fresh when user returns
-              navigation.goBack();
+              // Navigate back only if shouldNavigateBack is true
+              if (shouldNavigateBack) {
+                navigation.goBack();
+              }
             },
           },
         ]
@@ -973,8 +1055,9 @@ const PricingScreen = ({ route, navigation }) => {
     
   };
 
-  const handleDownloadPricing = async () => {
-    if (stones.length === 0) {
+  // Download pricing for a specific entry
+  const handleDownloadPricingForEntry = async (pricingEntry, entryStones) => {
+    if (entryStones.length === 0) {
       Alert.alert('No Data', 'No stones data available to download');
       return;
     }
@@ -984,11 +1067,11 @@ const PricingScreen = ({ route, navigation }) => {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
         Alert.alert('Error', 'Authentication token not found');
-      return;
-    }
+        return;
+      }
 
       // Prepare stones data for Excel generation
-      const stonesData = stones.map(stone => ({
+      const stonesData = entryStones.map(stone => ({
         Type: stone.Type || '',
         Color: stone.Color || '',
         Shape: stone.Shape || '',
@@ -1008,14 +1091,6 @@ const PricingScreen = ({ route, navigation }) => {
 
       // Try to call backend API to generate Excel
       const excelUrl = `${API_BASE_URL}/api/pricing/generate-excel`;
-      
-              if (__DEV__) {
-        console.log('Generating Excel for pricing:', {
-          stonesCount: stonesData.length,
-          designCode,
-          excelFilename,
-        });
-      }
 
       const response = await fetch(excelUrl, {
         method: 'POST',
@@ -1056,10 +1131,59 @@ const PricingScreen = ({ route, navigation }) => {
         // Backend returned Excel file directly
         const arrayBuffer = await response.arrayBuffer();
         await saveExcelFile(arrayBuffer, excelFilename);
+        // Share modal is already opened in saveExcelFile function
       }
     } catch (error) {
-      // Fallback to client-side Excel generation
-      await generateExcelFile();
+      // Fallback to client-side Excel generation for this entry
+      const entryStonesData = entryStones.map(stone => ({
+        Type: stone.Type || '',
+        Color: stone.Color || '',
+        Shape: stone.Shape || '',
+        MmSize: stone.MM || '',
+        SieveSize: stone.Sieve || '',
+        Weight: parseFloat(stone.Weight) || 0,
+        Pcs: parseInt(stone.Pieces) || 0,
+        CtWeight: parseFloat(stone.CaratWeight) || 0,
+        Price: parseFloat(stone.Price) || 0,
+      }));
+      
+      const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
+      const excelFilename = designCode 
+        ? `Pricing_${designCode}_${timestamp}.xlsx`
+        : `Pricing_${timestamp}.xlsx`;
+      
+      // Generate Excel using XLSX library
+      const ws = XLSX.utils.json_to_sheet(entryStonesData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Pricing');
+      const wbout = XLSX.write(wb, { type: 'binary', bookType: 'xlsx' });
+      
+      // Convert to base64
+      const base64 = btoa(wbout);
+      const downloadPath = `${RNFS.DownloadDirectoryPath}/${excelFilename}`;
+      
+      // Write file to device
+      await RNFS.writeFile(downloadPath, base64, 'base64');
+      
+      // Share/open the file using share modal
+      try {
+        await Share.open({
+          url: `file://${downloadPath}`,
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          filename: excelFilename,
+          title: 'Share Pricing Excel File',
+          message: `Pricing data: ${excelFilename}`,
+          subject: `Pricing Data - ${excelFilename}`,
+        });
+      } catch (shareError) {
+        if (shareError.message !== 'User did not share') {
+          Alert.alert(
+            'Success',
+            `Excel file generated successfully!\n\nSaved to: Downloads/${excelFilename}\n\nYou can share it from your file manager.`,
+            [{ text: 'OK' }]
+          );
+        }
+      }
     }
   };
 
@@ -1211,9 +1335,102 @@ const PricingScreen = ({ route, navigation }) => {
     }
   };
 
-  const handleSyncClientPricing = async () => {
+  // Calculate pricing for a specific entry
+  const handleCalculateForEntry = async (entryIndex) => {
+    if (entryIndex === null || !pricingEntriesState[entryIndex]) {
+      Alert.alert('Error', 'Invalid pricing entry');
+      return;
+    }
+
+    setIsCalculating(true);
+    try {
+      const entryState = pricingEntriesState[entryIndex];
+      const entryFormData = entryState.formData;
+      const entryStones = entryState.stones;
+
+      // Get metal details from enquiry
+      const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
+      const metalQuality = originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '10K';
+      const metalWeight = parseFloat(entryFormData.metalWeight) || 0;
+
+      // Transform stones array to match API format
+      const transformedStones = entryStones.map((stone) => {
+        if (!stone.Type || stone.Type.trim() === '') {
+          return null;
+        }
+
+        return {
+          Type: stone.Type.trim(),
+          Color: stone.Color?.trim() || '',
+          Shape: stone.Shape?.trim() || '',
+          MmSize: stone.MM?.toString().trim() || '0',
+          SieveSize: stone.Sieve?.trim() || '',
+          CtWeight: parseFloat(stone.CaratWeight) || 0,
+          Weight: parseFloat(stone.Weight) || 0,
+          Pcs: parseInt(stone.Pieces) || 0,
+          Price: parseFloat(stone.Price) || 0,
+        };
+      }).filter(stone => stone !== null && stone.Type);
+
+      // Get clientId
+      const clientId = enquiry?.clientId || enquiry?.ClientId || originalData?.clientId || originalData?.ClientId || null;
+
+      if (!clientId) {
+        Alert.alert('Error', 'Client ID is missing');
+        return;
+      }
+
+      // Build payload
+      const payload = {
+        clientId: clientId,
+        details: {
+          Metal: {
+            Weight: metalWeight,
+            Quality: metalQuality,
+            Color: metalColor,
+          },
+          Stones: transformedStones,
+          Loss: parseFloat(entryFormData.lossPercent) || 0,
+          Labour: parseFloat(entryFormData.labour) || 0,
+          ExtraCharges: parseFloat(entryFormData.extraCharges) || 0,
+          Duties: parseFloat(entryFormData.duties) || 0,
+          Quantity: parseInt(entryFormData.totalPieces) || 1,
+        },
+      };
+
+      // Call API to calculate pricing
+      const response = await calculatePricing(payload).unwrap();
+
+      // Update the specific entry's form data
+      if (response) {
+        updatePricingEntryFormData(entryIndex, 'metalPrice', response.MetalPrice?.toString() || '0');
+        updatePricingEntryFormData(entryIndex, 'diamondPrice', response.DiamondsPrice?.toString() || '0');
+        const totalPrice = (parseFloat(response.MetalPrice || 0) + parseFloat(response.DiamondsPrice || 0)).toString();
+        updatePricingEntryFormData(entryIndex, 'totalPrice', totalPrice);
+        
+        Alert.alert('Success', 'Pricing calculated successfully');
+      }
+    } catch (error) {
+      const errorMessage = error?.data?.message || error?.message || 'Failed to calculate pricing';
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  // Sync client pricing for a specific entry
+  const handleSyncClientPricingForEntry = async (entryIndex) => {
+    if (entryIndex === null || !pricingEntriesState[entryIndex]) {
+      Alert.alert('Error', 'Invalid pricing entry');
+      return;
+    }
+
     setIsSyncing(true);
     try {
+      const entryState = pricingEntriesState[entryIndex];
+      const entryFormData = entryState.formData;
+      const entryStones = entryState.stones;
+
       // Get clientId from multiple possible sources
       const clientId = enquiry?.clientId || 
                        enquiry?.ClientId || 
@@ -1232,10 +1449,10 @@ const PricingScreen = ({ route, navigation }) => {
       // Get metal details from enquiry
       const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
       const metalQuality = originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '24K';
-      const metalWeight = parseFloat(formData.metalWeight) || 0;
+      const metalWeight = parseFloat(entryFormData.metalWeight) || 0;
 
       // Format stones array according to API specification
-      const formattedStones = stones.map(stone => ({
+      const formattedStones = entryStones.map(stone => ({
         Type: stone.Type || '',
         Color: stone.Color || '',
         Shape: stone.Shape || '',
@@ -1256,307 +1473,358 @@ const PricingScreen = ({ route, navigation }) => {
             Quality: metalQuality,
           },
           Stones: formattedStones,
-          Loss: parseFloat(formData.lossPercent) || 0,
-          Labour: parseFloat(formData.labour) || 0,
-          ExtraCharges: parseFloat(formData.extraCharges) || 0,
-          Duties: parseFloat(formData.duties) || 0,
-          Quantity: parseInt(formData.totalPieces) || 1,
+          Loss: parseFloat(entryFormData.lossPercent) || 0,
+          Labour: parseFloat(entryFormData.labour) || 0,
+          ExtraCharges: parseFloat(entryFormData.extraCharges) || 0,
+          Duties: parseFloat(entryFormData.duties) || 0,
+          Quantity: parseInt(entryFormData.totalPieces) || 1,
         },
       };
 
-      if (__DEV__) {
-        console.log('Payload:', JSON.stringify(payload, null, 2));
-      }
 
       // Call API to sync client pricing
       const response = await calculatePricing(payload).unwrap();
 
-      
-
-      // Update form data with response
+      // Update the specific entry's form data with response
       if (response) {
         // Update metal price
         if (response.MetalPrice !== undefined) {
-          setFormData(prev => ({
-            ...prev,
-            metalPrice: response.MetalPrice.toString(),
-          }));
+          updatePricingEntryFormData(entryIndex, 'metalPrice', response.MetalPrice.toString());
         }
 
         // Update diamonds price
         if (response.DiamondsPrice !== undefined) {
-          setFormData(prev => ({
-            ...prev,
-            diamondPrice: response.DiamondsPrice.toString(),
-          }));
+          updatePricingEntryFormData(entryIndex, 'diamondPrice', response.DiamondsPrice.toString());
         }
 
         // Update total price
         if (response.TotalPrice !== undefined) {
-          setFormData(prev => ({
-            ...prev,
-            totalPrice: response.TotalPrice.toString(),
-          }));
+          updatePricingEntryFormData(entryIndex, 'totalPrice', response.TotalPrice.toString());
+        } else {
+          // Calculate total if not provided
+          const totalPrice = (parseFloat(response.MetalPrice || 0) + parseFloat(response.DiamondsPrice || 0)).toString();
+          updatePricingEntryFormData(entryIndex, 'totalPrice', totalPrice);
         }
 
         // Update metal weight and rate if provided
         if (response.Metal) {
           if (response.Metal.Weight !== undefined) {
-            setFormData(prev => ({
-              ...prev,
-              metalWeight: response.Metal.Weight.toString(),
-            }));
-          }
-          if (response.Metal.Rate !== undefined) {
-            setMetalRateConsidered(parseFloat(response.Metal.Rate) || 0);
+            updatePricingEntryFormData(entryIndex, 'metalWeight', response.Metal.Weight.toString());
           }
         }
 
         // Update diamond weight
         if (response.DiamondWeight !== undefined) {
-          setFormData(prev => ({
-            ...prev,
-            diamondWeight: response.DiamondWeight.toString(),
-          }));
+          updatePricingEntryFormData(entryIndex, 'diamondWeight', response.DiamondWeight.toString());
         }
 
         // Update client-specific charges if provided
         if (response.Client) {
           if (response.Client.Loss !== undefined) {
-            setFormData(prev => ({
-              ...prev,
-              lossPercent: response.Client.Loss.toString(),
-            }));
+            updatePricingEntryFormData(entryIndex, 'lossPercent', response.Client.Loss.toString());
           }
           if (response.Client.Labour !== undefined) {
-            setFormData(prev => ({
-              ...prev,
-              labour: response.Client.Labour.toString(),
-            }));
+            updatePricingEntryFormData(entryIndex, 'labour', response.Client.Labour.toString());
           }
           if (response.Client.ExtraCharges !== undefined) {
-            setFormData(prev => ({
-              ...prev,
-              extraCharges: response.Client.ExtraCharges.toString(),
-            }));
+            updatePricingEntryFormData(entryIndex, 'extraCharges', response.Client.ExtraCharges.toString());
           }
           if (response.Client.Duties !== undefined) {
-            setFormData(prev => ({
-              ...prev,
-              duties: response.Client.Duties.toString(),
-            }));
+            updatePricingEntryFormData(entryIndex, 'duties', response.Client.Duties.toString());
           }
         }
 
-        // Update stones if provided
-        if (response.Stones && Array.isArray(response.Stones) && response.Stones.length > 0) {
-          const normalizedStones = normalizeStones(response.Stones);
-          setStones(normalizedStones);
-        }
-
-        Alert.alert(
-          'Success',
-          'Client pricing synced successfully. The form has been updated with client-specific pricing.'
-        );
-      } else {
-        Alert.alert('Warning', 'No pricing data received from server.');
+        Alert.alert('Success', 'Client pricing synced successfully');
       }
     } catch (error) {
-      
-      let errorMessage = 'Failed to sync client pricing. Please try again.';
-      if (error?.data?.message) {
-        errorMessage = error.data.message;
-      } else if (error?.data?.error) {
-        errorMessage = error.data.error;
-      } else if (error?.message) {
-        errorMessage = error.message;
-      }
-      
-      Alert.alert('Sync Failed', errorMessage);
+      const errorMessage = error?.data?.message || error?.message || 'Failed to sync client pricing';
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsSyncing(false);
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Header with Download Excel */}
-        <View style={styles.header}>
-          <Heading level={3} style={styles.headerTitle}>Pricing</Heading>
-          {/* {designCode && (
-            <Button
-              title={`Download Excel - ${designCode}.xlsx`}
-              onPress={handleDownloadExcel}
-              style={styles.downloadExcelButton}
+  // Legacy handleSyncClientPricing - kept for backward compatibility but now uses entry-specific function
+  const handleSyncClientPricing = async () => {
+    // If we're in edit modal, use entry-specific function
+    if (editingEntryIndex !== null && pricingEntriesState[editingEntryIndex]) {
+      await handleSyncClientPricingForEntry(editingEntryIndex);
+      return;
+    }
+    
+    // Otherwise, use the first entry or show error
+    if (pricingEntriesState.length > 0) {
+      await handleSyncClientPricingForEntry(0);
+    } else {
+      Alert.alert('Error', 'No pricing entries available');
+    }
+  };
+
+  // Function to get pricing entry label
+  const getPricingEntryLabel = (pricingEntry, index) => {
+    const entryNumber = index + 1;
+    if (pricingEntry?.ClientPricingMessage) {
+      return `Pricing Entry #${entryNumber} - ${pricingEntry.ClientPricingMessage}`;
+    }
+    return `Pricing Entry #${entryNumber}`;
+  };
+
+  // Helper to update a specific pricing entry's formData - memoized
+  const updatePricingEntryFormData = useCallback((index, field, value) => {
+    setPricingEntriesState(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        formData: {
+          ...updated[index].formData,
+          [field]: value,
+        },
+      };
+      return updated;
+    });
+  }, []);
+
+  // Helper to update a specific pricing entry's stones - memoized
+  const updatePricingEntryStone = useCallback((entryIndex, stoneIndex, field, value) => {
+    setPricingEntriesState(prev => {
+      const updated = [...prev];
+      const newStones = [...updated[entryIndex].stones];
+      newStones[stoneIndex] = {
+        ...newStones[stoneIndex],
+        [field]: value,
+      };
+      updated[entryIndex] = {
+        ...updated[entryIndex],
+        stones: newStones,
+      };
+      return updated;
+    });
+  }, []);
+
+  // Helper to add a stone to a specific pricing entry - memoized
+  const addStoneToPricingEntry = useCallback((entryIndex) => {
+    setPricingEntriesState(prev => {
+      const updated = [...prev];
+      const newStone = {
+        Type: '',
+        Color: '',
+        Shape: '',
+        MM: '',
+        Sieve: '',
+        Weight: '0',
+        Pieces: '0',
+        CaratWeight: '0',
+        Price: '0',
+      };
+      updated[entryIndex] = {
+        ...updated[entryIndex],
+        stones: [...updated[entryIndex].stones, newStone],
+      };
+      return updated;
+    });
+  }, []);
+
+  // Helper to delete a stone from a specific pricing entry - memoized
+  const deleteStoneFromPricingEntry = useCallback((entryIndex, stoneIndex) => {
+    setPricingEntriesState(prev => {
+      const updated = [...prev];
+      updated[entryIndex] = {
+        ...updated[entryIndex],
+        stones: updated[entryIndex].stones.filter((_, i) => i !== stoneIndex),
+      };
+      return updated;
+    });
+  }, []);
+
+  // Function to render an editable pricing entry
+  const renderEditablePricingEntry = (entryState, index, originalPricingEntry) => {
+    const entryFormData = entryState.formData;
+    const entryStones = entryState.stones;
+    const entryUndercutEnabled = entryState.undercutEnabled;
+    const pricingMetalRate = originalPricingEntry?.Metal?.Rate || originalPricingEntry?.MetalRate || 0;
+    
+    
+    return (
+      <Card key={index} style={styles.pricingEntryCard}>
+        <Heading level={4} style={styles.pricingEntryTitle}>
+          {getPricingEntryLabel(originalPricingEntry, index)} - Editable
+        </Heading>
+        
+        {/* Metal Rate Info for this pricing entry */}
+        {pricingMetalRate > 0 && (
+          <View style={styles.pricingEntryInfo}>
+            <CustomText variant="body" style={styles.pricingEntryInfoText}>
+              Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
+            </CustomText>
+          </View>
+        )}
+        
+        {/* Editable Pricing Details Grid */}
+        <View style={styles.pricingGrid}>
+          {/* Row 1 */}
+          <View style={styles.inputRowThree}>
+            <Input
+              label="Metal Price*"
+              value={entryFormData.metalPrice}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'metalPrice', value)}
+              keyboardType="numeric"
+              style={styles.gridInputThird}
             />
-          )} */}
-          <></>
+            <Input
+              label="Diamonds Price*"
+              value={entryFormData.diamondPrice}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'diamondPrice', value)}
+              keyboardType="numeric"
+              style={styles.gridInputThird}
+            />
+            <Input
+              label="Total Price*"
+              value={entryFormData.totalPrice}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'totalPrice', value)}
+              keyboardType="numeric"
+              style={styles.gridInputThird}
+              editable={false}
+            />
+          </View>
+
+          {/* Row 2 */}
+          <View style={styles.inputRowThree}>
+            <Input
+              label="Metal Weight"
+              value={entryFormData.metalWeight}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'metalWeight', value)}
+              keyboardType="numeric"
+              style={styles.gridInputThird}
+            />
+            <Input
+              label="Diamond Weight"
+              value={entryFormData.diamondWeight}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'diamondWeight', value)}
+              keyboardType="numeric"
+              style={styles.gridInputThird}
+            />
+            <Input
+              label="Total Pieces"
+              value={entryFormData.totalPieces}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'totalPieces', value)}
+              keyboardType="numeric"
+              style={styles.gridInputThird}
+            />
+          </View>
+
+          {/* Row 3 */}
+          <View style={styles.inputRowFour}>
+            <Input
+              label="Loss (%)"
+              value={entryFormData.lossPercent}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'lossPercent', value)}
+              keyboardType="numeric"
+              style={styles.gridInputQuarter}
+            />
+            <Input
+              label="Labour"
+              value={entryFormData.labour}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'labour', value)}
+              keyboardType="numeric"
+              style={styles.gridInputQuarter}
+            />
+            <Input
+              label="Duties"
+              value={entryFormData.duties}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'duties', value)}
+              keyboardType="numeric"
+              style={styles.gridInputQuarter}
+            />
+            <Input
+              label="Extra Charges"
+              value={entryFormData.extraCharges}
+              onChangeText={(value) => updatePricingEntryFormData(index, 'extraCharges', value)}
+              keyboardType="numeric"
+              style={styles.gridInputQuarter}
+            />
+          </View>
         </View>
 
-        {/* Metal Rate Information */}
-        <Card style={styles.infoCard}>
-          {loadingMetalPrices ? (
-            <CustomText variant="body" style={styles.infoText}>
-              Loading metal rates...
-            </CustomText>
-          ) : (
-            <CustomText variant="body" style={styles.infoText}>
-              The Metal Rate considered for quotation was ₹{metalRateConsidered.toFixed(2)} per gram.{'\n'}
-              The Latest Metal Rate is ₹{latestMetalRate.toFixed(2)} per gram.{'\n'}
-              Please click on calculate to update calculations according to latest rates.
-            </CustomText>
-          )}
-        </Card>
-
-        {/* Pricing Input Fields */}
-        <Card style={styles.pricingCard}>
-          <Heading level={4} style={styles.sectionTitle}>Pricing Details</Heading>
-          
-          <View style={styles.pricingGrid}>
-            {/* Row 1 */}
-            <View style={styles.inputRow}>
-              <Input
-                label="Metal Price*"
-                value={formData.metalPrice}
-                onChangeText={(value) => handleInputChange('metalPrice', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-              <Input
-                label="Diamonds Price*"
-                value={formData.diamondPrice}
-                onChangeText={(value) => handleInputChange('diamondPrice', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-              <Input
-                label="Total Price*"
-                value={formData.totalPrice}
-                onChangeText={(value) => handleInputChange('totalPrice', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-                editable={false}
-              />
-            </View>
-
-            {/* Row 2 */}
-            <View style={styles.inputRow}>
-              <Input
-                label="Metal Weight"
-                value={formData.metalWeight}
-                onChangeText={(value) => handleInputChange('metalWeight', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-              <Input
-                label="Diamond Weight"
-                value={formData.diamondWeight}
-                onChangeText={(value) => handleInputChange('diamondWeight', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-              <Input
-                label="Total Pieces"
-                value={formData.totalPieces}
-                onChangeText={(value) => handleInputChange('totalPieces', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-            </View>
-
-            {/* Row 3 */}
-            <View style={styles.inputRow}>
-              <Input
-                label="Loss (%)"
-                value={formData.lossPercent}
-                onChangeText={(value) => handleInputChange('lossPercent', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-              <Input
-                label="Labour"
-                value={formData.labour}
-                onChangeText={(value) => handleInputChange('labour', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-              <Input
-                label="Duties"
-                value={formData.duties}
-                onChangeText={(value) => handleInputChange('duties', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-            </View>
-
-            {/* Row 4 */}
-            <View style={styles.inputRow}>
-              <Input
-                label="ExtraCharges"
-                value={formData.extraCharges}
-                onChangeText={(value) => handleInputChange('extraCharges', value)}
-                keyboardType="numeric"
-                style={styles.gridInput}
-              />
-            </View>
-          </View>
-        </Card>
-
-        {/* Undercut Price Section */}
-        <Card style={styles.undercutCard}>
-          <View style={styles.undercutHeader}>
-            <Switch
-              value={undercutEnabled}
-              onValueChange={setUndercutEnabled}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.textWhite}
-            />
-            <CustomText variant="label" style={styles.undercutLabel}>
-              Undercut Price
-            </CustomText>
-          </View>
-          {undercutEnabled && (
-            <Input
-              label="Undercut Price"
-              value={formData.undercutPrice}
-              onChangeText={(value) => handleInputChange('undercutPrice', value)}
-              keyboardType="numeric"
-              style={styles.undercutInput}
-            />
-          )}
-        </Card>
-
-        {/* Stones Section */}
-        <Card style={styles.stonesCard}>
+        {/* Editable Stones Table for this pricing entry */}
+        <View style={styles.pricingEntryStonesContainer}>
           <View style={styles.stonesHeader}>
-            <Heading level={4} style={styles.sectionTitle}>Stones</Heading>
-          </View>
-          <View style={styles.stonesButtonsContainer}>
+            <Heading level={5} style={styles.pricingEntryStonesTitle}>Stones</Heading>
             <TouchableOpacity
-                onPress={handleAddDiamond}
-                style={[styles.stonesButton, styles.addButton]}
+              onPress={() => addStoneToPricingEntry(index)}
+              style={[styles.stonesButton, styles.addButton]}
               activeOpacity={0.8}
             >
               <View style={styles.stonesBtnContent}>
                 <Icon name="add" size={18} color={colors.textWhite} />
-                <Text style={styles.stonesBtnText}>Add Diamond</Text>
+                <Text style={styles.stonesBtnText}>Add Stone</Text>
               </View>
-            </TouchableOpacity>
-            <TouchableOpacity
-                onPress={handleDownloadPricing}
-                style={[styles.stonesButton, styles.downloadButton]}
-              activeOpacity={0.8}
-            >
-              <View style={styles.stonesBtnContent}>
-                <Icon name="file-download" size={18} color={colors.textWhite} />
-                <Text style={styles.stonesBtnText}>Download Pricing</Text>
-            </View>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.stonesTableContainer}>
-            {stones.length > 0 ? (
+          {/* Change Stone Type for All Stones in this pricing entry */}
+          <View style={styles.stoneFilterRow}>
+            <Text style={styles.stoneFilterLabel}>Change All Stone Types</Text>
+            <TouchableOpacity
+              style={styles.stoneFilterButton}
+              onPress={() => toggleEntryFilterDropdown(index)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.stoneFilterButtonText} numberOfLines={1}>
+                Select Stone Type
+              </Text>
+              <Icon name="arrow-drop-down" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          <Modal
+            visible={entryFilterDropdowns[index] || false}
+            transparent
+            animationType="fade"
+            onRequestClose={() => toggleEntryFilterDropdown(index)}
+          >
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => toggleEntryFilterDropdown(index)}
+            >
+              <View style={styles.dropdownModal}>
+                <ScrollView 
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                  style={styles.dropdownScrollView}
+                >
+                  {stoneTypeOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={styles.dropdownOption}
+                      onPress={() => {
+                        // Update all stones' Type to the selected value
+                        // Use setPricingEntriesState directly to update all stones at once
+                        setPricingEntriesState(prev => {
+                          const updated = [...prev];
+                          if (updated[index] && updated[index].stones.length > 0) {
+                            updated[index] = {
+                              ...updated[index],
+                              stones: updated[index].stones.map(stone => ({
+                                ...stone,
+                                Type: option.value,
+                              })),
+                            };
+                          }
+                          return updated;
+                        });
+                        toggleEntryFilterDropdown(index);
+                      }}
+                    >
+                      <Text style={styles.dropdownOptionText}>{option.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+          
+          {entryStones.length > 0 ? (
               <View style={styles.tableWrapper}>
                 <ScrollView 
                   horizontal 
@@ -1564,13 +1832,13 @@ const PricingScreen = ({ route, navigation }) => {
                   style={styles.tableScrollContainer}
                 >
                   <View>
-                    {/* Table Header */}
+                    {/* Table Header - same as in main form */}
                     <View style={styles.tableHeader}>
                       <View style={[styles.tableHeaderCell, styles.tableCellNumber]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
                       </View>
                       <View style={[styles.tableHeaderCell, styles.tableCellType]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Type *</CustomText>
+                        <CustomText variant="caption" style={styles.tableHeaderText}>Type</CustomText>
                       </View>
                       <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
@@ -1599,218 +1867,647 @@ const PricingScreen = ({ route, navigation }) => {
                       <View style={[styles.tableHeaderCell, styles.tableCellAction]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Action</CustomText>
                       </View>
-                  </View>
-                  
-                    {/* Table Body */}
+                    </View>
+                    
+                    {/* Table Body - Editable */}
                     <View style={styles.tableBody}>
-                      {stones.map((stone, index) => (
-                      <View key={index} style={[styles.tableRow, index % 2 === 1 && styles.tableRowEven]}>
-                        {/* Row Number */}
+                      {entryStones.map((stone, originalIndex) => (
+                      <View key={originalIndex} style={[styles.tableRow, originalIndex % 2 === 1 && styles.tableRowEven]}>
                         <View style={[styles.tableCell, styles.tableCellNumber]}>
                           <CustomText variant="body" style={styles.tableCellText}>
-                            {index + 1}
-                      </CustomText>
+                            {originalIndex + 1}
+                          </CustomText>
                         </View>
-
-                        {/* Type Dropdown */}
                         <View style={[styles.tableCell, styles.tableCellType]}>
-                    {renderTypeDropdown(index, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '')}
-                  </View>
-                  
-                        {/* Color */}
+                          {renderTypeDropdown(`${index}-${originalIndex}`, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '', index, originalIndex)}
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.Color || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'Color', value)}
+                            value={stone.Color || ''}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Color', value)}
                             placeholder="Color"
-                    placeholderTextColor={colors.textLight}
-                  />
-                      </View>
-                  
-                        {/* Shape */}
+                            placeholderTextColor={colors.textLight}
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.Shape || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'Shape', value)}
+                            value={stone.Shape || ''}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Shape', value)}
                             placeholder="Shape"
-                    placeholderTextColor={colors.textLight}
-                  />
-                    </View>
-                    
-                        {/* MM Size */}
+                            placeholderTextColor={colors.textLight}
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.MM || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'MM', value)}
-                          placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                      </View>
-                  
-                        {/* Sieve Size */}
+                            value={stone.MM || ''}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'MM', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellMedium]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.Sieve || ''}
-                    onChangeText={(value) => handleUpdateStone(index, 'Sieve', value)}
-                          placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                    </View>
-                    
-                        {/* Weight */}
+                            value={stone.Sieve || ''}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Sieve', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.Weight || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'Weight', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                      </View>
-                  
-                        {/* Pieces */}
+                            value={stone.Weight || '0'}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Weight', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.Pieces || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'Pieces', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                        />
-                    </View>
-                    
-                        {/* Carat Weight */}
+                            value={stone.Pieces || '0'}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Pieces', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.CaratWeight || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'CaratWeight', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                  />
-                      </View>
-                  
-                        {/* Price */}
+                            value={stone.CaratWeight || '0'}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'CaratWeight', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellSmall]}>
-                  <TextInput
+                          <TextInput
                             style={styles.tableInput}
-                    value={stone.Price || '0'}
-                    onChangeText={(value) => handleUpdateStone(index, 'Price', value)}
-                    placeholder="0"
-                    placeholderTextColor={colors.textLight}
-                    keyboardType="numeric"
-                        />
-                </View>
-
-                        {/* Delete Action */}
+                            value={stone.Price || '0'}
+                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Price', value)}
+                            placeholder="0"
+                            placeholderTextColor={colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
                         <View style={[styles.tableCell, styles.tableCellAction]}>
                           <TouchableOpacity
-                            onPress={() => handleDeleteStone(index)}
+                            onPress={() => {
+                              Alert.alert(
+                                'Delete Stone',
+                                'Are you sure you want to delete this stone?',
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  {
+                                    text: 'Delete',
+                                    style: 'destructive',
+                                    onPress: () => deleteStoneFromPricingEntry(index, originalIndex),
+                                  },
+                                ]
+                              );
+                            }}
                             style={styles.tableDeleteButton}
                           >
                             <Icon name="delete" size={18} color={colors.error} />
                           </TouchableOpacity>
-                    </View>
+                        </View>
+                      </View>
+                    ))}
                   </View>
-                      ))}
-                    </View>
-                  </View>
-                </ScrollView>
+                </View>
+              </ScrollView>
               </View>
             ) : (
-              <View style={styles.emptyStonesContainer}>
-                <Icon name="diamond" size={48} color={colors.textLight} />
-                <Text style={styles.emptyStonesText}>No stones added yet</Text>
-                <Text style={styles.emptyStonesSubtext}>
-                  Click "Add Diamond" to add your first stone
-                </Text>
-              </View>
+              <CustomText variant="body" style={styles.noStonesText}>
+                No stones added yet. Click "Add Stone" to add stones.
+              </CustomText>
             )}
-          </View>
-        </Card>
-
-        {/* Client Pricing Message */}
-        <Card style={styles.messageCard}>
-          <CustomText variant="label" style={styles.label}>
-            Client Pricing Message
-          </CustomText>
-          <Input
-            value={formData.clientPricingMessage}
-            onChangeText={(value) => handleInputChange('clientPricingMessage', value)}
-            placeholder="Enter client pricing message..."
-            multiline
-            numberOfLines={6}
-            style={styles.messageInput}
-          />
-        </Card>
-
-        {/* Action Buttons */}
-        <Card style={styles.actionButtonsCard}>
-        <View style={styles.actionButtons}>
-            <View style={styles.actionButtonsRow}>
-              <TouchableOpacity
-            onPress={handleSave}
-                disabled={isSaving}
-                style={[styles.actionBtn, styles.actionBtnHalf, styles.saveBtn, isSaving && styles.btnDisabled]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.btnContent}>
-                  <Icon name="save" size={18} color={colors.textWhite} />
-                  <Text style={styles.btnText}>{isSaving ? 'Saving...' : 'Save'}</Text>
-                </View>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-            onPress={() => navigation.goBack()}
-                style={[styles.actionBtn, styles.actionBtnHalf, styles.cancelBtn]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.btnContent}>
-                  <Icon name="close" size={18} color={colors.textWhite} />
-                  <Text style={styles.btnText}>Cancel</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-            onPress={handleCalculate}
-            disabled={isCalculating}
-              style={[styles.actionBtn, styles.calculateBtn, isCalculating && styles.btnDisabled]}
-              activeOpacity={0.8}
-            >
-              <View style={styles.btnContent}>
-                <Icon name="calculate" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>
-                  {isCalculating ? "Calculating..." : "Calculate"}
-                </Text>
         </View>
-            </TouchableOpacity>
+      </Card>
+    );
+  };
 
+  // Function to render a single pricing entry (read-only display) - kept for backward compatibility
+  const renderPricingEntry = (pricingEntry, index) => {
+    const pricingStones = normalizeStones(pricingEntry?.Stones || pricingEntry?.stones || []);
+    const pricingMetalRate = pricingEntry?.Metal?.Rate || pricingEntry?.MetalRate || 0;
+    
+    return (
+      <Card key={index} style={styles.pricingEntryCard}>
+        <Heading level={4} style={styles.pricingEntryTitle}>
+          {getPricingEntryLabel(pricingEntry, index)}
+        </Heading>
+        
+        {/* Metal Rate Info for this pricing entry */}
+        {pricingMetalRate > 0 && (
+          <View style={styles.pricingEntryInfo}>
+            <CustomText variant="body" style={styles.pricingEntryInfoText}>
+              Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
+            </CustomText>
+          </View>
+        )}
+        
+        {/* Pricing Details Grid */}
+        <View style={styles.pricingGrid}>
+          {/* Row 1 */}
+          <View style={styles.inputRowThree}>
+            <View style={styles.gridInputThird}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Metal Price</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                ${(pricingEntry?.MetalPrice || pricingEntry?.metalPrice || 0).toFixed(2)}
+              </CustomText>
+            </View>
+            <View style={styles.gridInputThird}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Diamonds Price</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                ${(pricingEntry?.DiamondsPrice || pricingEntry?.DiamondPrice || pricingEntry?.diamondsPrice || pricingEntry?.diamondPrice || 0).toFixed(2)}
+              </CustomText>
+            </View>
+            <View style={styles.gridInputThird}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Total Price</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                ${(pricingEntry?.TotalPrice || pricingEntry?.totalPrice || 0).toFixed(2)}
+              </CustomText>
+            </View>
+          </View>
+
+          {/* Row 2 */}
+          <View style={styles.inputRowThree}>
+            <View style={styles.gridInputThird}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Metal Weight</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                {(pricingEntry?.Metal?.Weight || pricingEntry?.MetalWeight || pricingEntry?.metalWeight || 0).toFixed(3)}
+              </CustomText>
+            </View>
+            <View style={styles.gridInputThird}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Diamond Weight</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                {(pricingEntry?.DiamondWeight || pricingEntry?.diamondWeight || 0).toFixed(3)}
+              </CustomText>
+            </View>
+            <View style={styles.gridInputThird}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Total Pieces</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                {pricingEntry?.TotalPieces || pricingEntry?.totalPieces || 0}
+              </CustomText>
+            </View>
+          </View>
+
+          {/* Row 3 */}
+          <View style={styles.inputRowFour}>
+            <View style={styles.gridInputQuarter}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Loss (%)</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                {(pricingEntry?.Loss || pricingEntry?.lossPercent || pricingEntry?.loss || 0).toFixed(1)}%
+              </CustomText>
+            </View>
+            <View style={styles.gridInputQuarter}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Labour</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                ${(pricingEntry?.Labour || pricingEntry?.labour || 0).toFixed(2)}
+              </CustomText>
+            </View>
+            <View style={styles.gridInputQuarter}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Duties</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                {(pricingEntry?.Duties || pricingEntry?.duties || 0).toFixed(2)}%
+              </CustomText>
+            </View>
+            <View style={styles.gridInputQuarter}>
+              <CustomText variant="label" style={styles.pricingEntryLabel}>Extra Charges</CustomText>
+              <CustomText variant="body" style={styles.pricingEntryValue}>
+                ${(pricingEntry?.ExtraCharges || pricingEntry?.extraCharges || 0).toFixed(2)}
+              </CustomText>
+            </View>
+          </View>
+        </View>
+
+        {/* Stones Table for this pricing entry */}
+        {pricingStones.length > 0 && (
+          <View style={styles.pricingEntryStonesContainer}>
+            <Heading level={5} style={styles.pricingEntryStonesTitle}>Stones</Heading>
+            <View style={styles.tableWrapper}>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={true}
+                style={styles.tableScrollContainer}
+              >
+                <View>
+                  {/* Table Header */}
+                  <View style={styles.tableHeader}>
+                    <View style={[styles.tableHeaderCell, styles.tableCellNumber]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellType]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Type</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Shape</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>MM</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellMedium]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Weight</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Pieces</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Carat</CustomText>
+                    </View>
+                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                      <CustomText variant="caption" style={styles.tableHeaderText}>Price</CustomText>
+                    </View>
+                  </View>
+                  
+                  {/* Table Body */}
+                  <View style={styles.tableBody}>
+                    {pricingStones.map((stone, stoneIndex) => (
+                      <View key={stoneIndex} style={[styles.tableRow, stoneIndex % 2 === 1 && styles.tableRowEven]}>
+                        <View style={[styles.tableCell, styles.tableCellNumber]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {stoneIndex + 1}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellType]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {stone.Type || '-'}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {stone.Color || '-'}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {stone.Shape || '-'}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {stone.MM || '-'}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellMedium]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {stone.Sieve || '-'}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {parseFloat(stone.Weight || 0).toFixed(3)}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {stone.Pieces || 0}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            {parseFloat(stone.CaratWeight || 0).toFixed(3)}
+                          </CustomText>
+                        </View>
+                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                          <CustomText variant="body" style={styles.tableCellText}>
+                            ${parseFloat(stone.Price || 0).toFixed(2)}
+                          </CustomText>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        )}
+      </Card>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* Header with Download Excel */}
+        <View style={styles.header}>
+          <Heading level={3} style={styles.headerTitle}>Pricing</Heading>
+          {/* {designCode && (
+            <Button
+              title={`Download Excel - ${designCode}.xlsx`}
+              onPress={handleDownloadExcel}
+              style={styles.downloadExcelButton}
+            />
+          )} */}
+          <></>
+        </View>
+
+        {/* Metal Rate Information */}
+        <Card style={styles.infoCard}>
+          {loadingMetalPrices ? (
+            <CustomText variant="body" style={styles.infoText}>
+              Loading metal rates...
+            </CustomText>
+          ) : (
+            <CustomText variant="body" style={styles.infoText}>
+              The Metal Rate considered for quotation was ${metalRateConsidered.toFixed(2)} per gram.{'\n'}
+              The Latest Metal Rate is ${latestMetalRate.toFixed(2)} per gram.{'\n'}
+              Please click on calculate to update calculations according to latest rates.{'\n'}
+              The Duties considered for quotation was ${dutiesConsidered.toFixed(2)}.
+            </CustomText>
+          )}
+        </Card>
+
+        {/* Display All Existing Pricing Entries - View Mode with Edit Button */}
+        <View style={styles.allPricingEntriesContainer}>
+          <View style={styles.pricingEntriesHeader}>
+            <Heading level={4} style={styles.allPricingEntriesTitle}>
+              Pricing Entries ({allPricingEntries.length})
+            </Heading>
             <TouchableOpacity
-              onPress={handleSyncClientPricing}
-              disabled={isSyncing}
-              style={[styles.actionBtn, styles.syncBtn, isSyncing && styles.btnDisabled]}
+              style={styles.addPricingButton}
+              onPress={() => {
+                // Create a new empty pricing entry
+                const newEntryState = {
+                  formData: {
+                    metalPrice: '0',
+                    diamondPrice: '0',
+                    totalPrice: '0',
+                    metalWeight: '0',
+                    diamondWeight: '0',
+                    totalPieces: '0',
+                    lossPercent: '0',
+                    labour: '0',
+                    duties: '0',
+                    extraCharges: '0',
+                    undercutPrice: '0',
+                    clientPricingMessage: '',
+                  },
+                  stones: [],
+                  undercutEnabled: false,
+                };
+                // Add to state temporarily for editing
+                setPricingEntriesState(prev => [...prev, newEntryState]);
+                setEditingEntryIndex(pricingEntriesState.length);
+                setShowAddModal(true);
+              }}
               activeOpacity={0.8}
             >
-              <View style={styles.btnContent}>
-                <Icon name="sync" size={20} color={colors.textWhite} />
-                <Text style={styles.btnText}>
-                  {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
-                </Text>
-            </View>
+              <Icon name="add" size={20} color={colors.textWhite} />
+              <Text style={styles.addPricingButtonText}>Add Pricing</Text>
             </TouchableOpacity>
-
           </View>
-        </Card>
+          {allPricingEntries.length > 0 ? (
+            allPricingEntries.map((pricingEntry, index) => (
+              <Card key={index} style={styles.pricingEntryCard}>
+                <View style={styles.pricingEntryHeader}>
+                  <Heading level={4} style={styles.pricingEntryTitle}>
+                    {getPricingEntryLabel(pricingEntry, index)}
+                  </Heading>
+                  <TouchableOpacity
+                    style={styles.editButton}
+                    onPress={() => {
+                      setEditingEntryIndex(index);
+                      setShowEditModal(true);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="edit" size={18} color={colors.primary} />
+                    <Text style={styles.editButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                </View>
+                {renderPricingEntry(pricingEntry, index)}
+                
+                {/* Download Button for View Mode */}
+                <View style={styles.pricingEntryActions}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      // Download pricing for this specific entry
+                      const entryStones = normalizeStones(pricingEntry?.Stones || pricingEntry?.stones || []);
+                      handleDownloadPricingForEntry(pricingEntry, entryStones);
+                    }}
+                    style={[styles.pricingEntryActionButton, styles.downloadButton]}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="file-download" size={18} color={colors.textWhite} />
+                    <Text style={styles.pricingEntryActionButtonText}>Download Pricing</Text>
+                  </TouchableOpacity>
+                </View>
+              </Card>
+            ))
+          ) : (
+            <Card style={styles.pricingEntryCard}>
+              <CustomText variant="body" style={styles.noPricingText}>
+                No pricing entries yet. Click "Add Pricing" to create your first pricing entry.
+              </CustomText>
+            </Card>
+          )}
+        </View>
+
+        {/* Modal for Editing Pricing Entry */}
+        <Modal
+          visible={showEditModal}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => {
+            setShowEditModal(false);
+            setEditingEntryIndex(null);
+          }}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Heading level={3} style={styles.modalTitle}>
+                Edit Pricing Entry {editingEntryIndex !== null ? editingEntryIndex + 1 : ''}
+              </Heading>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  setShowEditModal(false);
+                  setEditingEntryIndex(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Icon name="close" size={24} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
+              {editingEntryIndex !== null && pricingEntriesState[editingEntryIndex] && (
+                renderEditablePricingEntry(
+                  pricingEntriesState[editingEntryIndex],
+                  editingEntryIndex,
+                  allPricingEntries[editingEntryIndex]
+                )
+              )}
+            </ScrollView>
+            <View style={styles.modalFooter}>
+              <View style={styles.modalFooterTopRow}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelModalButton]}
+                  onPress={() => {
+                    setShowEditModal(false);
+                    setEditingEntryIndex(null);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.modalButtonText}>Close</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveModalButton]}
+                  onPress={async () => {
+                    try {
+                      // Save without navigating back (stay on pricing screen)
+                      await handleSave(false);
+                      // Close modal after successful save
+                      setShowEditModal(false);
+                      setEditingEntryIndex(null);
+                    } catch (error) {
+                      // Error is already handled in handleSave
+                      // Modal stays open so user can fix and retry
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.modalButtonText, styles.saveModalButtonText]}>Save Changes</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Calculate and Sync Buttons */}
+              <View style={styles.modalFooterActionRow}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (editingEntryIndex !== null && pricingEntriesState[editingEntryIndex]) {
+                      await handleCalculateForEntry(editingEntryIndex);
+                    }
+                  }}
+                  disabled={isCalculating}
+                  style={[styles.modalActionButton, styles.calculateBtn, isCalculating && styles.btnDisabled]}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="calculate" size={18} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText}>
+                    {isCalculating ? "Calculating..." : "Calculate"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (editingEntryIndex !== null && pricingEntriesState[editingEntryIndex]) {
+                      await handleSyncClientPricingForEntry(editingEntryIndex);
+                    }
+                  }}
+                  disabled={isSyncing}
+                  style={[styles.modalActionButton, styles.syncBtn, isSyncing && styles.btnDisabled]}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="sync" size={18} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText}>
+                    {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Modal for Adding New Pricing Entry */}
+        <Modal
+          visible={showAddModal}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => {
+            setShowAddModal(false);
+            // Remove the temporary new entry if modal is closed without saving
+            if (editingEntryIndex !== null && editingEntryIndex >= allPricingEntries.length) {
+              setPricingEntriesState(prev => prev.slice(0, -1));
+            }
+            setEditingEntryIndex(null);
+          }}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Heading level={3} style={styles.modalTitle}>
+                Add New Pricing Entry
+              </Heading>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  setShowAddModal(false);
+                  // Remove the temporary new entry if modal is closed without saving
+                  if (editingEntryIndex !== null && editingEntryIndex >= allPricingEntries.length) {
+                    setPricingEntriesState(prev => prev.slice(0, -1));
+                  }
+                  setEditingEntryIndex(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Icon name="close" size={24} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
+              {editingEntryIndex !== null && pricingEntriesState[editingEntryIndex] && (
+                renderEditablePricingEntry(
+                  pricingEntriesState[editingEntryIndex],
+                  editingEntryIndex,
+                  null // No original pricing entry for new entries
+                )
+              )}
+            </ScrollView>
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelModalButton]}
+                onPress={() => {
+                  setShowAddModal(false);
+                  // Remove the temporary new entry if modal is closed without saving
+                  if (editingEntryIndex !== null && editingEntryIndex >= allPricingEntries.length) {
+                    setPricingEntriesState(prev => prev.slice(0, -1));
+                  }
+                  setEditingEntryIndex(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveModalButton]}
+                onPress={async () => {
+                  try {
+                    // Save the new pricing entry
+                    await handleSave(false);
+                    // Close modal after successful save
+                    setShowAddModal(false);
+                    setEditingEntryIndex(null);
+                  } catch (error) {
+                    // Error is already handled in handleSave
+                    // Modal stays open so user can fix and retry
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.modalButtonText, styles.saveModalButtonText]}>Save New Pricing</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Pricing Input Fields - REMOVED (only shown in modals now) */}
+        {/* All form sections (Pricing Details, Stones, Action Buttons) removed from main screen */}
+        {/* All editing happens in modals - use "Add Pricing" button or "Edit" button on existing entries */}
       </ScrollView>
     </View>
   );
@@ -1880,6 +2577,24 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: '30%',
   },
+  inputRowThree: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'nowrap',
+  },
+  gridInputThird: {
+    flexBasis: '32%',
+  },
+  inputRowFour: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'nowrap',
+  },
+  gridInputQuarter: {
+    flexBasis: '24%',
+  },
   undercutCard: {
     marginBottom: 16,
     padding: 20,
@@ -1914,6 +2629,36 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 16,
     flexWrap: 'wrap',
+  },
+  stoneFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 12,
+  },
+  stoneFilterLabel: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontFamily: fonts.medium,
+    fontSize: fonts.sm,
+  },
+  stoneFilterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: 170,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  stoneFilterButtonText: {
+    flex: 1,
+    marginRight: 4,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
   },
   stonesButton: {
     borderRadius: 10,
@@ -1974,10 +2719,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tableScrollContainer: {
-    maxHeight: 500,
+    // Removed maxHeight to allow all stone rows to be visible and scrollable
   },
   tableBody: {
     backgroundColor: colors.background,
+  },
+  noFilteredDataRow: {
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noFilteredDataText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.medium,
   },
   tableRow: {
     flexDirection: 'row',
@@ -2075,12 +2830,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 8,
     minWidth: 200,
-    maxHeight: 300,
+    maxWidth: '80%',
+    maxHeight: '70%',
     shadowColor: colors.textPrimary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 8,
+  },
+  dropdownScrollView: {
+    maxHeight: 400,
   },
   dropdownOption: {
     paddingVertical: 12,
@@ -2191,7 +2950,229 @@ const styles = StyleSheet.create({
   btnDisabled: {
     opacity: 0.6,
   },
+  filterCard: {
+    marginBottom: 20,
+    padding: 16,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  allPricingEntriesContainer: {
+    marginBottom: 24,
+  },
+  pricingEntriesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  allPricingEntriesTitle: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: fonts.xl,
+  },
+  addPricingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    gap: 8,
+  },
+  addPricingButtonText: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+    fontSize: fonts.base,
+  },
+  noPricingText: {
+    textAlign: 'center',
+    color: colors.textSecondary,
+    padding: 20,
+    fontFamily: fonts.medium,
+  },
+  pricingEntryCard: {
+    marginBottom: 20,
+    padding: 20,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pricingEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.primary,
+  },
+  pricingEntryTitle: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: fonts.lg,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: colors.primary + '20',
+    gap: 6,
+  },
+  editButtonText: {
+    color: colors.primary,
+    fontFamily: fonts.medium,
+    fontSize: fonts.sm,
+  },
+  pricingEntryActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  pricingEntryActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 8,
+    flex: 1,
+    minWidth: '30%',
+  },
+  pricingEntryActionButtonText: {
+    color: colors.textWhite,
+    fontFamily: fonts.medium,
+    fontSize: fonts.sm,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    paddingTop: 50,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modalTitle: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: fonts.xl,
+  },
+  closeButton: {
+    padding: 8,
+  },
+  modalContent: {
+    flex: 1,
+  },
+  modalContentContainer: {
+    padding: 20,
+  },
+  modalFooter: {
+    padding: 20,
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  modalFooterTopRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  modalFooterActionRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelModalButton: {
+    backgroundColor: colors.textSecondary,
+  },
+  saveModalButton: {
+    backgroundColor: colors.primary,
+  },
+  modalButtonText: {
+    fontFamily: fonts.bold,
+    fontSize: fonts.base,
+    color: colors.textWhite,
+  },
+  saveModalButtonText: {
+    color: colors.textWhite,
+  },
+  modalActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    gap: 8,
+  },
+  modalActionButtonText: {
+    color: colors.textWhite,
+    fontFamily: fonts.medium,
+    fontSize: fonts.base,
+  },
+  pricingEntryInfo: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 8,
+  },
+  pricingEntryInfoText: {
+    color: colors.textSecondary,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+  },
+  pricingEntryLabel: {
+    marginBottom: 4,
+    color: colors.textSecondary,
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+  },
+  pricingEntryValue: {
+    color: colors.textPrimary,
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+  },
+  pricingEntryStonesContainer: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  pricingEntryStonesTitle: {
+    marginBottom: 12,
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: fonts.base,
+  },
 });
 
 export default PricingScreen;
+
+
 
