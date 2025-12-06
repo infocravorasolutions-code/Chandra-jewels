@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch } from 'react-redux';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../../utils/secureStorage';
 import { useLoginMutation } from '../../store/api';
 import { setCredentials } from '../../features/auth/authSlice';
 import { useAuth } from '../../context/AuthContext'; // Keeping for backward compatibility during migration
@@ -160,13 +160,29 @@ const LoginScreen = ({ navigation }) => {
         }
         
         
-        // Store in AsyncStorage
-        await AsyncStorage.setItem('user', JSON.stringify(userData));
-        await AsyncStorage.setItem('token', result.token);
+        // Store in secure storage
+        await secureStorage.setItem('user', JSON.stringify(userData));
+        await secureStorage.setItem('token', result.token);
+        
+        // Verify token was stored securely
+        const tokenVerification = await secureStorage.verifyStorage('token');
+        const userVerification = await secureStorage.verifyStorage('user');
+        
+        if (__DEV__) {
+          console.log('🔐 [LOGIN] Storage Verification:');
+          console.log('  Token:', tokenVerification.message);
+          console.log('  User:', userVerification.message);
+          
+          if (tokenVerification.isSecure) {
+            console.log('✅ Token is securely stored in Keychain/Keystore');
+          } else {
+            console.warn('⚠️ Token is NOT securely stored - using AsyncStorage fallback');
+          }
+        }
         
         // Verify token was stored
-        const storedToken = await AsyncStorage.getItem('token');
-        console.log('Token stored in AsyncStorage:', storedToken?.substring(0, 50) + '...');
+        const storedToken = await secureStorage.getItem('token');
+        console.log('Token retrieved from storage:', storedToken?.substring(0, 50) + '...');
         
         // Update Redux store
         dispatch(setCredentials({ user: userData, token: result.token }));

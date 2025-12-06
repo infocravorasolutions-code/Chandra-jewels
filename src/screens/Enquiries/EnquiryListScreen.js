@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import useDebounce from '../../hooks/useDebounce';
 import {
   View,
   StyleSheet,
@@ -37,7 +38,7 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { API_BASE_URL } from '../../config/apiConfig';
 // Import PDF generator module
-import * as pdfGeneratorModule from '../../utils/pdfGenerator';
+import { downloadAllEnquiriesPDF } from '../../utils/pdfGenerator';
 
 
 const { width } = Dimensions.get('window');
@@ -74,6 +75,8 @@ const EnquiryListScreen = ({ navigation }) => {
   // Redux state
   const filters = useSelector(state => state.enquiries.filters);
   const searchQuery = useSelector(state => state.enquiries.searchQuery);
+  // Debounce search query to reduce API calls - UI updates immediately, API calls delayed
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
   const sortBy = useSelector(state => state.enquiries.sortBy);
   const sortOrder = useSelector(state => state.enquiries.sortOrder);
   const selectedStatus = useSelector(state => state.enquiries.selectedStatus);
@@ -145,8 +148,9 @@ const EnquiryListScreen = ({ navigation }) => {
     params.append('page', String(pageToLoad));
     params.append('limit', String(PAGE_SIZE));
     
-    if (searchQuery && searchQuery.trim()) {
-      params.append('search', searchQuery.trim());
+    // Use debounced search query for API calls (reduces API calls while typing)
+    if (debouncedSearchQuery && debouncedSearchQuery.trim()) {
+      params.append('search', debouncedSearchQuery.trim());
     }
     
     Object.entries(resolvedFilters).forEach(([key, value]) => {
@@ -183,7 +187,7 @@ const EnquiryListScreen = ({ navigation }) => {
     params.append('sortOrder', sortDirection);
     
     return params;
-  }, [resolvedFilters, searchQuery, sortBy, sortOrder]);
+  }, [resolvedFilters, debouncedSearchQuery, sortBy, sortOrder]);
   
   const fetchEnquiries = useCallback(async ({ pageToLoad = 1, append = false, suppressInlineLoader = false } = {}) => {
     const requestId = ++requestIdRef.current;
@@ -990,16 +994,12 @@ const EnquiryListScreen = ({ navigation }) => {
   // Handler for downloading all enquiries as PDF
   const handleDownloadAllPDF = async () => {
     try {
-      // Get the function from the module
-      const downloadFn = pdfGeneratorModule?.downloadAllEnquiriesPDF;
-      
-      if (!downloadFn || typeof downloadFn !== 'function') {
+      // Check if function is available
+      if (!downloadAllEnquiriesPDF || typeof downloadAllEnquiriesPDF !== 'function') {
         if (__DEV__) {
           console.error('downloadAllEnquiriesPDF not available:', {
-            module: pdfGeneratorModule,
-            moduleType: typeof pdfGeneratorModule,
-            moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
-            functionType: typeof downloadFn,
+            functionType: typeof downloadAllEnquiriesPDF,
+            function: downloadAllEnquiriesPDF,
           });
         }
         Alert.alert(
@@ -1010,40 +1010,147 @@ const EnquiryListScreen = ({ navigation }) => {
       }
 
       // Use enrichedEnquiries (all enquiries with client names) for the PDF
-      const enquiriesToExport = enrichedEnquiries && enrichedEnquiries.length > 0 
+      // Fallback to displayEnquiries if enrichedEnquiries is empty
+      const enquiriesToExport = (enrichedEnquiries && enrichedEnquiries.length > 0) 
         ? enrichedEnquiries 
+        : (displayEnquiries && displayEnquiries.length > 0)
+        ? displayEnquiries
         : enquiries;
       
       if (!enquiriesToExport || enquiriesToExport.length === 0) {
-        Alert.alert('No Data', 'No enquiries available to export.');
+        Alert.alert(
+          'No Data', 
+          'No enquiries available to export. Please ensure enquiries are loaded before downloading.'
+        );
         return;
       }
 
+      if (__DEV__) {
+        console.log('📥 Starting PDF download for', enquiriesToExport.length, 'enquiries');
+      }
 
+      // Show loading alert
       Alert.alert(
         'Generating PDF',
-        `Generating PDF for ${enquiriesToExport.length} enquiries...`,
+        `Generating PDF for ${enquiriesToExport.length} enquiries...\n\nThis may take a moment.`,
         [],
         { cancelable: false }
       );
 
-      await downloadFn(enquiriesToExport);
+      // Call the download function
+      const result = await downloadAllEnquiriesPDF(enquiriesToExport);
       
-      Alert.alert(
-        'Success',
-        `PDF generated successfully for ${enquiriesToExport.length} enquiries! Check your share/download options.`,
-        [{ text: 'OK' }]
-      );
+      // Check if user cancelled
+      if (result && result.cancelled) {
+        return; // User cancelled, don't show success message
+      }
+      
+      // Show success message based on file type and method
+      if (result && result.method === 'print') {
+        // Print dialog was opened
+        Alert.alert(
+          'Print Dialog Opened',
+          `Print dialog opened for ${enquiriesToExport.length} enquiries.\n\n` +
+          `Please select "Save as PDF" in the print dialog to save the file.\n\n` +
+          `This method handles large documents better and avoids timeout issues.`,
+          [{ text: 'OK' }]
+        );
+      } else if (result && result.isHTML) {
+        // Check if it was a timeout (large number of enquiries)
+        const isTimeoutCase = enquiriesToExport.length > 100;
+        const timeoutMessage = isTimeoutCase 
+          ? `PDF generation timed out for ${enquiriesToExport.length} enquiries.\n\n` +
+            `💡 Tip: For faster PDF generation, export fewer enquiries at once (50-100 recommended).\n\n` +
+            `The file has been saved as HTML instead.\n\n`
+          : `PDF generation is not available. The file has been saved as HTML.\n\n`;
+        
+        Alert.alert(
+          'File Saved',
+          `File saved as HTML for ${enquiriesToExport.length} enquiries.\n\n` +
+          timeoutMessage +
+          `To convert to PDF, open the file in a browser and use Print → Save as PDF.`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Success',
+          `PDF generated successfully for ${enquiriesToExport.length} enquiries!\n\nCheck your share/download options.`,
+          [{ text: 'OK' }]
+        );
+      }
     } catch (error) {
       if (__DEV__) {
-        console.error('Error generating PDF:', error);
+        console.error('❌ Error generating PDF:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Error details:', {
+          message: error?.message,
+          name: error?.name,
+          code: error?.code,
+        });
       }
-      const errorMessage = error?.message || 'Unknown error occurred';
-      Alert.alert(
-        'Error',
-        `Failed to generate PDF: ${errorMessage}. Please try again.`,
-        [{ text: 'OK' }]
-      );
+      
+      const errorMessage = error?.message || error?.toString() || 'Unknown error occurred';
+      
+      // Check if error message indicates HTML fallback
+      const isHTMLFallback = errorMessage.includes('HTML instead') || errorMessage.includes('HTML format');
+      
+      // Check if it's a timeout error
+      const isTimeoutError = errorMessage.toLowerCase().includes('timeout') || 
+                            errorMessage.toLowerCase().includes('timed out');
+      
+      if (isTimeoutError) {
+        // Timeout error - suggest splitting
+        Alert.alert(
+          'PDF Generation Timeout',
+          errorMessage + '\n\n' +
+          `Tip: Try filtering/searching to show fewer enquiries (50-100), then download.`,
+          [
+            { text: 'OK', style: 'default' },
+            { 
+              text: 'Save as HTML', 
+              style: 'default',
+              onPress: async () => {
+                // Still save as HTML even though PDF timed out
+                try {
+                  const { generateEnquiriesListHTML } = await import('../../utils/pdfGenerator');
+                  const htmlContent = await generateEnquiriesListHTML(enquiriesToExport);
+                  const timestamp = new Date().toISOString().split('T')[0];
+                  const filename = `All_Enquiries_${timestamp}`;
+                  const htmlFilePath = `${require('react-native-fs').default.DownloadDirectoryPath}/${filename}.html`;
+                  await require('react-native-fs').default.writeFile(htmlFilePath, htmlContent, 'utf8');
+                  await require('react-native-share').default.open({
+                    title: 'Download All Enquiries',
+                    url: `file://${htmlFilePath}`,
+                    type: 'text/html',
+                  });
+                } catch (e) {
+                  Alert.alert('Error', 'Failed to save HTML file: ' + e.message);
+                }
+              }
+            }
+          ]
+        );
+      } else if (isHTMLFallback) {
+        // PDF generation failed, but HTML was saved - show info message
+        Alert.alert(
+          'PDF Generation Unavailable',
+          `PDF generation is not available on this device.\n\n` +
+          `The file has been saved as HTML format instead.\n\n` +
+          `To convert to PDF:\n` +
+          `1. Open the HTML file in a browser\n` +
+          `2. Press Ctrl+P (Windows) or Cmd+P (Mac)\n` +
+          `3. Choose "Save as PDF" as destination\n\n` +
+          `Error: ${errorMessage}`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        // Other error - show error message
+        Alert.alert(
+          'Error',
+          `Failed to generate PDF:\n\n${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+          [{ text: 'OK' }]
+        );
+      }
     }
   };
 

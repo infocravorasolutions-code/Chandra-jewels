@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -16,7 +16,7 @@ import {
   Switch,
 } from 'react-native';
 import { Card } from '../../components/cards/Cards';
-import { Button, Input, AnimatedLogoLoader } from '../../components/common';
+import { Button, Input, AnimatedLogoLoader, OptimizedImage } from '../../components/common';
 import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -231,20 +231,23 @@ const DesignViewerScreen = ({ route, navigation }) => {
   
   // Get design data based on type
   const originalData = currentEnquiry?._originalData || currentEnquiry;
-  let designData = designType === 'coral' 
+  const initialDesignData = designType === 'coral' 
     ? (originalData?.Coral || currentEnquiry?.Coral || [])
     : (originalData?.Cad || currentEnquiry?.Cad || []);
   
   // Filter versions for clients - show versions with ShowToClient: true OR versions uploaded by the client
-  if (isClient && Array.isArray(designData)) {
-    const originalLength = designData.length;
+  const designData = useMemo(() => {
+    if (!isClient || !Array.isArray(initialDesignData)) {
+      return initialDesignData;
+    }
+    
     const currentUserId = user?.id || user?._id || user?.userId;
     const clientId = user?.clientId || user?.ClientId;
     
     // Get StatusHistory to check who uploaded each version
     const statusHistory = originalData?.StatusHistory || currentEnquiry?.StatusHistory || [];
     
-    designData = designData.filter(version => {
+    return initialDesignData.filter(version => {
       // Show if marked as visible to client
       const isVisibleToClient = version?.ShowToClient === true || 
                                 version?.showToClient === true || 
@@ -293,7 +296,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
       
       return isVisibleToClient || isUploadedByClient;
     });
-  }, [designData, user, currentUserId, clientId]);
+  }, [isClient, initialDesignData, user, currentEnquiry, originalData, designType]);
 
   // Get selected design version (use versionIndex if provided, otherwise use latest)
   const selectedDesign = versionIndex !== undefined && versionIndex >= 0 && versionIndex < designData.length
@@ -1492,13 +1495,15 @@ const DesignViewerScreen = ({ route, navigation }) => {
                       onPress={() => setIsFullScreen(true)}
                       style={styles.imageTouchable}
                     >
-                      <Image
+                      <OptimizedImage
                         source={{
                           uri: currentImageUrl,
                           headers: imageHeaders,
                         }}
                         style={styles.image}
                         resizeMode="contain"
+                        showLoader={false}
+                        cacheEnabled={true}
                         onLoadStart={() => {
                           setImageLoadingError(false);
                         }}
@@ -1545,10 +1550,12 @@ const DesignViewerScreen = ({ route, navigation }) => {
                       onPress={() => setIsFullScreen(true)}
                       style={styles.imageTouchable}
                     >
-                      <Image
+                      <OptimizedImage
                         source={{ uri: imageDataUri }}
                         style={styles.image}
                         resizeMode="contain"
+                        showLoader={false}
+                        cacheEnabled={false}
                         onLoadStart={() => {
                           // Image loading started
                         }}
@@ -2002,19 +2009,23 @@ const DesignViewerScreen = ({ route, navigation }) => {
               onPress={() => setIsFullScreen(false)}
             >
               {!imageDataUri && !useFetchDirectly ? (
-                <Image
+                <OptimizedImage
                   source={{
                     uri: currentImageUrl,
                     headers: imageHeaders,
                   }}
                   style={styles.fullScreenImage}
                   resizeMode="contain"
+                  showLoader={false}
+                  cacheEnabled={true}
                 />
               ) : imageDataUri ? (
-                <Image
+                <OptimizedImage
                   source={{ uri: imageDataUri }}
                   style={styles.fullScreenImage}
                   resizeMode="contain"
+                  showLoader={false}
+                  cacheEnabled={false}
                 />
               ) : null}
             </TouchableOpacity>

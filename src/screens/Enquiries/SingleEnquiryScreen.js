@@ -19,7 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useGetEnquiryByIdQuery, useDeleteEnquiryMutation, useApproveDesignVersionMutation, useRejectDesignVersionMutation, useUploadReferenceImagesMutation } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
 import { Card } from '../../components/cards/Cards';
-import { Button, Input, EnquiryImage } from '../../components/common';
+import { Button, Input, EnquiryImage, OptimizedImage } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -1655,10 +1655,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     if (onPress === null) {
       return (
         <View style={styles.modalImageWrapper}>
-          <Image
+          <OptimizedImage
             source={{ uri: imageDataUri }}
             style={styles.fullscreenImage}
             resizeMode="contain"
+            showLoader={false}
+            cacheEnabled={false}
             onError={() => {
               setImageError(true);
             }}
@@ -2329,10 +2331,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                   panToMove={isModalZoomed}
                   onMove={handleZoomMove}
                 >
-            <Image
+            <OptimizedImage
               source={{ uri: selectedImageUri }}
               style={styles.fullscreenImage}
               resizeMode="contain"
+              showLoader={false}
+              cacheEnabled={false}
             />
                 </ImageZoom>
               </View>

@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FILE_BASE_URL } from '../config/apiConfig';
 import { getUserName } from './userUtils';
 
-// Import PDF generation library
+// Import PDF generation library (react-native-html-to-pdf)
 let generatePDF = null;
 try {
   // Import the generatePDF function from react-native-html-to-pdf
@@ -27,6 +27,19 @@ try {
     console.log('Module keys:', htmlToPdfModule ? Object.keys(htmlToPdfModule) : 'no module');
   }
 } catch (error) {
+}
+
+// Import alternative PDF library (react-native-print) for large documents
+let RNPrint = null;
+try {
+  RNPrint = require('react-native-print');
+  if (__DEV__) {
+    console.log('✅ react-native-print loaded successfully');
+  }
+} catch (error) {
+  if (__DEV__) {
+    console.log('⚠️ react-native-print not available:', error.message);
+  }
 }
 
 // Debug: Log when module loads
@@ -161,8 +174,10 @@ const fetchImageAsBase64 = async (imageUrl) => {
         if (__DEV__) {
           console.log('🔄 Found S3 URL in JSON response:', actualImageUrl.substring(0, 100));
         }
-        // Return the S3 URL directly - PDF library can load it
-        // S3 presigned URLs are publicly accessible, so we can use them directly
+        // For large documents, return S3 URL directly (it's presigned and publicly accessible)
+        // For small documents, convert to base64 for better reliability
+        // Check if caller wants base64 (by checking if this is called from generateEnquiriesListHTML)
+        // For now, return S3 URL - the caller will decide whether to convert to base64
         return actualImageUrl;
       }
       
@@ -1223,48 +1238,86 @@ export const generateEnquiriesListHTML = async (enquiries) => {
             }
             // Fetch to get S3 URL if API endpoint
             return imageUrl;
-          } else {
-            
           }
           return '';
         });
         
-        // Resolve API endpoints to S3 URLs
+        // For large documents, use S3 URLs directly (they're presigned and publicly accessible)
+        // For small documents, convert to base64 for better reliability
+        // This prevents HTML from becoming too large (170MB+ with base64 images)
+        const isLargeDocument = enquiries.length > 100;
+        const USE_DIRECT_URLS = isLargeDocument; // Use URLs for large docs to avoid huge HTML
+        
         const resolvedImageUrls = await Promise.all(imageUrls.map(async (imageUrl, idx) => {
           if (!imageUrl) return '';
           
-          // If it's already an S3 URL, use it directly
-          if (imageUrl.includes('amazonaws.com') || imageUrl.includes('s3.')) {
+          // For large documents, prefer using S3 URLs directly
+          // S3 presigned URLs are publicly accessible and work in PDFs
+          if (USE_DIRECT_URLS) {
+            // If it's already an S3 URL, use it directly
+            if (imageUrl.includes('amazonaws.com') || imageUrl.includes('s3.')) {
+              if (__DEV__ && idx < 5) {
+                console.log(`✅ Using S3 URL directly for image ${idx + 1} (large document mode)`);
+              }
+              return imageUrl;
+            }
             
-            return imageUrl;
-          }
-          
-          // If it's an API endpoint, fetch to get S3 URL
-          try {
-            const token = await AsyncStorage.getItem('token');
-            const response = await fetch(imageUrl, {
-              method: 'GET',
-              headers: token ? {
-                'Authorization': `Bearer ${token}`,
-              } : {},
-            });
-            
-            if (response.ok) {
-              const contentType = response.headers.get('content-type') || '';
-              if (contentType.includes('application/json')) {
-                const jsonData = await response.json();
-                const s3Url = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
-                if (s3Url) {
-                  
-                  return s3Url;
+            // If it's an API endpoint, get S3 URL and use it directly
+            try {
+              const token = await AsyncStorage.getItem('token');
+              const response = await fetch(imageUrl, {
+                method: 'GET',
+                headers: token ? {
+                  'Authorization': `Bearer ${token}`,
+                } : {},
+              });
+              
+              if (response.ok) {
+                const contentType = response.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                  const jsonData = await response.json();
+                  const s3Url = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
+                  if (s3Url && (s3Url.includes('amazonaws.com') || s3Url.includes('s3.'))) {
+                    if (__DEV__ && idx < 5) {
+                      console.log(`✅ Got S3 URL, using directly:`, s3Url.substring(0, 60));
+                    }
+                    return s3Url;
+                  }
                 }
               }
+            } catch (error) {
+              // Ignore errors, fall through to base64 conversion
             }
-          } catch (error) {
-            
           }
           
-          return imageUrl; // Fallback to original URL
+          // For small documents OR if URL approach failed, convert to base64
+          // This ensures images work even if URLs don't
+          try {
+            if (__DEV__ && !USE_DIRECT_URLS) {
+              const progress = idx < 10 || idx % 20 === 0 || idx === imageUrls.length - 1;
+              if (progress) {
+                console.log(`🔄 Converting image ${idx + 1}/${imageUrls.length} to base64:`, imageUrl.substring(0, 60));
+              }
+            }
+            
+            const base64Image = await fetchImageAsBase64(imageUrl);
+            if (base64Image) {
+              if (__DEV__ && !USE_DIRECT_URLS) {
+                const progress = idx < 10 || idx % 20 === 0 || idx === imageUrls.length - 1;
+                if (progress) {
+                  console.log(`✅ Image ${idx + 1} converted to base64 (${(base64Image.length / 1024).toFixed(1)}KB)`);
+                }
+              }
+              return base64Image;
+            }
+          } catch (error) {
+            if (__DEV__ && idx < 5) {
+              console.warn(`⚠️ Failed to convert image ${idx + 1} to base64:`, error.message);
+            }
+          }
+          
+          // Final fallback: return original URL
+          return imageUrl;
         }));
         
         if (__DEV__) {
@@ -1334,7 +1387,9 @@ export const generateEnquiriesListHTML = async (enquiries) => {
           </td>
           <td>${escapeHtml(clientName)}</td>
           <td class="image-cell">
-            ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="Enquiry Image" class="enquiry-image" />` : '-'}
+            ${imageUrl ? (imageUrl.startsWith('data:image/') 
+              ? `<img src="${imageUrl}" alt="Enquiry Image" class="enquiry-image" />` 
+              : `<img src="${escapeHtml(imageUrl)}" alt="Enquiry Image" class="enquiry-image" />`) : '-'}
           </td>
           <td>${escapeHtml(assignedToName)}</td>
           <td>${escapeHtml(assignedDate) || 'N/A'}</td>
@@ -1394,10 +1449,106 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
     const timestamp = new Date().toISOString().split('T')[0];
     const filename = `All_Enquiries_${timestamp}`;
     
-    // Try to generate PDF using react-native-html-to-pdf
-    if (generatePDF && typeof generatePDF === 'function') {
+    // Check document size to determine best PDF generation method
+    const htmlSizeKB = htmlContent.length / 1024;
+    const htmlSizeMB = (htmlContent.length / 1024 / 1024).toFixed(2);
+    const MAX_HTML_SIZE = 5000000; // 5MB limit
+    const WARN_HTML_SIZE = 200000; // 200KB - warn but still try
+    const LARGE_DOCUMENT_THRESHOLD = 150; // Use alternative method for >150 enquiries
+    
+    // For large documents, try react-native-print first (uses native print, handles large docs better)
+    const isLargeDocument = enquiries.length > LARGE_DOCUMENT_THRESHOLD || htmlContent.length > WARN_HTML_SIZE;
+    
+    if (isLargeDocument && RNPrint) {
+      if (__DEV__) {
+        console.log('========== USING react-native-print FOR LARGE DOCUMENT ==========');
+        console.log(`Number of enquiries: ${enquiries.length}, HTML size: ${htmlSizeKB.toFixed(0)}KB`);
+      }
+      
       try {
+        // Use react-native-print to print HTML (user can save as PDF through print dialog)
+        const printResult = await RNPrint.print({
+          html: htmlContent,
+          fileName: filename,
+        });
         
+        if (printResult) {
+          if (__DEV__) {
+            console.log('✅ Print dialog opened successfully');
+          }
+          
+          // Return success - user will save as PDF through print dialog
+          return { 
+            success: true, 
+            filePath: null, 
+            isPDF: true,
+            method: 'print',
+            message: 'Print dialog opened. Please select "Save as PDF" to save the file.'
+          };
+        }
+      } catch (printError) {
+        if (__DEV__) {
+          console.warn('⚠️ react-native-print failed, falling back to html-to-pdf:', printError.message);
+        }
+        // Fall through to html-to-pdf method
+      }
+    }
+    
+    // Try to generate PDF using react-native-html-to-pdf
+    // Check if generatePDF is available
+    if (!generatePDF) {
+      if (__DEV__) {
+        console.error('❌ PDF library not available! generatePDF is null/undefined');
+      }
+      throw new Error('PDF generation library is not available. The file will be saved as HTML instead.');
+    }
+    
+    if (typeof generatePDF !== 'function') {
+      if (__DEV__) {
+        console.error('❌ PDF library not available! generatePDF is not a function:', typeof generatePDF, generatePDF);
+      }
+      throw new Error('PDF generation library is not available. The file will be saved as HTML instead.');
+    }
+    
+    // generatePDF is available and is a function - proceed with PDF generation
+    try {
+      if (__DEV__) {
+        console.log('========== ATTEMPTING PDF GENERATION (ALL ENQUIRIES) ==========');
+        console.log('Number of enquiries:', enquiries.length);
+        console.log('HTML content length:', htmlContent.length, 'characters');
+        console.log('generatePDF type:', typeof generatePDF);
+        console.log('generatePDF available:', !!generatePDF);
+        console.log('generatePDF is function:', typeof generatePDF === 'function');
+      }
+        
+        if (htmlContent.length > MAX_HTML_SIZE) {
+          const sizeMB = (htmlContent.length / 1024 / 1024).toFixed(2);
+          throw new Error(`HTML content is too large (${sizeMB}MB). Please export fewer enquiries at once (max ~150 enquiries recommended).`);
+        }
+        
+        if (htmlContent.length > WARN_HTML_SIZE) {
+          if (__DEV__) {
+            console.warn(`⚠️ HTML content is large (${htmlSizeKB.toFixed(0)}KB / ${htmlSizeMB}MB). PDF generation may take longer or timeout.`);
+            console.warn(`⚠️ Consider exporting fewer enquiries (${enquiries.length} enquiries may be too many).`);
+          }
+        }
+        
+        // Log image statistics
+        if (__DEV__) {
+          const imageCount = (htmlContent.match(/<img[^>]*>/gi) || []).length;
+          const base64ImageCount = (htmlContent.match(/data:image\//gi) || []).length;
+          const s3UrlCount = (htmlContent.match(/amazonaws\.com/gi) || []).length;
+          const isUsingUrls = enquiries.length > 100;
+          
+          console.log(`📊 HTML contains ${imageCount} image tags`);
+          if (isUsingUrls) {
+            console.log(`✅ Using S3 URLs directly (${s3UrlCount} S3 URLs detected) - HTML size optimized`);
+            console.log(`💡 S3 presigned URLs are publicly accessible and work in PDFs`);
+            console.log(`📏 HTML size: ${htmlSizeKB.toFixed(0)}KB (would be ~170MB+ with base64)`);
+          } else {
+            console.log(`✅ ${base64ImageCount} images embedded as base64 data URLs`);
+          }
+        }
         
         // Don't specify directory - let library use its default
         // Or use a simple string like "Documents" to avoid path issues
@@ -1415,13 +1566,24 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
         };
         
         if (__DEV__) {
-          console.log('PDF options:', JSON.stringify({ ...options, html: '[HTML content]' }, null, 2));
+          console.log('PDF options:', JSON.stringify({ ...options, html: `[HTML content - ${htmlContent.length} chars / ${htmlSizeKB.toFixed(0)}KB]` }, null, 2));
         }
         
-        const file = await generatePDF(options);
+        // Add timeout wrapper for PDF generation
+        const PDF_TIMEOUT = 60000; // 60 seconds timeout
+        const pdfGenerationPromise = generatePDF(options);
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error('PDF conversion timed out after 60 seconds. The HTML content may be too large. Try exporting fewer enquiries.'));
+          }, PDF_TIMEOUT);
+        });
+        
+        const file = await Promise.race([pdfGenerationPromise, timeoutPromise]);
         
         if (__DEV__) {
+          console.log('========== PDF GENERATION SUCCESS (ALL ENQUIRIES) ==========');
           console.log('File exists:', file.filePath ? await RNFS.exists(file.filePath) : 'no path');
+          console.log('File path:', file.filePath);
         }
         
         // Verify file exists and is not empty
@@ -1491,11 +1653,36 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
           throw new Error('PDF generation returned invalid file path');
         }
       } catch (pdfError) {
-        // Fall through to HTML fallback
+        // Log the error so we can debug why PDF generation is failing
+        if (__DEV__) {
+          console.error('========== PDF GENERATION ERROR (ALL ENQUIRIES) ==========');
+          console.error('Error:', pdfError);
+          console.error('Error message:', pdfError?.message);
+          console.error('Error stack:', pdfError?.stack);
+          console.error('HTML content length:', htmlContent?.length || 0);
+          console.error('Number of enquiries:', enquiries?.length || 0);
+        }
+        
+        // Check if it's a timeout error
+        const isTimeoutError = pdfError?.message?.toLowerCase().includes('timeout') || 
+                               pdfError?.message?.toLowerCase().includes('timed out');
+        
+        if (isTimeoutError) {
+          // Timeout error - log warning and fall through to HTML fallback
+          const htmlSizeMB = htmlContent ? (htmlContent.length / 1024 / 1024).toFixed(2) : 'unknown';
+          if (__DEV__) {
+            console.warn(`⚠️ PDF generation timed out for ${enquiries.length} enquiries (${htmlSizeMB}MB HTML). Falling back to HTML.`);
+            console.warn(`💡 Tip: Export fewer enquiries at once (recommended: 50-100 enquiries per PDF) for better performance.`);
+          }
+          // Don't throw - let it fall through to HTML fallback below
+        } else {
+          // Other errors - log and fall through to HTML fallback
+          if (__DEV__) {
+            console.warn(`⚠️ PDF generation failed: ${pdfError?.message || pdfError?.toString()}. Falling back to HTML.`);
+          }
+        }
+        // Fall through to HTML fallback instead of throwing
       }
-    } else {
-      
-    }
     
     // Fallback: Save as HTML if PDF generation fails or library not available
     const htmlFilename = `${filename}.html`;
@@ -1503,7 +1690,9 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
     
     try {
       if (__DEV__) {
+        console.warn('⚠️ Falling back to HTML format (PDF generation failed)');
         console.log('Saving as HTML file (fallback):', htmlFilePath);
+        console.log('HTML content size:', htmlContent?.length || 0, 'characters');
       }
       
       await RNFS.writeFile(htmlFilePath, htmlContent, 'utf8');
@@ -1518,13 +1707,25 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
         throw new Error('Saved HTML file is empty');
       }
       
+      // Determine the reason for HTML fallback
+      const htmlSizeMB = htmlContent ? (htmlContent.length / 1024 / 1024).toFixed(2) : 'unknown';
+      let fallbackReason = 'PDF generation unavailable';
+      let conversionTip = '';
+      
+      // Check if it was a timeout (we can infer this from size/number of enquiries)
+      if (enquiries.length > 100 || htmlContent.length > 200000) {
+        fallbackReason = `PDF generation timed out (${enquiries.length} enquiries, ${htmlSizeMB}MB)`;
+        conversionTip = `\n💡 Tip: For faster PDF generation, export fewer enquiries at once (50-100 recommended).\n\n`;
+      }
+      
       // Share the HTML file with instructions
       await Share.open({
         title: 'Download All Enquiries',
         message: `Enquiries List - ${enquiries.length} enquiries\n\n` +
-                 `File saved as HTML. To convert to PDF:\n` +
+                 `Note: File saved as HTML (${fallbackReason}).${conversionTip}` +
+                 `To convert to PDF:\n` +
                  `1. Open the file in a browser\n` +
-                 `2. Use browser's Print function\n` +
+                 `2. Use browser's Print function (Ctrl+P / Cmd+P)\n` +
                  `3. Choose "Save as PDF" as the destination`,
         url: `file://${htmlFilePath}`,
         type: 'text/html',

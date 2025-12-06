@@ -6,6 +6,7 @@ import { fonts } from '../../constants/fonts';
 import { spacing, responsivePadding, imageSizes } from '../../utils';
 import { formatCount } from '../../utils/helpers';
 import Icon from '../common/Icon';
+import { OptimizedImage } from '../common';
 import { FILE_BASE_URL } from '../../config/apiConfig';
 import { getUserName } from '../../utils/userUtils';
 import { getCachedImage, cacheImage } from '../../utils/imageCache';
@@ -587,18 +588,15 @@ export const CompactEnquiryCard = ({
       {/* Reference Image - Always show container */}
       <View style={styles.compactImageContainer}>
         {imageDataUri && !imageError ? (
-          <Image
+          <OptimizedImage
             source={{ uri: imageDataUri }}
             style={styles.compactImage}
             resizeMode="cover"
+            showLoader={false}
+            cacheEnabled={true}
             onError={() => {
               setImageError(true);
             }}
-            // Performance optimizations
-            fadeDuration={150}
-            progressiveRenderingEnabled={true}
-            // Reduce memory footprint for list items
-            defaultSource={null}
           />
         ) : (
           <View style={styles.compactImagePlaceholder}>

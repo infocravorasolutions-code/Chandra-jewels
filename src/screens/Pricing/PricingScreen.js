@@ -99,7 +99,8 @@ const PricingScreen = ({ route, navigation }) => {
   
   
   // Normalize stones data - map API field names to UI field names
-  const normalizeStones = (rawStones) => {
+  // Memoized with useCallback to prevent function recreation on every render
+  const normalizeStones = useCallback((rawStones) => {
     if (!Array.isArray(rawStones) || rawStones.length === 0) return [];
     return rawStones.map(stone => ({
       Type: stone.Type || stone.type || '',
@@ -112,10 +113,11 @@ const PricingScreen = ({ route, navigation }) => {
       CaratWeight: (stone.CtWeight || stone.CaratWeight || stone.ctWeight || stone.caratWeight || 0).toString(),
       Price: (stone.Price || stone.price || 0).toString(),
     }));
-  };
+  }, []);
   
   // Initialize state for all pricing entries - each entry has its own formData and stones
-  const initializePricingEntryState = (pricingEntry) => {
+  // Memoized with useCallback to prevent function recreation on every render
+  const initializePricingEntryState = useCallback((pricingEntry) => {
     return {
       formData: {
         metalPrice: (pricingEntry?.MetalPrice || pricingEntry?.metalPrice || 0).toString(),
@@ -134,7 +136,7 @@ const PricingScreen = ({ route, navigation }) => {
       stones: normalizeStones(pricingEntry?.Stones || pricingEntry?.stones || []),
       undercutEnabled: !!(pricingEntry?.UndercutPrice || pricingEntry?.undercutPrice),
     };
-  };
+  }, [normalizeStones]);
 
   // State for all pricing entries - array of { formData, stones, undercutEnabled }
   const [pricingEntriesState, setPricingEntriesState] = useState(() => {
@@ -779,7 +781,8 @@ const PricingScreen = ({ route, navigation }) => {
   };
 
   // Helper to get filtered stones for a given stones array and filter value
-  const getFilteredStones = (stonesArray, filterValue = 'all') => {
+  // Memoized to avoid recalculating on every render
+  const getFilteredStones = useCallback((stonesArray, filterValue = 'all') => {
     if (filterValue === 'all') {
       return stonesArray.map((stone, index) => ({ stone, originalIndex: index }));
     }
@@ -789,7 +792,7 @@ const PricingScreen = ({ route, navigation }) => {
         const typeValue = (stone?.Type || '').toString().toLowerCase();
         return typeValue === filterValue.toLowerCase();
       });
-  };
+  }, []);
 
   // For the latest entry (backward compatibility)
   const stonesToRender = useMemo(() => {

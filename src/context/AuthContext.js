@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { decodeJWT } from '../utils/helpers';
 import { checkAuthState, logoutUser } from '../features/auth/authThunks';
 import { useRemovePushTokenMutation } from '../store/api';
@@ -45,7 +45,7 @@ export const AuthProvider = ({ children }) => {
 
   const clearInvalidAuth = async () => {
     try {
-      const storedToken = await AsyncStorage.getItem('token');
+      const storedToken = await secureStorage.getItem('token');
       if (storedToken) {
         // Check if token is expired
         const decodedToken = decodeJWT(storedToken);

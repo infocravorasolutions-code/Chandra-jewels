@@ -1,5 +1,5 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../../utils/secureStorage';
 import { decodeJWT, mapRoleNumberToString } from '../../utils/helpers';
 
 // Async thunk to check auth state on app start
@@ -7,8 +7,8 @@ export const checkAuthState = createAsyncThunk(
   'auth/checkAuthState',
   async () => {
     try {
-      const storedUser = await AsyncStorage.getItem('user');
-      const storedToken = await AsyncStorage.getItem('token');
+      const storedUser = await secureStorage.getItem('user');
+      const storedToken = await secureStorage.getItem('token');
       
       if (storedUser && storedToken) {
         // Validate token expiration
@@ -19,15 +19,15 @@ export const checkAuthState = createAsyncThunk(
             const currentTime = Math.floor(Date.now() / 1000);
             if (exp < currentTime) {
               // Token is expired, clear it
-              await AsyncStorage.removeItem('user');
-              await AsyncStorage.removeItem('token');
+              await secureStorage.removeItem('user');
+              await secureStorage.removeItem('token');
               return null;
             }
           }
         } else {
           // Invalid token format, clear it
-          await AsyncStorage.removeItem('user');
-          await AsyncStorage.removeItem('token');
+          await secureStorage.removeItem('user');
+          await secureStorage.removeItem('token');
           return null;
         }
         
@@ -122,7 +122,7 @@ export const checkAuthState = createAsyncThunk(
         
         // Save updated userData if any changes were made
         if (userDataUpdated) {
-          await AsyncStorage.setItem('user', JSON.stringify(userData));
+          await secureStorage.setItem('user', JSON.stringify(userData));
         }
         
         return { user: userData, token: storedToken };
@@ -131,8 +131,8 @@ export const checkAuthState = createAsyncThunk(
     } catch (error) {
       // Clear potentially corrupted data
       try {
-        await AsyncStorage.removeItem('user');
-        await AsyncStorage.removeItem('token');
+        await secureStorage.removeItem('user');
+        await secureStorage.removeItem('token');
       } catch (clearError) {
       }
       return null;
@@ -145,8 +145,8 @@ export const logoutUser = createAsyncThunk(
   'auth/logout',
   async () => {
     try {
-      await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('token');
+      await secureStorage.removeItem('user');
+      await secureStorage.removeItem('token');
     } catch (error) {
     }
   }

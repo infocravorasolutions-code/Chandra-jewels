@@ -13,8 +13,6 @@ import AccountModal from '../modals/AccountModal';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { images } from '../../constants/images';
-// Import PNG logo header
-const logoHeaderImage = require('../../assets/images/logo-header (1).png');
 import Icon from './Icon';
 import { useGetUnreadNotificationsCountQuery } from '../../store/api';
 
@@ -61,12 +59,11 @@ const TopNavbar = ({ navigation }) => {
               style={styles.logoImage}
               resizeMode="contain"
             />
-            {/* Logo Header PNG */}
-            <Image 
-              source={logoHeaderImage}
-              style={styles.logoHeaderImage}
-              resizeMode="contain"
-            />
+            {/* Logo Header Text - Replaced image with text for better quality in release builds */}
+            <View style={styles.logoTextContainer}>
+              <Text style={styles.logoHeaderTextMain}>CHANDRA</Text>
+              <Text style={styles.logoHeaderTextSub}>JEWELS</Text>
+            </View>
           </View>
         </View>
 
@@ -169,10 +166,26 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
   },
-  logoHeaderImage: {
-    height: 40,
-    width: 160,
+  logoTextContainer: {
     marginLeft: 8,
+    justifyContent: 'center',
+  },
+  logoHeaderTextMain: {
+    fontSize: 24, // Increased from 20
+    fontFamily: fonts.bold, // Bold/semi-bold weight for CHANDRA (matching logo)
+    color: '#c3a772', // Golden color matching logo
+    letterSpacing: 1.2,
+    lineHeight: 28, // Adjusted for larger font
+    fontWeight: '500', // Manual weight adjustment - can be: '400', '500', '600', '700', '800', '900'
+  },
+  logoHeaderTextSub: {
+    fontSize: 17, // Increased from 14
+    fontFamily: fonts.light, // Light/thin weight for JEWELS (matching logo)
+    color: '#c3a772', // Golden color matching logo
+    letterSpacing: 0.6,
+    lineHeight: 20, // Adjusted for larger font
+    marginTop: -1, // Tighter spacing between lines
+    fontWeight: '300', // Light weight
   },
   rightSection: {
     flexDirection: 'row',

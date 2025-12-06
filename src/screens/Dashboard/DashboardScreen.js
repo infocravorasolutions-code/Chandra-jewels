@@ -16,7 +16,7 @@ import { useGetDashboardDataQuery, useGetEnquiriesQuery, useGetStatusStatisticsQ
 import { useClients } from '../../features/clients/clientsHooks';
 import { useStatuses } from '../../features/statuses/statusesHooks';
 import { StatusCard, Card, EnquiryStatusCard } from '../../components/cards/Cards';
-import { Button, SearchInput } from '../../components/common';
+import { Button, SearchInput, OptimizedImage } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
 import TopNavbar from '../../components/common/TopNavbar';
 import Icon from '../../components/common/Icon';
@@ -159,13 +159,15 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
       onPress={onPress}
     >
       {actualImageUrl && !imageError ? (
-        <Image
+        <OptimizedImage
           source={{ 
             uri: actualImageUrl,
             headers: imageHeaders,
           }}
           style={styles.clientImage}
           resizeMode="contain"
+          showLoader={false}
+          cacheEnabled={true}
           onError={(error) => {
             if (__DEV__) {
               console.error('❌ Client image failed to load:', {
@@ -197,6 +199,10 @@ const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
 };
 
 const DashboardScreen = ({ navigation }) => {
+  // TEMPORARY TEST - Remove after testing Error Boundary
+  // Uncomment the line below to test Error Boundary:
+  // throw new Error('Testing Error Boundary - This is intentional!');
+  
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
 
