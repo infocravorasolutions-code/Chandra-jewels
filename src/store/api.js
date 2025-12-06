@@ -1,6 +1,6 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { decodeJWT, mapRoleNumberToString, setRolesCache } from '../utils/helpers';
 import { API_BASE_URL } from '../config/apiConfig';
 
@@ -9,7 +9,7 @@ const baseQuery = fetchBaseQuery({
   baseUrl: API_BASE_URL,
   prepareHeaders: async (headers, { getState }) => {
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await secureStorage.getItem('token');
       if (token) {
         headers.set('authorization', `Bearer ${token}`);
         if (__DEV__) {
@@ -1500,7 +1500,7 @@ export const api = createApi({
       queryFn: async ({ enquiryId, designType, version, images, excel, designCode }, { dispatch }, extraOptions, baseQuery) => {
         // Note: invalidatesTags is set in the mutation definition below
         try {
-          const token = await AsyncStorage.getItem('token');
+          const token = await secureStorage.getItem('token');
           if (!token) {
             return {
               error: {
@@ -1822,7 +1822,7 @@ export const api = createApi({
     uploadReferenceImages: builder.mutation({
       queryFn: async ({ enquiryId, images }, { dispatch }, extraOptions, baseQuery) => {
         try {
-          const token = await AsyncStorage.getItem('token');
+          const token = await secureStorage.getItem('token');
           if (!token) {
             return {
               error: {
@@ -1925,7 +1925,7 @@ export const api = createApi({
               });
               
               // Get auth token
-              const token = await AsyncStorage.getItem('token');
+              const token = await secureStorage.getItem('token');
               const headers = {};
               if (token) {
                 headers['Authorization'] = `Bearer ${token}`;
@@ -2475,7 +2475,7 @@ export const api = createApi({
                 chatMap.set(enquiryId, {
                   _id: enquiryId,
                   enquiryId: enquiryId,
-                  enquiryTitle: msg.enquiryTitle || 'Untitled Chat',
+                  enquiryTitle: msg.EnquiryName || msg.enquiryName || msg.enquiryTitle || msg.EnquiryTitle || msg.Enquiry?.Name || msg.Enquiry?.title || 'Untitled Chat',
                   clientName: msg.clientName || 'Unknown Client',
                   lastMessage: '',
                   lastMessageTime: timestamp || new Date().toISOString(),
@@ -2587,7 +2587,7 @@ export const api = createApi({
           return {
             id: chatId,
             enquiryId: enquiryId || chat.Enquiry?.id || chat.enquiry?.id,
-            enquiryTitle: chat.EnquiryTitle || chat.enquiryTitle || chat.Enquiry?.Name || chat.Enquiry?.title || 'Untitled Chat',
+            enquiryTitle: chat.EnquiryName || chat.enquiryName || chat.EnquiryTitle || chat.enquiryTitle || chat.Enquiry?.Name || chat.Enquiry?.title || 'Untitled Chat',
             clientName: chat.ClientName || chat.clientName || chat.Client?.Name || chat.client?.name || 'Unknown Client',
             lastMessage: lastMessageText,
             lastMessageTime: lastMessageTime || new Date().toISOString(),
@@ -2618,7 +2618,7 @@ export const api = createApi({
         }
 
         try {
-          const token = await AsyncStorage.getItem('token');
+          const token = await secureStorage.getItem('token');
           const params = new URLSearchParams();
           params.append('limit', limit.toString());
           if (before) {
@@ -2971,7 +2971,7 @@ export const api = createApi({
     uploadChatMedia: builder.mutation({
       queryFn: async (file, { dispatch }, extraOptions, baseQuery) => {
         try {
-          const token = await AsyncStorage.getItem('token');
+          const token = await secureStorage.getItem('token');
           if (!token) {
             return {
               error: {
