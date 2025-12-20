@@ -10,7 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useGetMetalPricesQuery, useAddMetalPriceMutation, useUpdateMetalPriceMutation, useDeleteMetalPriceMutation } from '../../store/api';
+import { useGetMetalPricesQuery, useGetMetalPriceHistoryQuery, useAddMetalPriceMutation, useUpdateMetalPriceMutation, useDeleteMetalPriceMutation } from '../../store/api';
 import { Card } from '../../components/cards/Cards';
 import { Input } from '../../components/common';
 import { AnimatedLogoLoader } from '../../components/common';
@@ -20,6 +20,7 @@ import Icon from '../../components/common/Icon';
 import { formatCurrency, formatDate } from '../../utils/helpers';
 import { API_BASE_URL } from '../../config/apiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import MetalPriceHistoryChart from '../../components/charts/MetalPriceHistoryChart';
 
 const MetalPricesScreen = () => {
   const isMountedRef = useRef(true);
@@ -29,6 +30,7 @@ const MetalPricesScreen = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [showMetalTypeDropdown, setShowMetalTypeDropdown] = useState(false);
+  const [selectedMetalForChart, setSelectedMetalForChart] = useState('gold');
   
   // Track component mount state and cleanup timeouts
   const timeoutRefs = useRef([]);
@@ -51,6 +53,7 @@ const MetalPricesScreen = () => {
 
   // Redux hooks
   const { data: metalPricesData, isLoading: loading, refetch } = useGetMetalPricesQuery(false);
+  const { data: metalPriceHistory, isLoading: loadingHistory, refetch: refetchHistory } = useGetMetalPriceHistoryQuery(false);
   const [addMetalPrice, { isLoading: isAddingPrice }] = useAddMetalPriceMutation();
   const [updateMetalPrice, { isLoading: isUpdatingPrice }] = useUpdateMetalPriceMutation();
   const [deleteMetalPrice, { isLoading: isDeletingPrice }] = useDeleteMetalPriceMutation();
@@ -67,7 +70,7 @@ const MetalPricesScreen = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), refetchHistory()]);
     setRefreshing(false);
   };
 
@@ -358,7 +361,7 @@ const MetalPricesScreen = () => {
               await new Promise(resolve => setTimeout(resolve, 500));
               
               // Reload prices to get updated data (Redux will refetch automatically)
-              await refetch();
+              await Promise.all([refetch(), refetchHistory()]);
             } catch (error) {
               Alert.alert(
                 'Error',
@@ -438,7 +441,7 @@ const MetalPricesScreen = () => {
         unit: 'per gram' 
       });
       // Reload prices to get the new data (Redux will refetch automatically)
-      await refetch();
+      await Promise.all([refetch(), refetchHistory()]);
     } catch (error) {
       Alert.alert(
         'Error',
@@ -699,55 +702,54 @@ const MetalPricesScreen = () => {
     </Card>
   );
 
-  const renderPriceHistory = () => (
-    <Card style={styles.historyCard}>
-      <Text style={[styles.historyTitle, { fontSize: fonts.lg, fontFamily: fonts.bold, color: colors.textPrimary }]}>
-        Price History
-      </Text>
-      
-      <View style={styles.historyItem}>
-        <View style={styles.historyIcon}>
-          <Icon name="dashboard" size={16} color={colors.success} />
-        </View>
-        <View style={styles.historyContent}>
-          <Text style={{ color: colors.textPrimary, fontSize: fonts.base }}>
-            Gold price increased by 2.5%
+  const renderPriceHistory = () => {
+    const historyData = metalPriceHistory?.[selectedMetalForChart] || [];
+    
+    return (
+      <Card style={styles.historyCard}>
+        <View style={styles.historyHeader}>
+          <Text style={[styles.historyTitle, { fontSize: fonts.lg, fontFamily: fonts.bold, color: colors.textPrimary }]}>
+            Price History
           </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-            2 days ago
-          </Text>
+          
+          {/* Metal Type Selector */}
+          <View style={styles.metalSelectorContainer}>
+            {metalTypes.map((metal) => (
+              <TouchableOpacity
+                key={metal.value}
+                style={[
+                  styles.metalSelectorButton,
+                  selectedMetalForChart === metal.value && styles.metalSelectorButtonActive,
+                ]}
+                onPress={() => setSelectedMetalForChart(metal.value)}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.metalSelectorText,
+                    selectedMetalForChart === metal.value && styles.metalSelectorTextActive,
+                  ]}
+                >
+                  {metal.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
 
-      <View style={styles.historyItem}>
-        <View style={styles.historyIcon}>
-          <Icon name="warning" size={16} color={colors.error} />
-        </View>
-        <View style={styles.historyContent}>
-          <Text style={{ color: colors.textPrimary, fontSize: fonts.base }}>
-            Silver price decreased by 1.2%
-          </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-            1 week ago
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.historyItem}>
-        <View style={styles.historyIcon}>
-          <Icon name="dashboard" size={16} color={colors.success} />
-        </View>
-        <View style={styles.historyContent}>
-          <Text style={{ color: colors.textPrimary, fontSize: fonts.base }}>
-            Platinum price increased by 3.1%
-          </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>
-            2 weeks ago
-          </Text>
-        </View>
-      </View>
-    </Card>
-  );
+        {loadingHistory ? (
+          <View style={styles.chartLoadingContainer}>
+            <AnimatedLogoLoader size={40} />
+          </View>
+        ) : (
+          <MetalPriceHistoryChart
+            historyData={historyData}
+            metalType={selectedMetalForChart}
+          />
+        )}
+      </Card>
+    );
+  };
 
   if (loading) {
     return <AnimatedLogoLoader size={80} />;
@@ -956,8 +958,46 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 12,
   },
-  historyTitle: {
+  historyHeader: {
     marginBottom: 16,
+  },
+  historyTitle: {
+    marginBottom: 12,
+  },
+  metalSelectorContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  metalSelectorButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metalSelectorButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  metalSelectorText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+  },
+  metalSelectorTextActive: {
+    color: colors.textWhite,
+    fontFamily: fonts.bold,
+  },
+  chartLoadingContainer: {
+    padding: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 200,
   },
   historyItem: {
     flexDirection: 'row',

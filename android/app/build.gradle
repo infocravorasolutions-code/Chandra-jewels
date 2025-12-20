@@ -107,6 +107,11 @@ android {
             }
         }
     }
+    splits {
+        abi {
+            enable false
+        }
+    }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug

@@ -4,6 +4,7 @@ export const images = {
   logo: require('../assets/images/logo.png'),
   logoWhite: require('../assets/images/logo.png'), // Using same logo for now, can be updated later
   logoHeader: require('../assets/images/Chandra logo .svg'),
+  headerLogo: require('../assets/images/HeaderLogo.png'),
   loginImage: require('../assets/images/Login-Image.png'),
   loginLogo: require('../assets/images/Login-logo.png'),
   

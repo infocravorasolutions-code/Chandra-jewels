@@ -51,21 +51,57 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
     return true;
   };
 
-  // Request storage permission for Android
+  // Request storage permission for Android (supports both images and videos)
   const requestStoragePermission = async () => {
     if (Platform.OS === 'android') {
       try {
+        const androidVersion = Platform.Version;
+        
+        // For Android 13+ (API 33+), need both READ_MEDIA_IMAGES and READ_MEDIA_VIDEO for mixed media
+        if (androidVersion >= 33) {
+          const imagePermission = 'android.permission.READ_MEDIA_IMAGES';
+          const videoPermission = 'android.permission.READ_MEDIA_VIDEO';
+          
+          // Request both permissions
+          const imageGranted = await PermissionsAndroid.request(
+            imagePermission,
+            {
+              title: 'Media Permission',
+              message: 'App needs access to your photos and videos',
+              buttonNeutral: 'Ask Me Later',
+              buttonNegative: 'Cancel',
+              buttonPositive: 'OK',
+            }
+          );
+          
+          const videoGranted = await PermissionsAndroid.request(
+            videoPermission,
+            {
+              title: 'Media Permission',
+              message: 'App needs access to your videos',
+              buttonNeutral: 'Ask Me Later',
+              buttonNegative: 'Cancel',
+              buttonPositive: 'OK',
+            }
+          );
+          
+          // Return true if at least one is granted (for mixed media, we need both ideally)
+          return imageGranted === PermissionsAndroid.RESULTS.GRANTED || 
+                 videoGranted === PermissionsAndroid.RESULTS.GRANTED;
+        } else {
+          // For older Android versions, use READ_EXTERNAL_STORAGE
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
           {
             title: 'Storage Permission',
-            message: 'App needs access to your storage to select images',
+              message: 'App needs access to your storage to select images and videos',
             buttonNeutral: 'Ask Me Later',
             buttonNegative: 'Cancel',
             buttonPositive: 'OK',
           }
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
+        }
       } catch (err) {
         return false;
       }
@@ -82,8 +118,9 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
       return;
     }
 
+    // Use 'mixed' for library to allow videos, but 'photo' for camera (camera videos handled separately)
     const options = {
-      mediaType: 'photo',
+      mediaType: source === 'library' ? 'mixed' : 'photo', // Allow videos from library
       quality: 0.8,
       selectionLimit: 10 - selectedImages.length,
     };
@@ -103,16 +140,23 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
       }
 
       if (response.assets && response.assets.length > 0) {
-        const newImages = response.assets.map(asset => ({
+        const newImages = response.assets.map(asset => {
+          // Determine file extension based on type or file name
+          const isVideo = asset.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp)$/i.test(asset.fileName || '');
+          const defaultExtension = isVideo ? 'mp4' : 'jpg';
+          const defaultName = asset.fileName || `${source}_${Date.now()}.${defaultExtension}`;
+          
+          return {
           uri: asset.uri,
-          type: asset.type || 'image/jpeg',
-          name: asset.fileName || `image_${Date.now()}.jpg`,
-        }));
+            type: asset.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+            name: defaultName,
+          };
+        });
 
         setSelectedImages(prev => [...prev, ...newImages]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick images');
+      Alert.alert('Error', 'Failed to pick media');
     }
   };
 

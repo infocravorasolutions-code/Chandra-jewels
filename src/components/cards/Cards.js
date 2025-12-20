@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, memo, useCallback } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Image, InteractionManager } from 'react-native';
+import Video from 'react-native-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -68,6 +69,8 @@ export const CompactEnquiryCard = ({
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [imageDataUri, setImageDataUri] = useState(null);
+  const [isVideo, setIsVideo] = useState(false);
+  const [videoUrl, setVideoUrl] = useState(null);
 
   // Safety checks to prevent undefined errors
   if (!enquiry) {
@@ -345,9 +348,49 @@ export const CompactEnquiryCard = ({
   const hasCAD = enquiry.Cad && Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0;
   const hasOrder = enquiry.status === 'completed';
 
-  // Get latest reference image URL (last image in array)
-  const getLatestImageUrl = () => {
+  // Utility function to detect if a file is a video
+  const isVideoFile = (imageKey, imageUri, image) => {
+    // First check for explicit video flag
+    if (image && typeof image === 'object' && (image._isVideo === true || image.isVideo === true)) {
+      return true;
+    }
+    
+    // Check file extension from key
+    if (imageKey && typeof imageKey === 'string') {
+      const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
+      if (videoExtensions.test(imageKey)) {
+        return true;
+      }
+    }
+    
+    // Check file extension from URI
+    if (imageUri && typeof imageUri === 'string') {
+      const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
+      if (videoExtensions.test(imageUri)) {
+        return true;
+      }
+    }
+    
+    // Check mime type from image object
+    if (image && typeof image === 'object') {
+      const contentType = image.ContentType || image.contentType || image.Type || image.type || image.MimeType || image.mimeType;
+      if (contentType && typeof contentType === 'string' && contentType.startsWith('video/')) {
+        return true;
+      }
+      
+      // Check if it's marked as video type
+      if (image.FileType === 'video' || image.fileType === 'video' || image.MediaType === 'video' || image.mediaType === 'video') {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Get latest reference image/video URL (last media in array)
+  const getLatestMediaUrl = () => {
     let referenceImages = [];
+    let referenceVideos = [];
     
     // Check ReferenceImages array
     if (enquiry?._originalData?.ReferenceImages && Array.isArray(enquiry._originalData.ReferenceImages)) {
@@ -360,52 +403,104 @@ export const CompactEnquiryCard = ({
       referenceImages = enquiry.Images;
     }
     
-    if (referenceImages.length === 0) {
-      return null;
+    // Check ReferenceVideos array
+    if (enquiry?._originalData?.ReferenceVideos && Array.isArray(enquiry._originalData.ReferenceVideos)) {
+      referenceVideos = enquiry._originalData.ReferenceVideos;
+    } else if (enquiry?.ReferenceVideos && Array.isArray(enquiry.ReferenceVideos)) {
+      referenceVideos = enquiry.ReferenceVideos;
+    } else if (enquiry?.Videos && Array.isArray(enquiry.Videos)) {
+      referenceVideos = enquiry.Videos;
     }
     
-    // Get the last image (latest)
-    const latestImage = referenceImages[referenceImages.length - 1];
+    // Also check CAD/Coral versions for videos
+    const coralVersions = enquiry?._originalData?.Coral || enquiry?.Coral || [];
+    const cadVersions = enquiry?._originalData?.Cad || enquiry?.Cad || [];
     
-    // Extract URL from image object or string
-    if (typeof latestImage === 'object' && latestImage !== null) {
-      const imageKey = latestImage.Key || latestImage.key || latestImage.KeyName || latestImage.keyName || '';
-      if (imageKey) {
-        return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(imageKey)}`;
+    coralVersions.forEach((version) => {
+      if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
+        referenceVideos = [...referenceVideos, ...version.Videos];
+      } else if (version?.videos && Array.isArray(version.videos) && version.videos.length > 0) {
+        referenceVideos = [...referenceVideos, ...version.videos];
       }
-      const imageId = latestImage.Id || latestImage.id || latestImage._id || latestImage.FileId || latestImage.fileId || '';
-      if (imageId) {
-        return `${FILE_BASE_URL}/api/enquiries/files/${imageId}`;
+    });
+    
+    cadVersions.forEach((version) => {
+      if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
+        referenceVideos = [...referenceVideos, ...version.Videos];
+      } else if (version?.videos && Array.isArray(version.videos) && version.videos.length > 0) {
+        referenceVideos = [...referenceVideos, ...version.videos];
       }
-      const imageUrl = latestImage.Url || latestImage.url || latestImage.URI || latestImage.uri || '';
-      if (imageUrl) {
-        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-          return imageUrl;
-        }
-        return imageUrl.startsWith('/') ? `${FILE_BASE_URL}${imageUrl}` : `${FILE_BASE_URL}/${imageUrl}`;
-      }
-      return null;
+    });
+    
+    // Merge images and videos, prioritizing videos
+    const allMedia = [...referenceImages, ...referenceVideos];
+    
+    if (allMedia.length === 0) {
+      return { url: null, isVideo: false, media: null };
     }
     
-    if (typeof latestImage === 'string') {
-      if (latestImage.startsWith('http://') || latestImage.startsWith('https://')) {
-        return latestImage;
+    // Get the last media (latest)
+    const latestMedia = allMedia[allMedia.length - 1];
+    
+    // Extract URL and detect if it's a video
+    let mediaUrl = null;
+    let mediaKey = null;
+    let mediaId = null;
+    
+    if (typeof latestMedia === 'object' && latestMedia !== null) {
+      mediaKey = latestMedia.Key || latestMedia.key || latestMedia.KeyName || latestMedia.keyName || '';
+      mediaId = latestMedia.Id || latestMedia.id || latestMedia._id || latestMedia.FileId || latestMedia.fileId || '';
+      const mediaUri = latestMedia.Url || latestMedia.url || latestMedia.URI || latestMedia.uri || '';
+      
+      if (mediaKey) {
+        mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(mediaKey)}`;
+      } else if (mediaId) {
+        mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${mediaId}`;
+      } else if (mediaUri) {
+        if (mediaUri.startsWith('http://') || mediaUri.startsWith('https://')) {
+          mediaUrl = mediaUri;
+        } else {
+          mediaUrl = mediaUri.startsWith('/') ? `${FILE_BASE_URL}${mediaUri}` : `${FILE_BASE_URL}/${mediaUri}`;
       }
-      if (latestImage.startsWith('/')) {
-        return `${FILE_BASE_URL}${latestImage}`;
       }
-      return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(latestImage)}`;
+      
+      const videoCheck = isVideoFile(mediaKey, mediaUri, latestMedia);
+      return { url: mediaUrl, isVideo: videoCheck, media: latestMedia };
     }
     
-    return null;
+    if (typeof latestMedia === 'string') {
+      if (latestMedia.startsWith('http://') || latestMedia.startsWith('https://')) {
+        mediaUrl = latestMedia;
+      } else if (latestMedia.startsWith('/')) {
+        mediaUrl = `${FILE_BASE_URL}${latestMedia}`;
+      } else {
+        mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(latestMedia)}`;
+    }
+    
+      const videoCheck = isVideoFile(latestMedia, latestMedia, null);
+      return { url: mediaUrl, isVideo: videoCheck, media: latestMedia };
+    }
+    
+    return { url: null, isVideo: false, media: null };
   };
 
-  const imageUrl = useMemo(() => getLatestImageUrl(), [
+  const mediaInfo = useMemo(() => getLatestMediaUrl(), [
     enquiry?._originalData?.ReferenceImages,
     enquiry?.ReferenceImages,
     enquiry?.images,
     enquiry?.Images,
+    enquiry?._originalData?.ReferenceVideos,
+    enquiry?.ReferenceVideos,
+    enquiry?.Videos,
+    enquiry?._originalData?.Coral,
+    enquiry?.Coral,
+    enquiry?._originalData?.Cad,
+    enquiry?.Cad,
   ]);
+  
+  const imageUrl = mediaInfo.url;
+  const mediaIsVideo = mediaInfo.isVideo;
+  const latestMedia = mediaInfo.media;
   
   // Optimized async base64 conversion (non-blocking, chunked processing)
   const convertToBase64Async = useCallback(async (arrayBuffer) => {
@@ -439,9 +534,90 @@ export const CompactEnquiryCard = ({
     return base64;
   }, []);
 
+  // Update video state when media type changes
+  useEffect(() => {
+    setIsVideo(mediaIsVideo);
+    if (!mediaIsVideo) {
+      setVideoUrl(null);
+    }
+  }, [mediaIsVideo]);
+
+  // Fetch video URL if it's a video
+  useEffect(() => {
+    if (!mediaIsVideo || !imageUrl) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchVideoUrl = async () => {
+      try {
+        setImageLoading(true);
+        setImageError(false);
+
+        const token = await AsyncStorage.getItem('token');
+        if (!token) {
+          setImageError(true);
+          setImageLoading(false);
+          return;
+        }
+
+        // Fetch presigned URL from API
+        const response = await fetch(imageUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+
+        // Check if response is JSON (presigned URL)
+        if (contentType.includes('application/json')) {
+          const jsonData = await response.json();
+          const videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+          if (videoUrlToUse && !cancelled) {
+            setVideoUrl(videoUrlToUse);
+            setImageLoading(false);
+            setImageError(false);
+          }
+        } else {
+          // Direct video response - use the URL directly
+          if (!cancelled) {
+            setVideoUrl(imageUrl);
+            setImageLoading(false);
+            setImageError(false);
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          if (__DEV__) {
+            console.error('Error loading video:', error);
+          }
+          setImageError(true);
+          setImageLoading(false);
+        }
+      }
+    };
+
+    fetchVideoUrl();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaIsVideo, imageUrl]);
+
   // Fetch and load image with caching and deferred loading
   useEffect(() => {
-    if (!imageUrl) {
+    if (!imageUrl || mediaIsVideo) {
+      // Skip image loading if it's a video (handled by video useEffect)
+      if (mediaIsVideo) {
+        return;
+      }
       setImageDataUri(null);
       setImageError(false);
       setImageLoading(false);
@@ -581,13 +757,34 @@ export const CompactEnquiryCard = ({
       cancelled = true;
       handle.cancel();
     };
-  }, [imageUrl, convertToBase64Async]);
+  }, [imageUrl, convertToBase64Async, mediaIsVideo]);
 
   return (
     <Card style={styles.compactEnquiryCard} onPress={onPress}>
-      {/* Reference Image - Always show container */}
+      {/* Reference Image/Video - Always show container */}
       <View style={styles.compactImageContainer}>
-        {imageDataUri && !imageError ? (
+        {isVideo && videoUrl && !imageError ? (
+          <View style={styles.compactVideoContainer}>
+            <Video
+              source={{ uri: videoUrl }}
+              style={styles.compactVideo}
+              resizeMode="cover"
+              paused={true}
+              controls={false}
+              muted={true}
+              repeat={false}
+              onLoad={() => {
+                // Ensure first frame is displayed
+              }}
+              onError={() => {
+                setImageError(true);
+              }}
+            />
+            <View style={styles.compactVideoPlayOverlay}>
+              <Icon name="play-arrow" size={24} color={colors.textWhite} />
+            </View>
+          </View>
+        ) : imageDataUri && !imageError ? (
           <OptimizedImage
             source={{ uri: imageDataUri }}
             style={styles.compactImage}
@@ -600,9 +797,9 @@ export const CompactEnquiryCard = ({
           />
         ) : (
           <View style={styles.compactImagePlaceholder}>
-            <Icon name="image" size={32} color={colors.textLight} />
+            <Icon name={isVideo ? "videocam" : "image"} size={32} color={colors.textLight} />
             <Text style={styles.compactImagePlaceholderText}>
-              {imageLoading ? 'Loading...' : 'No image available'}
+              {imageLoading ? 'Loading...' : (isVideo ? 'No video available' : 'No image available')}
               </Text>
           </View>
         )}
@@ -1199,6 +1396,28 @@ const styles = StyleSheet.create({
   compactImage: {
     width: '100%',
     height: '100%',
+  },
+  compactVideoContainer: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+    position: 'relative',
+    backgroundColor: colors.backgroundSecondary,
+    overflow: 'hidden',
+  },
+  compactVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  compactVideoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   compactImagePlaceholder: {
     width: '100%',

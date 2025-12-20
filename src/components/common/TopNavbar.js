@@ -59,11 +59,12 @@ const TopNavbar = ({ navigation }) => {
               style={styles.logoImage}
               resizeMode="contain"
             />
-            {/* Logo Header Text - Replaced image with text for better quality in release builds */}
-            <View style={styles.logoTextContainer}>
-              <Text style={styles.logoHeaderTextMain}>CHANDRA</Text>
-              <Text style={styles.logoHeaderTextSub}>JEWELS</Text>
-            </View>
+            {/* Header Logo Image */}
+            <Image 
+              source={images.headerLogo}
+              style={styles.headerLogoImage}
+              resizeMode="contain"
+            />
           </View>
         </View>
 
@@ -166,26 +167,10 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
   },
-  logoTextContainer: {
+  headerLogoImage: {
+    width: 120,
+    height: 50,
     marginLeft: 8,
-    justifyContent: 'center',
-  },
-  logoHeaderTextMain: {
-    fontSize: 24, // Increased from 20
-    fontFamily: fonts.bold, // Bold/semi-bold weight for CHANDRA (matching logo)
-    color: '#c3a772', // Golden color matching logo
-    letterSpacing: 1.2,
-    lineHeight: 28, // Adjusted for larger font
-    fontWeight: '500', // Manual weight adjustment - can be: '400', '500', '600', '700', '800', '900'
-  },
-  logoHeaderTextSub: {
-    fontSize: 17, // Increased from 14
-    fontFamily: fonts.light, // Light/thin weight for JEWELS (matching logo)
-    color: '#c3a772', // Golden color matching logo
-    letterSpacing: 0.6,
-    lineHeight: 20, // Adjusted for larger font
-    marginTop: -1, // Tighter spacing between lines
-    fontWeight: '300', // Light weight
   },
   rightSection: {
     flexDirection: 'row',

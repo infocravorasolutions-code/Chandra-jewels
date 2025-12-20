@@ -42,6 +42,16 @@ const PricingScreen = ({ route, navigation }) => {
   // Fetch stone types from API
   const { data: stoneTypesData = [] } = useGetStoneTypesQuery();
   
+  // Metal quality options
+  const metalQualityOptions = [
+    { label: '10K', value: '10K' },
+    { label: '14K', value: '14K' },
+    { label: '18K', value: '18K' },
+    { label: '22K', value: '22K' },
+    { label: 'Silver 925', value: 'Silver 925' },
+    { label: 'Platinum', value: 'Platinum' },
+  ];
+  
   // Use fetched enquiry if available, otherwise fall back to route params
   const enquiry = fetchedEnquiry || routeEnquiry;
   const originalData = enquiry?._originalData || enquiry;
@@ -118,6 +128,12 @@ const PricingScreen = ({ route, navigation }) => {
   // Initialize state for all pricing entries - each entry has its own formData and stones
   // Memoized with useCallback to prevent function recreation on every render
   const initializePricingEntryState = useCallback((pricingEntry) => {
+    // Get metal quality from pricing entry or fallback to enquiry
+    const entryMetalQuality = pricingEntry?.Metal?.Quality || 
+                              originalData?.Metal?.Quality || 
+                              enquiry?.Metal?.Quality || 
+                              '10K';
+    
     return {
       formData: {
         metalPrice: (pricingEntry?.MetalPrice || pricingEntry?.metalPrice || 0).toString(),
@@ -132,11 +148,12 @@ const PricingScreen = ({ route, navigation }) => {
         extraCharges: (pricingEntry?.ExtraCharges || pricingEntry?.extraCharges || 0).toString(),
         undercutPrice: (pricingEntry?.UndercutPrice || pricingEntry?.undercutPrice || 0).toString(),
         clientPricingMessage: pricingEntry?.ClientPricingMessage || '',
+        metalQuality: entryMetalQuality,
       },
       stones: normalizeStones(pricingEntry?.Stones || pricingEntry?.stones || []),
       undercutEnabled: !!(pricingEntry?.UndercutPrice || pricingEntry?.undercutPrice),
     };
-  }, [normalizeStones]);
+  }, [normalizeStones, originalData, enquiry]);
 
   // State for all pricing entries - array of { formData, stones, undercutEnabled }
   const [pricingEntriesState, setPricingEntriesState] = useState(() => {
@@ -144,6 +161,7 @@ const PricingScreen = ({ route, navigation }) => {
       return allPricingEntries.map(entry => initializePricingEntryState(entry));
     }
     // If no existing entries, create one empty entry for new pricing
+    const defaultMetalQuality = originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '10K';
     return [{
       formData: {
         metalPrice: '0',
@@ -158,6 +176,7 @@ const PricingScreen = ({ route, navigation }) => {
         extraCharges: '0',
         undercutPrice: '0',
         clientPricingMessage: '',
+        metalQuality: defaultMetalQuality,
       },
       stones: [],
       undercutEnabled: false,
@@ -748,6 +767,7 @@ const PricingScreen = ({ route, navigation }) => {
   const [entryStoneFilters, setEntryStoneFilters] = useState({});
   // Individual dropdown visibility for each pricing entry - { entryIndex: isVisible }
   const [entryFilterDropdowns, setEntryFilterDropdowns] = useState({});
+  const [entryMetalQualityDropdowns, setEntryMetalQualityDropdowns] = useState({});
   // Modal state for editing pricing entry
   const [editingEntryIndex, setEditingEntryIndex] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -775,6 +795,14 @@ const PricingScreen = ({ route, navigation }) => {
   // Helper to toggle dropdown for a specific entry
   const toggleEntryFilterDropdown = (entryIndex) => {
     setEntryFilterDropdowns(prev => ({
+      ...prev,
+      [entryIndex]: !prev[entryIndex],
+    }));
+  };
+
+  // Helper to toggle metal quality dropdown for a specific entry
+  const toggleEntryMetalQualityDropdown = (entryIndex) => {
+    setEntryMetalQualityDropdowns(prev => ({
       ...prev,
       [entryIndex]: !prev[entryIndex],
     }));
@@ -935,9 +963,8 @@ const PricingScreen = ({ route, navigation }) => {
         version = `Version ${version}`;
       }
       
-      // Get metal details from enquiry
+      // Get metal details from enquiry (fallback only)
       const metalColor = originalData?.Metal?.Color || enquiry?.Metal?.Color || 'Gold';
-      const metalQuality = originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '14K';
       
       // Get default metal rate for fallback (from latest entry or metalRateConsidered)
       const defaultMetalWeight = parseFloat(formData.metalWeight) || 0;
@@ -955,6 +982,12 @@ const PricingScreen = ({ route, navigation }) => {
         const entryFormData = entryState.formData;
         const entryStones = entryState.stones;
         const entryUndercutEnabled = entryState.undercutEnabled;
+        
+        // Get metal quality from entry state (per version), fallback to enquiry if not set
+        const entryMetalQuality = entryFormData.metalQuality || 
+                                  originalData?.Metal?.Quality || 
+                                  enquiry?.Metal?.Quality || 
+                                  '10K';
         
         // Get metal rate for this entry (try to preserve from original if exists)
         const originalEntry = allPricingEntries[entryIndex];
@@ -989,7 +1022,7 @@ const PricingScreen = ({ route, navigation }) => {
           TotalPieces: parseInt(entryFormData.totalPieces) || 0,
         Metal: {
             Weight: parseFloat(entryFormData.metalWeight) || 0,
-          Quality: metalQuality,
+          Quality: entryMetalQuality,
             Rate: entryMetalRate,
           },
           ExtraCharges: parseFloat(entryFormData.extraCharges) || 0,
@@ -1653,14 +1686,17 @@ const PricingScreen = ({ route, navigation }) => {
           {getPricingEntryLabel(originalPricingEntry, index)} - Editable
         </Heading>
         
-        {/* Metal Rate Info for this pricing entry */}
-        {pricingMetalRate > 0 && (
-          <View style={styles.pricingEntryInfo}>
+        {/* Metal Rate and Quality Info for this pricing entry */}
+        <View style={styles.pricingEntryInfo}>
+          {pricingMetalRate > 0 && (
             <CustomText variant="body" style={styles.pricingEntryInfoText}>
               Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
             </CustomText>
-          </View>
-        )}
+          )}
+          <CustomText variant="body" style={styles.pricingEntryInfoText}>
+            Metal Quality: {entryFormData.metalQuality || '10K'}
+          </CustomText>
+        </View>
         
         {/* Editable Pricing Details Grid */}
         <View style={styles.pricingGrid}>
@@ -1764,19 +1800,34 @@ const PricingScreen = ({ route, navigation }) => {
             </TouchableOpacity>
           </View>
 
-          {/* Change Stone Type for All Stones in this pricing entry */}
+          {/* Change Stone Type and Metal Quality for All Stones in this pricing entry */}
           <View style={styles.stoneFilterRow}>
-            <Text style={styles.stoneFilterLabel}>Change All Stone Types</Text>
-            <TouchableOpacity
-              style={styles.stoneFilterButton}
-              onPress={() => toggleEntryFilterDropdown(index)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.stoneFilterButtonText} numberOfLines={1}>
-                Select Stone Type
-              </Text>
-              <Icon name="arrow-drop-down" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.stoneFilterLabel}>Change All Stone Types</Text>
+              <TouchableOpacity
+                style={styles.stoneFilterButton}
+                onPress={() => toggleEntryFilterDropdown(index)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.stoneFilterButtonText} numberOfLines={1}>
+                  Select Stone Type
+                </Text>
+                <Icon name="arrow-drop-down" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ flex: 1, marginLeft: 8 }}>
+              <Text style={styles.stoneFilterLabel}>Metal Quality</Text>
+              <TouchableOpacity
+                style={styles.stoneFilterButton}
+                onPress={() => toggleEntryMetalQualityDropdown(index)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.stoneFilterButtonText} numberOfLines={1}>
+                  {entryFormData.metalQuality || 'Select Quality'}
+                </Text>
+                <Icon name="arrow-drop-down" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <Modal
@@ -1817,6 +1868,42 @@ const PricingScreen = ({ route, navigation }) => {
                           return updated;
                         });
                         toggleEntryFilterDropdown(index);
+                      }}
+                    >
+                      <Text style={styles.dropdownOptionText}>{option.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+
+          {/* Metal Quality Dropdown Modal */}
+          <Modal
+            visible={entryMetalQualityDropdowns[index] || false}
+            transparent
+            animationType="fade"
+            onRequestClose={() => toggleEntryMetalQualityDropdown(index)}
+          >
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => toggleEntryMetalQualityDropdown(index)}
+            >
+              <View style={styles.dropdownModal}>
+                <ScrollView 
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                  style={styles.dropdownScrollView}
+                >
+                  {metalQualityOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={styles.dropdownOption}
+                      onPress={() => {
+                        // Update metal quality for this pricing entry
+                        updatePricingEntryFormData(index, 'metalQuality', option.value);
+                        toggleEntryMetalQualityDropdown(index);
                       }}
                     >
                       <Text style={styles.dropdownOptionText}>{option.label}</Text>
@@ -2010,14 +2097,17 @@ const PricingScreen = ({ route, navigation }) => {
           {getPricingEntryLabel(pricingEntry, index)}
         </Heading>
         
-        {/* Metal Rate Info for this pricing entry */}
-        {pricingMetalRate > 0 && (
-          <View style={styles.pricingEntryInfo}>
+        {/* Metal Rate and Quality Info for this pricing entry */}
+        <View style={styles.pricingEntryInfo}>
+          {pricingMetalRate > 0 && (
             <CustomText variant="body" style={styles.pricingEntryInfoText}>
               Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
             </CustomText>
-          </View>
-        )}
+          )}
+          <CustomText variant="body" style={styles.pricingEntryInfoText}>
+            Metal Quality: {pricingEntry?.Metal?.Quality || originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '10K'}
+          </CustomText>
+        </View>
         
         {/* Pricing Details Grid */}
         <View style={styles.pricingGrid}>
@@ -2472,38 +2562,75 @@ const PricingScreen = ({ route, navigation }) => {
               )}
             </ScrollView>
             <View style={styles.modalFooter}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelModalButton]}
-                onPress={() => {
-                  setShowAddModal(false);
-                  // Remove the temporary new entry if modal is closed without saving
-                  if (editingEntryIndex !== null && editingEntryIndex >= allPricingEntries.length) {
-                    setPricingEntriesState(prev => prev.slice(0, -1));
-                  }
-                  setEditingEntryIndex(null);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveModalButton]}
-                onPress={async () => {
-                  try {
-                    // Save the new pricing entry
-                    await handleSave(false);
-                    // Close modal after successful save
+              <View style={styles.modalFooterTopRow}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelModalButton]}
+                  onPress={() => {
                     setShowAddModal(false);
+                    // Remove the temporary new entry if modal is closed without saving
+                    if (editingEntryIndex !== null && editingEntryIndex >= allPricingEntries.length) {
+                      setPricingEntriesState(prev => prev.slice(0, -1));
+                    }
                     setEditingEntryIndex(null);
-                  } catch (error) {
-                    // Error is already handled in handleSave
-                    // Modal stays open so user can fix and retry
-                  }
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.modalButtonText, styles.saveModalButtonText]}>Save New Pricing</Text>
-              </TouchableOpacity>
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.modalButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveModalButton]}
+                  onPress={async () => {
+                    try {
+                      // Save the new pricing entry
+                      await handleSave(false);
+                      // Close modal after successful save
+                      setShowAddModal(false);
+                      setEditingEntryIndex(null);
+                    } catch (error) {
+                      // Error is already handled in handleSave
+                      // Modal stays open so user can fix and retry
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.modalButtonText, styles.saveModalButtonText]}>Save New Pricing</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Calculate and Sync Buttons */}
+              <View style={styles.modalFooterActionRow}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (editingEntryIndex !== null && pricingEntriesState[editingEntryIndex]) {
+                      await handleCalculateForEntry(editingEntryIndex);
+                    }
+                  }}
+                  disabled={isCalculating}
+                  style={[styles.modalActionButton, styles.calculateBtn, isCalculating && styles.btnDisabled]}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="calculate" size={18} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText}>
+                    {isCalculating ? "Calculating..." : "Calculate"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (editingEntryIndex !== null && pricingEntriesState[editingEntryIndex]) {
+                      await handleSyncClientPricingForEntry(editingEntryIndex);
+                    }
+                  }}
+                  disabled={isSyncing}
+                  style={[styles.modalActionButton, styles.syncBtn, isSyncing && styles.btnDisabled]}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="sync" size={18} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText}>
+                    {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>

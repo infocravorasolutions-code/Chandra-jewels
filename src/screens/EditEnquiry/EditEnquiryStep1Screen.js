@@ -7,7 +7,9 @@ import {
   Alert,
   Modal,
   Text,
+  Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Input, Button } from '../../components/common';
 import { Heading, CustomText } from '../../components/common/Text';
@@ -18,6 +20,7 @@ import { useGetEnquiryByIdQuery, useGetUsersQuery, useUpdateEnquiryMutation, use
 import { useClients } from '../../features/clients/clientsHooks';
 import { useAuth } from '../../context/AuthContext';
 import { useStatusOptions } from '../../features/statuses/statusesHooks';
+import { formatDate } from '../../utils';
 
 const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const { user } = useAuth();
@@ -340,6 +343,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       diamondWeightFrom: safeToString(diamondWeight.From || diamondWeight.from || ''),
       diamondWeightTo: safeToString(diamondWeight.To || diamondWeight.to || ''),
       diamondWeightExact: safeToString(diamondWeight.Exact || diamondWeight.exact || ''),
+      deadline: formatDateForInput(originalData?.ShippingDate || enquiry.ShippingDate || enquiry.deadline || ''),
     };
   };
 
@@ -366,6 +370,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     diamondWeightFrom: '',
     diamondWeightTo: '',
     diamondWeightExact: '',
+    deadline: '',
   });
   const [errors, setErrors] = useState({});
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -375,6 +380,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [tempDate, setTempDate] = useState(new Date());
 
 
   // Update form data when enquiry changes or when fetched data arrives
@@ -674,7 +681,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         },
         Stamping: formData.stamping && formData.stamping.trim() ? formData.stamping : null,
         Remarks: formData.description && formData.description.trim() ? formData.description : null,
-        ShippingDate: null, // Not in Step 1
+        ShippingDate: formData.deadline && formData.deadline.trim() ? formData.deadline : null,
         CoralCode: finalEnquiryToEdit?.CoralCode || finalEnquiryToEdit?.coralCode || null,
         CadCode: finalEnquiryToEdit?.CadCode || finalEnquiryToEdit?.cadCode || null,
         Category: formData.category || 'Ring',
@@ -799,6 +806,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   ];
 
   const metalColorOptions = [
+    { label: 'Gold', value: 'Gold' },
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
     { label: 'Yellow Gold', value: 'Yellow Gold' },
@@ -828,7 +836,10 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={true}>
       <View style={styles.header}>
         <Heading level={3}>Edit Enquiry</Heading>
         <CustomText variant="caption" color="secondary">
@@ -1073,7 +1084,41 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* Row 10: Remarks (full width textarea) */}
+        {/* Row 10: Shipping Date */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Text style={styles.label}>Shipping Date</Text>
+            <TouchableOpacity
+              style={styles.dateInputButton}
+              onPress={() => {
+                if (formData.deadline) {
+                  try {
+                    setTempDate(new Date(formData.deadline));
+                  } catch (e) {
+                    setTempDate(new Date());
+                  }
+                } else {
+                  setTempDate(new Date());
+                }
+                setShowDatePicker(true);
+              }}
+              activeOpacity={0.7}>
+              <Text style={[
+                styles.dateInputText,
+                !formData.deadline && styles.dateInputPlaceholder,
+              ]}>
+                {formData.deadline || 'Select Shipping Date'}
+              </Text>
+              <IconComponent 
+                name="calendar-today" 
+                size={20} 
+                color={colors.primary} 
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Row 11: Remarks (full width textarea) */}
         <View style={styles.formRow}>
           <View style={[styles.formField, styles.fullWidthField]}>
             <Input
@@ -1087,6 +1132,66 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
             />
           </View>
         </View>
+
+        {/* Date Picker Modal */}
+        {showDatePicker && Platform.OS === 'ios' && (
+          <Modal
+            transparent={true}
+            animationType="slide"
+            visible={showDatePicker}
+            onRequestClose={() => setShowDatePicker(false)}>
+            <TouchableOpacity
+              style={styles.datePickerModal}
+              activeOpacity={1}
+              onPress={() => setShowDatePicker(false)}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation()}
+                style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <TouchableOpacity
+                    onPress={() => setShowDatePicker(false)}
+                    style={styles.datePickerCancel}>
+                    <Text style={styles.datePickerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.datePickerTitle}>Select Shipping Date</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const formattedDate = tempDate.toISOString().split('T')[0];
+                      handleInputChange('deadline', formattedDate);
+                      setShowDatePicker(false);
+                    }}
+                    style={styles.datePickerDone}>
+                    <Text style={styles.datePickerDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={tempDate}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, date) => {
+                    if (date) setTempDate(date);
+                  }}
+                  style={styles.datePicker}
+                />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        )}
+        {showDatePicker && Platform.OS === 'android' && (
+          <DateTimePicker
+            value={tempDate}
+            mode="date"
+            display="default"
+            onChange={(event, date) => {
+              setShowDatePicker(false);
+              if (event.type === 'set' && date) {
+                const formattedDate = date.toISOString().split('T')[0];
+                handleInputChange('deadline', formattedDate);
+              }
+            }}
+          />
+        )}
 
         <Button
           title={isUpdating ? "Saving..." : "Save"}
@@ -1103,6 +1208,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundSecondary,
+  },
+  scrollContent: {
+    paddingBottom: 40,
   },
   header: {
     padding: 20,
@@ -1244,6 +1352,83 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     padding: 20,
     color: colors.textSecondary,
+  },
+  label: {
+    marginBottom: 8,
+    fontSize: fonts.sm,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  dateInputButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    minHeight: 50,
+    marginTop: 4,
+  },
+  dateInputButtonSelected: {
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+  },
+  dateInputText: {
+    fontSize: fonts.base,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  dateInputTextSelected: {
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  dateInputPlaceholder: {
+    color: colors.textSecondary,
+  },
+  datePickerModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  datePickerContainer: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 20,
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  datePickerCancel: {
+    padding: 8,
+  },
+  datePickerCancelText: {
+    fontSize: fonts.base,
+    color: colors.textSecondary,
+  },
+  datePickerTitle: {
+    fontSize: fonts.lg,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  datePickerDone: {
+    padding: 8,
+  },
+  datePickerDoneText: {
+    fontSize: fonts.base,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  datePicker: {
+    width: '100%',
+    height: 200,
   },
 });
 

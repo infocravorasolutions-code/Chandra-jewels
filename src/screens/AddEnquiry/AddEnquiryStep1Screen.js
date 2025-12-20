@@ -249,10 +249,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       newErrors.status = 'Status is required';
     }
 
-    if (!formData.stoneType) {
-      newErrors.stoneType = 'Stone Type is required';
-    }
-
     if (!formData.metalQuality) {
       newErrors.metalQuality = 'Metal Quality is required';
     }
@@ -471,6 +467,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   const metalColorOptions = [
     { label: 'None', value: '' }, // Option to clear selection
+    { label: 'Gold', value: 'Gold' },
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
     { label: 'Yellow Gold', value: 'Yellow Gold' },
@@ -639,15 +636,12 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         <View style={styles.formRow}>
           <View style={[styles.formField, styles.fullWidthField]}>
             {renderDropdown(
-              'Stone Type*',
+              'Stone Type',
               formData.stoneType,
               stoneTypeOptions,
               (value) => handleInputChange('stoneType', value),
               showStoneTypeDropdown,
               () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
-            )}
-            {errors.stoneType && (
-              <Text style={styles.errorText}>{errors.stoneType}</Text>
             )}
           </View>
         </View>

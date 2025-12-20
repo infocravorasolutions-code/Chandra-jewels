@@ -216,6 +216,22 @@ export const usePushNotifications = () => {
     } else if (normalizedLink.startsWith('enquiries/')) {
       const enquiryId = normalizedLink.split('/')[1];
       navigationRef.navigate('SingleEnquiry', { enquiryId });
+    } else if (normalizedLink.startsWith('chats/')) {
+      // Handle chat notification: chats/{chatId}
+      const parts = normalizedLink.split('/');
+      const chatId = parts[1];
+      const enquiryId = remoteMessage?.data?.enquiryId || remoteMessage?.data?.EnquiryId;
+      const chatType = remoteMessage?.data?.chatType || remoteMessage?.data?.ChatType;
+      
+      if (chatId) {
+        navigationRef.navigate('ChatDetail', {
+          chatId: chatId,
+          enquiryId: enquiryId,
+          chatType: chatType,
+        });
+      } else {
+        navigationRef.navigate('Notifications');
+      }
     } else {
       navigationRef.navigate('Notifications');
     }
@@ -377,6 +393,22 @@ export const usePushNotifications = () => {
             } else if (normalizedLink.startsWith('enquiries/')) {
               const enquiryId = normalizedLink.split('/')[1];
               navigationRef.navigate('SingleEnquiry', { enquiryId });
+            } else if (normalizedLink.startsWith('chats/')) {
+              // Handle chat notification: chats/{chatId}
+              const parts = normalizedLink.split('/');
+              const chatId = parts[1];
+              const enquiryId = detail.notification?.data?.enquiryId || detail.notification?.data?.EnquiryId;
+              const chatType = detail.notification?.data?.chatType || detail.notification?.data?.ChatType;
+              
+              if (chatId) {
+                navigationRef.navigate('ChatDetail', {
+                  chatId: chatId,
+                  enquiryId: enquiryId,
+                  chatType: chatType,
+                });
+              } else {
+                navigationRef.navigate('Notifications');
+              }
             } else {
               navigationRef.navigate('Notifications');
             }

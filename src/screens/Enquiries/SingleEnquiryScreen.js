@@ -14,6 +14,9 @@ import {
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import ImageZoom from 'react-native-image-pan-zoom';
+import Video from 'react-native-video';
+import Share from 'react-native-share';
+import RNFS from 'react-native-fs';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useGetEnquiryByIdQuery, useDeleteEnquiryMutation, useApproveDesignVersionMutation, useRejectDesignVersionMutation, useUploadReferenceImagesMutation } from '../../store/api';
@@ -29,11 +32,27 @@ import { EnquiryHistoryModal } from '../../components/modals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../config/apiConfig';
 import { useUsers } from '../../features/users/usersHooks';
-import { getUserName } from '../../utils/userUtils';
+import { getUserName, useUserName } from '../../utils/userUtils';
 
 const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { enquiry: initialEnquiry, enquiryId: routeEnquiryId, shouldRefresh } = route.params || {};
+  
+  // Store initial AssignedTo as fallback (in case refetch loses it)
+  const initialAssignedToRef = useRef(null);
+  
+  // Capture initial AssignedTo from initialEnquiry if available
+  useEffect(() => {
+    if (initialEnquiry && !initialAssignedToRef.current) {
+      const initialId = initialEnquiry?._originalData?.AssignedTo || 
+                       initialEnquiry?.AssignedTo || 
+                       initialEnquiry?.assignedTo;
+      if (initialId) {
+        initialAssignedToRef.current = initialId;
+        console.log('[SingleEnquiry] 💾 Stored initial AssignedTo as fallback:', initialId);
+      }
+    }
+  }, [initialEnquiry]);
   
   
   // Log route params when screen loads or params change
@@ -42,7 +61,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   }, [route.params, initialEnquiry, routeEnquiryId, shouldRefresh]);
   
   // Fetch and cache users for name resolution
-  useUsers();
+  const { users: usersList, isLoading: usersLoading } = useUsers();
+  
+  // Debug: Log users loading status
+  useEffect(() => {
+    console.log('[SingleEnquiry] 👥 Users Debug:', {
+      'usersLoading': usersLoading,
+      'usersList length': usersList?.length || 0,
+      'sample users': usersList?.slice(0, 3).map(u => ({
+        id: u.id || u._id,
+        name: u.name || u.Name,
+        email: u.email || u.Email,
+      })),
+    });
+  }, [usersLoading, usersList]);
   
   // Automatic cache cleanup on screen mount (runs once per app session)
   useEffect(() => {
@@ -271,6 +303,164 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const modalFlatListRef = useRef(null);
   const [modalCurrentIndex, setModalCurrentIndex] = useState(0);
   const [isModalZoomed, setIsModalZoomed] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  
+  // Handle sharing to WhatsApp
+  const handleShareToWhatsApp = useCallback(async () => {
+    if (isSharing) return;
+    
+    setIsSharing(true);
+    try {
+      const currentMedia = modalImages[modalCurrentIndex] || modalImages[0];
+      if (!currentMedia) {
+        Alert.alert('Error', 'No media to share');
+        setIsSharing(false);
+        return;
+      }
+      
+      const isVideo = currentMedia.isVideo;
+      const mediaKey = currentMedia.imageKey || currentMedia.imageId;
+      const mediaUri = currentMedia.imageUri || currentMedia.cachedUri || selectedImageUri;
+      
+      if (!mediaKey && !mediaUri) {
+        Alert.alert('Error', 'Media URL not available');
+        setIsSharing(false);
+        return;
+      }
+      
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        Alert.alert('Error', 'Authentication required');
+        setIsSharing(false);
+        return;
+      }
+      
+      let fileUrl = mediaUri;
+      
+      // If we don't have a direct URL, fetch presigned URL
+      if (!fileUrl || (!fileUrl.startsWith('http') && !fileUrl.startsWith('file://'))) {
+        try {
+          const encodedKey = encodeURIComponent(mediaKey);
+          const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${encodedKey}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const jsonData = await response.json();
+              fileUrl = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+            } else {
+              // Direct file response - download to temp file
+              const arrayBuffer = await response.arrayBuffer();
+              const tempDir = RNFS.CachesDirectoryPath;
+              const fileName = mediaKey.split('/').pop() || `media_${Date.now()}.${isVideo ? 'mp4' : 'jpg'}`;
+              const tempFilePath = `${tempDir}/${fileName}`;
+              
+              // Convert to base64
+              const bytes = new Uint8Array(arrayBuffer);
+              let binary = '';
+              const chunkSize = 8192;
+              for (let i = 0; i < bytes.length; i += chunkSize) {
+                const chunk = bytes.subarray(i, i + chunkSize);
+                binary += String.fromCharCode.apply(null, chunk);
+              }
+              
+              let base64;
+              try {
+                base64 = btoa(binary);
+              } catch (e) {
+                if (typeof Buffer !== 'undefined') {
+                  base64 = Buffer.from(binary, 'binary').toString('base64');
+                } else {
+                  throw new Error('Unable to convert to base64');
+                }
+              }
+              
+              await RNFS.writeFile(tempFilePath, base64, 'base64');
+              fileUrl = `file://${tempFilePath}`;
+            }
+          }
+        } catch (error) {
+          Alert.alert('Error', 'Failed to prepare media for sharing');
+          setIsSharing(false);
+          return;
+        }
+      }
+      
+      // If fileUrl is a remote URL, download it first
+      if (fileUrl.startsWith('http') && !fileUrl.startsWith('file://')) {
+        try {
+          const response = await fetch(fileUrl, {
+            headers: fileUrl.includes('amazonaws.com') ? {} : {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            const tempDir = RNFS.CachesDirectoryPath;
+            const fileName = mediaKey ? mediaKey.split('/').pop() : `media_${Date.now()}.${isVideo ? 'mp4' : 'jpg'}`;
+            const tempFilePath = `${tempDir}/${fileName}`;
+            
+            // Convert to base64
+            const bytes = new Uint8Array(arrayBuffer);
+            let binary = '';
+            const chunkSize = 8192;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+              const chunk = bytes.subarray(i, i + chunkSize);
+              binary += String.fromCharCode.apply(null, chunk);
+            }
+            
+            let base64;
+            try {
+              base64 = btoa(binary);
+            } catch (e) {
+              if (typeof Buffer !== 'undefined') {
+                base64 = Buffer.from(binary, 'binary').toString('base64');
+              } else {
+                throw new Error('Unable to convert to base64');
+              }
+            }
+            
+            await RNFS.writeFile(tempFilePath, base64, 'base64');
+            fileUrl = `file://${tempFilePath}`;
+          }
+        } catch (error) {
+          Alert.alert('Error', 'Failed to download media for sharing');
+          setIsSharing(false);
+          return;
+        }
+      }
+      
+      // Share via WhatsApp
+      const shareMessage = `Reference ${isVideo ? 'Video' : 'Image'} from Enquiry`;
+      
+      try {
+        await Share.open({
+          message: shareMessage,
+          url: fileUrl,
+          type: isVideo ? 'video/mp4' : 'image/jpeg',
+          social: Share.Social.WHATSAPP,
+        });
+      } catch (shareError) {
+        // If WhatsApp sharing fails, try general share
+        if (shareError.message !== 'User did not share') {
+          await Share.open({
+            message: `${shareMessage}\n\n${isVideo ? 'Video' : 'Image'}: ${fileUrl}`,
+            url: fileUrl,
+            type: isVideo ? 'video/mp4' : 'image/jpeg',
+          });
+        }
+      }
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to share media');
+    } finally {
+      setIsSharing(false);
+    }
+  }, [isSharing, modalImages, modalCurrentIndex, selectedImageUri]);
   
   const handleImagePress = (uri, index, allImages) => {
     if (!uri) {
@@ -301,7 +491,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       // Ensure selected index image URI is set (prevents flicker)
       const targetImage = modalImages[modalCurrentIndex];
       if (targetImage) {
+        // For videos, we need to fetch the URL if not available
+        if (targetImage.isVideo) {
+          // Video URL will be fetched by Video component in modal
+          setSelectedImageUri(targetImage.imageUri || targetImage.cachedUri || null);
+        } else {
         setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
+        }
       }
       
       if (modalFlatListRef.current) {
@@ -354,7 +550,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       setModalCurrentIndex((prev) => (prev === boundedIndex ? prev : boundedIndex));
       const targetImage = modalImages?.[boundedIndex];
       if (targetImage) {
+        // For videos, use imageUri or cachedUri
+        if (targetImage.isVideo) {
+          setSelectedImageUri(targetImage.imageUri || targetImage.cachedUri || null);
+        } else {
         setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
+        }
       }
       setIsModalZoomed(false);
     });
@@ -401,6 +602,68 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   
   // Get original data for accessing raw API fields
   const originalData = enquiry?._originalData || enquiry;
+  
+  // Extract AssignedTo ID using useMemo to reactively update when enquiry data changes
+  // IMPORTANT: Check _originalData first (raw API response) before normalized enquiry
+  const assignedToId = useMemo(() => {
+    // Priority 1: Check _originalData (raw API response) first - this is most reliable
+    const fromOriginalData = enquiry?._originalData?.AssignedTo || 
+                            originalData?.AssignedTo ||
+                            originalData?.assignedTo;
+    
+    // Priority 2: Check normalized enquiry fields
+    const fromEnquiry = enquiry?.AssignedTo || 
+                       enquiry?.assignedTo;
+    
+    // Priority 3: Use stored fallback if current data doesn't have it
+    const fromFallback = initialAssignedToRef.current;
+    
+    const id = fromOriginalData || fromEnquiry || fromFallback || null;
+    
+    // Update fallback if we found a new value
+    if (id && id !== initialAssignedToRef.current) {
+      initialAssignedToRef.current = id;
+    }
+    
+    // Debug: Log assignedToId extraction with detailed info
+    console.log('[SingleEnquiry] 🔍 AssignedTo ID extracted (useMemo):', {
+      'enquiry?._originalData?.AssignedTo': enquiry?._originalData?.AssignedTo,
+      'originalData?.AssignedTo': originalData?.AssignedTo,
+      'originalData?.assignedTo': originalData?.assignedTo,
+      'enquiry?.AssignedTo': enquiry?.AssignedTo,
+      'enquiry?.assignedTo': enquiry?.assignedTo,
+      'fromOriginalData': fromOriginalData,
+      'fromEnquiry': fromEnquiry,
+      'fromFallback': fromFallback,
+      'Final assignedToId': id,
+      'assignedToId type': typeof id,
+      'originalData exists': !!originalData,
+      'enquiry exists': !!enquiry,
+      'enquiry._originalData exists': !!enquiry?._originalData,
+    });
+    
+    return id;
+  }, [
+    enquiry?._originalData?.AssignedTo, // Check _originalData.AssignedTo specifically
+    originalData?.AssignedTo,
+    originalData?.assignedTo,
+    enquiry?.AssignedTo,
+    enquiry?.assignedTo,
+    enquiry?._originalData, // Also watch entire _originalData object
+    enquiry, // Watch entire enquiry object
+  ]);
+  
+  // Use reactive hook to get assigned user name
+  const assignedToName = useUserName(assignedToId);
+  
+  // Debug: Log assignedToName from hook
+  useEffect(() => {
+    console.log('[SingleEnquiry] 👤 AssignedToName from hook:', {
+      'assignedToId': assignedToId,
+      'assignedToName': assignedToName,
+      'assignedToName type': typeof assignedToName,
+    });
+  }, [assignedToId, assignedToName]);
   
   // Log originalData for debugging - Enhanced to show all fields
   useEffect(() => {
@@ -1022,7 +1285,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
 
     const pickerOptions = {
-      mediaType: 'photo',
+      mediaType: 'mixed', // Allow both images and videos
       selectionLimit: 10,
       includeBase64: false,
     };
@@ -1033,21 +1296,28 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       }
 
       if (response.errorCode) {
-        Alert.alert('Image Picker Error', response.errorMessage || 'Failed to open gallery. Please try again.');
+        Alert.alert('Media Picker Error', response.errorMessage || 'Failed to open gallery. Please try again.');
         return;
       }
 
       const assets = response.assets?.filter((asset) => asset?.uri) || [];
       if (assets.length === 0) {
-        Alert.alert('No Images Selected', 'Please choose at least one reference image to upload.');
+        Alert.alert('No Media Selected', 'Please choose at least one reference image or video to upload.');
         return;
       }
 
-      const imagesPayload = assets.map((asset, index) => ({
+      const imagesPayload = assets.map((asset, index) => {
+        // Determine file extension based on type or file name
+        const isVideo = asset.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp)$/i.test(asset.fileName || '');
+        const defaultExtension = isVideo ? 'mp4' : 'jpg';
+        const defaultName = asset.fileName || `reference_${Date.now()}_${index}.${defaultExtension}`;
+        
+        return {
         uri: asset.uri,
-        type: asset.type || 'image/jpeg',
-        name: asset.fileName || `reference_${Date.now()}_${index}.jpg`,
-      }));
+          type: asset.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+          name: defaultName,
+        };
+      });
 
       try {
         await uploadReferenceImages({
@@ -1055,7 +1325,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           images: imagesPayload,
         }).unwrap();
 
-        Alert.alert('Success', 'Reference images uploaded successfully.');
+        Alert.alert('Success', 'Reference images/videos uploaded successfully.');
         refetch();
       } catch (error) {
         const message =
@@ -1072,7 +1342,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const hasDetailValue = (cell) => {
     if (!cell) return false;
     const value = cell.value;
-    return value !== null && value !== undefined && String(value).trim() !== '';
+    const result = value !== null && value !== undefined && String(value).trim() !== '';
+    
+    // Debug: Log hasDetailValue check for Assigned To
+    if (cell.label === 'Assigned To') {
+      console.log('[SingleEnquiry] ✅ hasDetailValue check for Assigned To:', {
+        'cell': cell,
+        'value': value,
+        'value type': typeof value,
+        'String(value).trim()': String(value).trim(),
+        'result': result,
+      });
+    }
+    
+    return result;
   };
 
   const renderDetailCell = (cell) => {
@@ -1081,6 +1364,19 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
 
     const valueExists = hasDetailValue(cell);
+    
+    // Debug: Log renderDetailCell for Assigned To
+    if (cell.label === 'Assigned To') {
+      console.log('[SingleEnquiry] 🎨 renderDetailCell for Assigned To:', {
+        'cell': cell,
+        'valueExists': valueExists,
+        'cell.showIfEmpty': cell.showIfEmpty,
+        'showAllDetails': showAllDetails,
+        'will render': valueExists || cell.showIfEmpty || showAllDetails,
+        'value to display': valueExists ? cell.value : (cell.placeholder ?? 'N/A'),
+      });
+    }
+    
     if (!valueExists && !cell.showIfEmpty && !showAllDetails) {
       return <View style={styles.detailCellPlaceholder} />;
     }
@@ -1184,13 +1480,16 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                          enquiry?.deadline ||
                          originalData?.deadline ||
                          null;
-    // Extract AssignedTo - check ALL possible locations with comprehensive fallback
-    const assignedToId = originalData?.AssignedTo || 
-                        enquiry?.AssignedTo || 
-                        enquiry?.assignedTo ||
-                        originalData?.assignedTo ||
-                        null;
-    const assignedTo = getUserName(assignedToId);
+    // Use assignedToName from hook (extracted at component level with useMemo)
+    const assignedTo = assignedToName || '-';
+    
+    // Debug: Log final assignedTo value being used for display
+    console.log('[SingleEnquiry] 📋 Final AssignedTo for display:', {
+      'assignedToId': assignedToId,
+      'assignedTo (final)': assignedTo,
+      'will display': assignedTo !== '-',
+      'renderEnquiryDetails called': true,
+    });
     
     // Format metal weight - only return value if exists, otherwise null (so field won't display)
     let metalWeightText = null;
@@ -1215,6 +1514,31 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         diamondWeightText = `From: ${from}${to ? ` To: ${to}` : ''} ct`;
       }
     }
+
+    // Get Coral and CAD codes for Assignment & Codes section
+    // Priority: Latest version's Code > Enquiry-level code
+    const coralVersions = originalData?.Coral || enquiry?.Coral || [];
+    const cadVersions = originalData?.Cad || enquiry?.Cad || [];
+    
+    // Get code from latest version if available, otherwise from enquiry level
+    const latestCoralVersion = coralVersions.length > 0 ? coralVersions[coralVersions.length - 1] : null;
+    const latestCadVersion = cadVersions.length > 0 ? cadVersions[cadVersions.length - 1] : null;
+    
+    const coralCode = latestCoralVersion?.Code || 
+                     latestCoralVersion?.code || 
+                     enquiry?.CoralCode || 
+                     enquiry?.coralVersion || 
+                     originalData?.CoralCode || 
+                     originalData?.coralVersion || 
+                     'N/A';
+    
+    const cadCode = latestCadVersion?.Code || 
+                   latestCadVersion?.code || 
+                   enquiry?.CadCode || 
+                   enquiry?.cadVersion || 
+                   originalData?.CadCode || 
+                   originalData?.cadVersion || 
+                   'N/A';
 
     return (
       <>
@@ -1248,10 +1572,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           </View>
 
           <View style={styles.detailsGrid}>
-            {renderDetailRow(
-              { icon: 'person', label: 'Client', value: clientName },
-              { icon: 'supervisor-account', label: 'Assigned To', value: assignedTo, showIfEmpty: true }
-            )}
+            {(() => {
+              // Debug: Log values right before rendering
+              console.log('[SingleEnquiry] 🎨 Rendering AssignedTo row:', {
+                'assignedTo value': assignedTo,
+                'assignedTo type': typeof assignedTo,
+                'assignedTo === "-"': assignedTo === '-',
+                'assignedToId': assignedToId,
+                'assignedToName': assignedToName,
+                'showIfEmpty': true,
+              });
+              return renderDetailRow(
+                { icon: 'person', label: 'Client', value: clientName },
+                { icon: 'supervisor-account', label: 'Assigned To', value: assignedTo, showIfEmpty: true }
+              );
+            })()}
           </View>
         </Card>
 
@@ -1327,18 +1662,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </Card>
 
         {/* Assignment & Codes Card (for admin/viewing) */}
-        {(assignedToId || enquiry?.CoralCode || enquiry?.CadCode || originalData?.CoralCode || originalData?.CadCode) && (
+        {((assignedTo && assignedTo !== '-') || (coralCode && coralCode !== 'N/A') || (cadCode && cadCode !== 'N/A')) && (
           <Card style={styles.detailsCard}>
             <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
               Assignment & Codes
             </Text>
             <View style={styles.detailsGrid}>
               {renderDetailRow(
-                { icon: 'person', label: 'Assigned To', value: assignedTo, showIfEmpty: true },
-                { icon: 'description', label: 'Coral Code', value: enquiry?.CoralCode || enquiry?.coralVersion || originalData?.CoralCode || originalData?.coralVersion }
+                { icon: 'person', label: 'Assigned To', value: assignedTo || '-', showIfEmpty: true },
+                { icon: 'description', label: 'Coral Code', value: coralCode }
               )}
               {renderDetailRow(
-                { icon: 'description', label: 'CAD Code', value: enquiry?.CadCode || enquiry?.cadVersion },
+                { icon: 'description', label: 'CAD Code', value: cadCode },
                 null
               )}
             </View>
@@ -1347,6 +1682,221 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       </>
     );
   };
+
+  // Utility function to detect if a file is a video based on key/name/URI
+  // This is a regular function, not a hook, so it can be called conditionally
+  const isVideoFile = (imageKey, imageUri, image) => {
+    // First check for explicit video flag (set when merging ReferenceVideos)
+    if (image && typeof image === 'object' && (image._isVideo === true || image.isVideo === true)) {
+      return true;
+    }
+    
+    // Check file extension from key
+    if (imageKey && typeof imageKey === 'string') {
+      const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
+      if (videoExtensions.test(imageKey)) {
+        return true;
+      }
+    }
+    
+    // Check file extension from URI
+    if (imageUri && typeof imageUri === 'string') {
+      const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
+      if (videoExtensions.test(imageUri)) {
+        return true;
+      }
+    }
+    
+    // Check mime type from image object
+    if (image && typeof image === 'object') {
+      const contentType = image.ContentType || image.contentType || image.Type || image.type || image.MimeType || image.mimeType;
+      if (contentType && typeof contentType === 'string' && contentType.startsWith('video/')) {
+        return true;
+      }
+      
+      // Check if it's from ReferenceVideos field (backend might mark it)
+      if (image.FileType === 'video' || image.fileType === 'video' || image.MediaType === 'video' || image.mediaType === 'video') {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Component to render video with fetch authentication
+  const VideoWithFallback = React.memo(({ image, imageKey, imageId, imageUri, index, onPress }) => {
+    const [videoUrl, setVideoUrl] = useState(null);
+    const [videoLoading, setVideoLoading] = useState(false);
+    const [videoError, setVideoError] = useState(false);
+    const videoRef = useRef(null);
+    const mountedRef = useRef(true);
+    
+    useEffect(() => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+      };
+    }, []);
+    
+    // Fetch video URL with authentication
+    const fetchVideoUrl = useCallback(async () => {
+      if (!mountedRef.current) return;
+      
+      let videoUrlToUse = null;
+      
+      // If we have a direct URI, use it
+      if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
+        videoUrlToUse = imageUri;
+      } else if (imageKey) {
+        // Fetch presigned URL from API
+        try {
+          setVideoLoading(true);
+          setVideoError(false);
+          
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+          
+          const encodedKey = encodeURIComponent(imageKey);
+          const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${encodedKey}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            
+            // Check if response is JSON (presigned URL)
+            if (contentType.includes('application/json')) {
+              const jsonData = await response.json();
+              videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+            } else {
+              // Direct video response - create blob URL
+              const blob = await response.blob();
+              videoUrlToUse = URL.createObjectURL(blob);
+            }
+          } else {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+        } catch (error) {
+          setVideoError(true);
+          setVideoLoading(false);
+          return;
+        }
+      } else if (imageId) {
+        try {
+          setVideoLoading(true);
+          setVideoError(false);
+          
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+          
+          const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${imageId}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const jsonData = await response.json();
+              videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+            }
+          } else {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+        } catch (error) {
+          setVideoError(true);
+          setVideoLoading(false);
+          return;
+        }
+      }
+      
+      if (videoUrlToUse && mountedRef.current) {
+        setVideoUrl(videoUrlToUse);
+        setVideoLoading(false);
+        setVideoError(false);
+      } else if (mountedRef.current) {
+        setVideoError(true);
+        setVideoLoading(false);
+      }
+    }, [imageKey, imageId, imageUri]);
+    
+    useEffect(() => {
+      fetchVideoUrl();
+    }, [fetchVideoUrl]);
+    
+    if (videoError) {
+      return (
+        <View style={styles.videoContainer}>
+          <View style={styles.videoPlaceholder}>
+            <Icon name="videocam-off" size={24} color={colors.textSecondary} />
+            <Text style={styles.videoErrorText}>Video unavailable</Text>
+          </View>
+        </View>
+      );
+    }
+    
+    if (videoLoading || !videoUrl) {
+      return (
+        <View style={styles.videoContainer}>
+          <View style={styles.videoPlaceholder}>
+            <AnimatedLogoLoader size="small" />
+            <Text style={styles.videoLoadingText}>Loading video...</Text>
+          </View>
+        </View>
+      );
+    }
+    
+    return (
+      <TouchableOpacity
+        style={styles.videoContainer}
+        activeOpacity={0.9}
+        onPress={() => {
+          if (onPress && videoUrl) {
+            onPress(videoUrl);
+          }
+        }}
+      >
+        <Video
+          ref={videoRef}
+          source={{ uri: videoUrl }}
+          style={styles.referenceVideo}
+          controls={false}
+          resizeMode="cover"
+          paused={true}
+          onError={(error) => {
+            setVideoError(true);
+          }}
+        />
+        <View style={styles.videoPlayOverlay}>
+          <Icon name="play-circle-filled" size={48} color={colors.textWhite} />
+        </View>
+      </TouchableOpacity>
+    );
+  }, (prevProps, nextProps) => {
+    return (
+      prevProps.imageKey === nextProps.imageKey &&
+      prevProps.imageId === nextProps.imageId &&
+      prevProps.imageUri === nextProps.imageUri &&
+      prevProps.index === nextProps.index
+    );
+  });
 
   // Component to render image with fetch authentication and caching
   const ImageWithFallback = React.memo(({ image, imageKey, imageId, imageUri, index, onPress, initialDataUri }) => {
@@ -1720,18 +2270,60 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       images = originalData.Images;
     }
     
-    // Removed excessive logging from render - causes performance issues
+    // Also check for ReferenceVideos field (videos might be stored separately)
+    let videos = [];
+    if (enquiry?.ReferenceVideos && Array.isArray(enquiry.ReferenceVideos) && enquiry.ReferenceVideos.length > 0) {
+      videos = enquiry.ReferenceVideos;
+    } else if (enquiry?.Videos && Array.isArray(enquiry.Videos) && enquiry.Videos.length > 0) {
+      videos = enquiry.Videos;
+    } else if (originalData?.ReferenceVideos && Array.isArray(originalData.ReferenceVideos) && originalData.ReferenceVideos.length > 0) {
+      videos = originalData.ReferenceVideos;
+    } else if (originalData?.Videos && Array.isArray(originalData.Videos) && originalData.Videos.length > 0) {
+      videos = originalData.Videos;
+    }
+    
+    // Also get videos from CAD/Coral versions
+    const coralVersions = originalData?.Coral || enquiry?.Coral || [];
+    const cadVersions = originalData?.Cad || enquiry?.Cad || [];
+    
+    // Extract videos from all Coral versions
+    coralVersions.forEach((version, index) => {
+      if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
+        videos = [...videos, ...version.Videos];
+      } else if (version?.videos && Array.isArray(version.videos) && version.videos.length > 0) {
+        videos = [...videos, ...version.videos];
+      }
+    });
+    
+    // Extract videos from all CAD versions
+    cadVersions.forEach((version, index) => {
+      if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
+        videos = [...videos, ...version.Videos];
+      } else if (version?.videos && Array.isArray(version.videos) && version.videos.length > 0) {
+        videos = [...videos, ...version.videos];
+      }
+    });
+    
+    // Merge images and videos into a single array for display
+    // Mark videos explicitly so they're rendered correctly
+    if (videos.length > 0) {
+      const videosWithFlag = videos.map(video => ({
+        ...video,
+        _isVideo: true, // Explicit flag to identify videos
+      }));
+      images = [...(images || []), ...videosWithFlag];
+    }
     
     if (!Array.isArray(images) || images.length === 0) {
       return (
         <Card style={styles.imagesCard}>
           <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
-            Reference Images
+            Reference Images/Videos
           </Text>
           <View style={styles.noImagesContainer}>
             <Icon name="photo-library" size={40} color={colors.primary} />
             <Text style={[styles.noImagesText, { color: colors.textSecondary, fontSize: fonts.base }]}>
-              No reference images available
+              No reference images or videos available
             </Text>
           </View>
         </Card>
@@ -1761,18 +2353,52 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         cachedUri = memoryCacheRef.current.get(cacheKey)?.dataUri || null;
       }
 
-      return { image, imageKey, imageId, imageUri, cacheKey, cachedUri };
+      // Detect if this is a video
+      const isVideo = isVideoFile(imageKey, imageUri, image);
+
+      return { image, imageKey, imageId, imageUri, cacheKey, cachedUri, isVideo };
     };
 
-    // If only one image, show it without slider
+    // Debug logging to see what we have (after buildImageMeta is defined)
+    if (__DEV__ && (images.length > 0 || videos.length > 0)) {
+      const coralVideoCount = coralVersions.reduce((count, v) => count + (v?.Videos?.length || v?.videos?.length || 0), 0);
+      const cadVideoCount = cadVersions.reduce((count, v) => count + (v?.Videos?.length || v?.videos?.length || 0), 0);
+      const sampleMeta = images[0] ? buildImageMeta(images[0]) : null;
+      console.log('🔍 [SingleEnquiryScreen] Media data:', {
+        imagesCount: images.length - videos.length,
+        videosCount: videos.length,
+        totalMedia: images.length,
+        hasReferenceImages: !!(enquiry?.ReferenceImages || originalData?.ReferenceImages),
+        hasReferenceVideos: !!(enquiry?.ReferenceVideos || originalData?.ReferenceVideos),
+        coralVideoCount: coralVideoCount,
+        cadVideoCount: cadVideoCount,
+        sampleImage: sampleMeta ? {
+          type: typeof sampleMeta.image,
+          keys: typeof sampleMeta.image === 'object' ? Object.keys(sampleMeta.image) : [],
+          isVideo: sampleMeta.isVideo,
+        } : null,
+      });
+    }
+
+    // If only one media item, show it without slider
     if (images.length === 1) {
       const meta = buildImageMeta(images[0]);
 
     return (
       <Card style={styles.imagesCard}>
         <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
-          Reference Images
+          Reference Images/Videos
           </Text>
+          {meta.isVideo ? (
+            <VideoWithFallback
+              image={meta.image}
+              imageKey={meta.imageKey}
+              imageId={meta.imageId}
+              imageUri={meta.imageUri}
+              index={0}
+              onPress={(uri) => handleImagePress(uri, 0, [meta])}
+            />
+          ) : (
           <ImageWithFallback
             image={meta.image}
             imageKey={meta.imageKey}
@@ -1782,24 +2408,38 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             initialDataUri={meta.cachedUri}
             onPress={(uri) => handleImagePress(uri, 0, [meta])}
           />
+          )}
         </Card>
       );
     }
 
-    // Build array of image data for the modal slider
+    // Build array of media data for the modal slider
     const imageDataForModal = images.map(buildImageMeta);
 
     return (
       <Card style={styles.imagesCard}>
         <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
-          Reference Images {images.length > 1 ? `(${images.length})` : ''}
+          Reference Images/Videos {images.length > 1 ? `(${images.length})` : ''}
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {images.map((image, index) => {
             const meta = imageDataForModal[index] || buildImageMeta(image);
             return (
+              <React.Fragment key={index}>
+                {meta.isVideo ? (
+                  <VideoWithFallback
+                    image={meta.image}
+                    imageKey={meta.imageKey}
+                    imageId={meta.imageId}
+                    imageUri={meta.imageUri}
+                    index={index}
+                    onPress={(uri) => {
+                      // Pass all media data to modal for slider
+                      handleImagePress(uri, index, imageDataForModal);
+                    }}
+                  />
+                ) : (
               <ImageWithFallback
-                key={index}
                 image={meta.image}
                 imageKey={meta.imageKey}
                 imageId={meta.imageId}
@@ -1807,10 +2447,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 index={index}
                 initialDataUri={meta.cachedUri}
                 onPress={(uri) => {
-                  // Pass all image data to modal for slider
+                      // Pass all media data to modal for slider
                   handleImagePress(uri, index, imageDataForModal);
                 }}
               />
+                )}
+              </React.Fragment>
             );
           })}
         </ScrollView>
@@ -2222,6 +2864,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               <Icon name="close" size={24} color={colors.textWhite} />
             </TouchableOpacity>
             
+            {/* Share button - positioned with high z-index */}
+            <TouchableOpacity 
+              style={styles.fullscreenImageShareButton} 
+              onPress={handleShareToWhatsApp}
+              activeOpacity={0.7}
+              disabled={isSharing}
+            >
+              {isSharing ? (
+                <AnimatedLogoLoader size="small" />
+              ) : (
+                <Icon name="share" size={24} color={colors.textWhite} />
+              )}
+            </TouchableOpacity>
+            
             {modalImages.length > 1 ? (
               <>
                 {/* Image Counter */}
@@ -2231,12 +2887,32 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                   </Text>
                 </View>
                 
-                {/* Slider for multiple images with zoom */}
+                {/* Slider for multiple images/videos with zoom */}
                 <FlatList
                   ref={modalFlatListRef}
                   data={modalImages}
-                  renderItem={({ item, index }) => (
+                  renderItem={({ item, index }) => {
+                    // For videos, we need to fetch the URL if not available
+                    const videoUrl = item.isVideo ? (item.imageUri || item.cachedUri || selectedImageUri) : null;
+                    
+                    return (
                     <View style={styles.modalImageContainer}>
+                        {item.isVideo ? (
+                          videoUrl ? (
+                            <Video
+                              source={{ uri: videoUrl }}
+                              style={styles.fullscreenVideo}
+                              controls={true}
+                              resizeMode="contain"
+                              paused={false}
+                            />
+                          ) : (
+                            <View style={styles.videoPlaceholder}>
+                              <AnimatedLogoLoader size="small" />
+                              <Text style={styles.videoLoadingText}>Loading video...</Text>
+                            </View>
+                          )
+                        ) : (
                       <ImageZoom
                         cropWidth={screenWidth}
                         cropHeight={screenHeight}
@@ -2259,8 +2935,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                         onPress={null} // No click handler in modal
                       />
                       </ImageZoom>
-                    </View>
                   )}
+                      </View>
+                    );
+                  }}
                   horizontal
                   pagingEnabled
                   showsHorizontalScrollIndicator={false}
@@ -2317,8 +2995,17 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 </View>
               </>
             ) : (
-              /* Single image with zoom */
+              /* Single image/video with zoom */
               <View style={styles.modalImageContainer}>
+                {modalImages[0]?.isVideo ? (
+                  <Video
+                    source={{ uri: selectedImageUri }}
+                    style={styles.fullscreenVideo}
+                    controls={true}
+                    resizeMode="contain"
+                    paused={false}
+                  />
+                ) : (
                 <ImageZoom
                   cropWidth={screenWidth}
                   cropHeight={screenHeight}
@@ -2339,6 +3026,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               cacheEnabled={false}
             />
                 </ImageZoom>
+                )}
               </View>
             )}
           </View>
@@ -2726,6 +3414,64 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 4,
+  },
+  fullscreenImageShareButton: {
+    position: 'absolute',
+    top: 40,
+    right: 80,
+    padding: 12,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 1000,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+  },
+  videoContainer: {
+    marginRight: 12,
+    width: 150,
+    height: 150,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: colors.backgroundSecondary,
+    position: 'relative',
+  },
+  referenceVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  videoPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSecondary,
+  },
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  videoLoadingText: {
+    marginTop: 8,
+    fontSize: fonts.sm,
+    color: colors.textSecondary,
+  },
+  videoErrorText: {
+    marginTop: 8,
+    fontSize: fonts.sm,
+    color: colors.error,
+  },
+  fullscreenVideo: {
+    width: '100%',
+    height: '100%',
   },
   adminActionsCard: {
     borderWidth: 1,

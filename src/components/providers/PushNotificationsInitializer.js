@@ -19,6 +19,22 @@ const PushNotificationsInitializer = () => {
             } else if (normalizedLink.startsWith('enquiries/')) {
               const enquiryId = normalizedLink.split('/')[1];
               navigationRef.navigate('SingleEnquiry', { enquiryId });
+              } else if (normalizedLink.startsWith('chats/')) {
+                // Handle chat notification: chats/{chatId}
+                const parts = normalizedLink.split('/');
+                const chatId = parts[1];
+                const enquiryId = detail.notification?.data?.enquiryId || detail.notification?.data?.EnquiryId;
+                const chatType = detail.notification?.data?.chatType || detail.notification?.data?.ChatType;
+                
+                if (chatId) {
+                  navigationRef.navigate('ChatDetail', {
+                    chatId: chatId,
+                    enquiryId: enquiryId,
+                    chatType: chatType,
+                  });
+                } else {
+                  navigationRef.navigate('Notifications');
+                }
             } else {
               navigationRef.navigate('Notifications');
             }
@@ -30,7 +46,9 @@ const PushNotificationsInitializer = () => {
     });
 
     return () => {
-      unsubscribe();
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
     };
   }, []);
 

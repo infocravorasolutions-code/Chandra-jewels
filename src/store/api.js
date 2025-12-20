@@ -726,6 +726,26 @@ export const api = createApi({
           images = normalizeImages(enquiry.images);
         }
         
+        // Also check for ReferenceVideos (videos might be stored separately by backend)
+        let videos = [];
+        if (enquiry?.ReferenceVideos && Array.isArray(enquiry.ReferenceVideos) && enquiry.ReferenceVideos.length > 0) {
+          videos = normalizeImages(enquiry.ReferenceVideos);
+        } else if (enquiry?.Videos && Array.isArray(enquiry.Videos) && enquiry.Videos.length > 0) {
+          videos = normalizeImages(enquiry.Videos);
+        }
+        
+        // Debug logging to see what backend returns
+        if (__DEV__) {
+          console.log('🔍 [getEnquiryById] Media data from backend:', {
+            hasReferenceImages: !!(enquiry?.ReferenceImages && Array.isArray(enquiry.ReferenceImages)),
+            referenceImagesCount: enquiry?.ReferenceImages?.length || 0,
+            hasReferenceVideos: !!(enquiry?.ReferenceVideos && Array.isArray(enquiry.ReferenceVideos)),
+            referenceVideosCount: enquiry?.ReferenceVideos?.length || 0,
+            imagesNormalized: images.length,
+            videosNormalized: videos.length,
+          });
+        }
+        
         if (images.length === 0 && enquiry?.Coral && Array.isArray(enquiry.Coral) && enquiry.Coral.length > 0) {
           const latestCoral = enquiry.Coral[enquiry.Coral.length - 1];
           if (latestCoral?.Images && Array.isArray(latestCoral.Images) && latestCoral.Images.length > 0) {
@@ -781,6 +801,9 @@ export const api = createApi({
           // CRITICAL: Preserve Coral and Cad arrays with Pricing data
           Coral: enquiry?.Coral || [],
           Cad: enquiry?.Cad || [],
+          // Preserve ReferenceVideos if they exist
+          ReferenceVideos: enquiry?.ReferenceVideos || [],
+          Videos: enquiry?.Videos || [],
           _originalData: enquiry,
         };
         } catch (transformError) {
@@ -1513,41 +1536,249 @@ export const api = createApi({
           // Create FormData
           const formData = new FormData();
           
-          // Add version as text
-          formData.append('version', version.toString());
-          
-          // Add design code (CoralCode or CadCode) if provided
-          if (designCode && designCode.trim()) {
-            if (designType === 'coral') {
-              formData.append('CoralCode', designCode.trim());
-            } else if (designType === 'cad') {
-              formData.append('CadCode', designCode.trim());
+          // Helper function to detect if a file is a video
+          const isVideoFile = (file) => {
+            if (file.type) {
+              return file.type.startsWith('video/');
             }
+            if (file.name) {
+              return /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i.test(file.name);
+            }
+            return false;
+          };
+          
+          // Log input parameters BEFORE processing
+          if (__DEV__) {
+            console.log('🔍 [uploadDesign] Input parameters:', {
+              enquiryId,
+              designType,
+              version: version,
+              versionType: typeof version,
+              imagesCount: images?.length || 0,
+              images: images?.map(img => ({
+                uri: img.uri?.substring(0, 50) + '...',
+                type: img.type,
+                name: img.name,
+                hasWidth: 'width' in img,
+                hasHeight: 'height' in img,
+                hasFileSize: 'fileSize' in img,
+                hasSize: 'size' in img,
+                allKeys: Object.keys(img || {}),
+              })) || [],
+              hasExcel: !!excel,
+              excel: excel ? {
+                uri: excel.uri?.substring(0, 50) + '...',
+                type: excel.type,
+                name: excel.name,
+                allKeys: Object.keys(excel || {}),
+              } : null,
+              designCode,
+            });
           }
           
-          // Add images as files
+          // Add version - backend might expect just the number, not "Version X" format
+          // Extract numeric version value
+          let versionValue = version;
+          if (typeof version === 'string') {
+            // If it's "Version 1" format, extract the number
+            const match = version.match(/\d+/);
+            if (match) {
+              versionValue = parseInt(match[0], 10);
+            } else {
+              // Try to parse as number
+              const parsed = parseInt(version, 10);
+              versionValue = isNaN(parsed) ? 1 : parsed;
+            }
+          } else if (typeof version === 'number') {
+            versionValue = version;
+          } else {
+            versionValue = 1; // Default
+          }
+          
+          if (__DEV__) {
+            console.log('🔍 [uploadDesign] Version processing:', {
+              originalVersion: version,
+              processedVersion: versionValue,
+              versionString: versionValue.toString(),
+            });
+          }
+          
+          // Send as string but ensure it's a valid number string
+          formData.append('version', versionValue.toString());
+          
+          // Add design code - backend expects field name 'code' (not CoralCode/CadCode)
+          // Backend determines type from endpoint URL (/upload/coral vs /upload/cad)
+          if (designCode && designCode.trim()) {
+            formData.append('code', designCode.trim());
+          }
+          
+          // Separate images and videos - backend expects them in separate fields
+          const imageFiles = [];
+          const videoFiles = [];
+          
+          // Backend accepted video formats per spec
+          const ACCEPTED_VIDEO_TYPES = [
+            'video/mp4',
+            'video/mpeg',
+            'video/quicktime',  // MOV
+            'video/x-msvideo',  // AVI
+            'video/webm'
+          ];
+          
+          // Validate video file before processing
+          const validateVideoFile = (file) => {
+            if (!file.uri) {
+              throw new Error('Video file URI is missing');
+          }
+          
+            // Check MIME type if available
+            if (file.type && !ACCEPTED_VIDEO_TYPES.includes(file.type)) {
+              // Log warning but don't fail - backend will handle validation
+              if (__DEV__) {
+                console.warn(`⚠️ [uploadDesign] Video type ${file.type} may not be fully supported by backend`);
+              }
+            }
+            
+            return true;
+          };
+          
           if (images && images.length > 0) {
             images.forEach((image, index) => {
-              formData.append('images', {
-                uri: image.uri,
-                type: image.type || 'image/jpeg',
-                name: image.name || `image_${index}_${Date.now()}.jpg`,
+              const isVideo = isVideoFile(image);
+              const defaultType = isVideo ? 'video/mp4' : 'image/jpeg';
+              const defaultExtension = isVideo ? 'mp4' : 'jpg';
+              const defaultName = `file_${index}_${Date.now()}.${defaultExtension}`;
+              
+              // Validate video files
+              if (isVideo) {
+                try {
+                  validateVideoFile(image);
+                } catch (validationError) {
+                  if (__DEV__) {
+                    console.error(`❌ [uploadDesign] Video validation failed for file ${index}:`, validationError);
+                  }
+                  // Skip invalid videos
+                  return;
+                }
+              }
+              
+              // Create a clean file object with ONLY required fields
+              // Use Object.create(null) to ensure no prototype properties leak through
+              // This prevents any extra metadata from being included
+              // CRITICAL: Only include uri, type, and name - nothing else!
+              const fileObject = Object.create(null);
+              fileObject.uri = String(image.uri || ''); // Ensure it's a string
+              fileObject.type = String(image.type || defaultType); // Ensure it's a string
+              fileObject.name = String(image.name || defaultName); // Ensure it's a string
+              
+              // Explicitly delete any potential extra properties (defensive)
+              // This shouldn't be necessary but ensures nothing leaks through
+              const allowedKeys = ['uri', 'type', 'name'];
+              Object.keys(fileObject).forEach(key => {
+                if (!allowedKeys.includes(key)) {
+                  delete fileObject[key];
+                }
               });
+              
+              // Log each file object being created
+              if (__DEV__) {
+                console.log(`🔍 [uploadDesign] File ${index} (${isVideo ? 'VIDEO' : 'IMAGE'}):`, {
+                  originalImage: {
+                    uri: image.uri?.substring(0, 50) + '...',
+                    type: image.type,
+                    name: image.name,
+                    allKeys: Object.keys(image || {}),
+                    hasFileSize: 'fileSize' in (image || {}),
+                    hasDuration: 'duration' in (image || {}),
+                    hasWidth: 'width' in (image || {}),
+                    hasHeight: 'height' in (image || {}),
+                    fileSize: image.fileSize,
+                    duration: image.duration,
+                    width: image.width,
+                    height: image.height,
+                    // Log ALL properties to see what React Native image picker returns
+                    fullOriginalImage: image,
+                  },
+                  fileObject: {
+                    uri: fileObject.uri?.substring(0, 50) + '...',
+                    type: fileObject.type,
+                    name: fileObject.name,
+                    allKeys: Object.keys(fileObject),
+                    // Log the exact object being sent to FormData
+                    fullFileObject: fileObject,
+                  },
+                });
+              }
+              
+              // Send videos in 'videos' field, images in 'images' field
+              if (isVideo) {
+                // For videos, ensure we're using the correct MIME type
+                // Backend expects: video/mp4, video/mpeg, video/quicktime, video/x-msvideo, video/webm
+                if (fileObject.type && !fileObject.type.match(/^video\/(mp4|mpeg|quicktime|x-msvideo|webm)$/i)) {
+                  // If type doesn't match accepted formats, default to mp4
+                  fileObject.type = 'video/mp4';
+                  if (__DEV__) {
+                    console.warn(`⚠️ [uploadDesign] Video type adjusted to video/mp4 for file: ${fileObject.name}`);
+                  }
+                }
+                formData.append('videos', fileObject);
+                videoFiles.push(fileObject);
+              } else {
+                formData.append('images', fileObject);
+                imageFiles.push(fileObject);
+              }
             });
           }
           
           // Add Excel file if provided
           if (excel) {
-            formData.append('excel', {
+            const excelObject = {
               uri: excel.uri,
               type: excel.type || 'application/vnd.ms-excel',
               name: excel.name || `excel_${Date.now()}.xlsx`,
-            });
+            };
+            
+            if (__DEV__) {
+              console.log('🔍 [uploadDesign] Excel file:', {
+                originalExcel: {
+                  uri: excel.uri?.substring(0, 50) + '...',
+                  type: excel.type,
+                  name: excel.name,
+                  allKeys: Object.keys(excel || {}),
+                },
+                excelObject: {
+                  uri: excelObject.uri?.substring(0, 50) + '...',
+                  type: excelObject.type,
+                  name: excelObject.name,
+                  allKeys: Object.keys(excelObject),
+                },
+              });
+            }
+            
+            formData.append('excel', excelObject);
           }
 
           const endpoint = `/api/enquiries/${enquiryId}/upload/${designType}`;
           
-          
+          // Debug logging to see what we're sending
+          if (__DEV__) {
+            console.log('📤 [uploadDesign] Final FormData summary:', {
+              endpoint: `${API_BASE_URL}${endpoint}`,
+              designType,
+              version: versionValue.toString(),
+              imagesCount: imageFiles.length,
+              videosCount: videoFiles.length,
+              hasExcel: !!excel,
+              designCode,
+              formDataFields: {
+                version: versionValue.toString(),
+                ...(designCode ? { code: designCode.trim() } : {}),
+                images: `${imageFiles.length} files`,
+                videos: `${videoFiles.length} files`,
+                ...(excel ? { excel: '1 file' } : {}),
+              },
+            });
+          }
 
           const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
@@ -1561,37 +1792,119 @@ export const api = createApi({
           if (response.ok) {
             const data = await response.json();
             
+            if (__DEV__) {
+              console.log('✅ [uploadDesign] Success:', {
+                status: response.status,
+                data,
+              });
+            }
+            
             return { data };
           } else {
             let errorData;
-            try {
-              const errorText = await response.text();
+              let errorText = '';
+              try {
+                errorText = await response.text();
+                
+                // Try to extract error message from HTML if it's an HTML error page
+                let extractedError = null;
+                if (errorText && errorText.includes('<!DOCTYPE html>')) {
+                  // Try to extract error message from HTML
+                  const errorMatch = errorText.match(/<title[^>]*>([^<]+)<\/title>/i) || 
+                                    errorText.match(/<h1[^>]*>([^<]+)<\/h1>/i) ||
+                                    errorText.match(/<p[^>]*>([^<]+)<\/p>/i) ||
+                                    errorText.match(/Error[:\s]+([^<\n]+)/i);
+                  if (errorMatch && errorMatch[1]) {
+                    extractedError = errorMatch[1].trim();
+                  }
+                  
+                  // Also try to find Java stack traces or error messages
+                  const javaErrorMatch = errorText.match(/(?:Exception|Error|at\s+[\w\.]+\([^\)]+\))/g);
+                  if (javaErrorMatch) {
+                    extractedError = javaErrorMatch[0] + (extractedError ? ` - ${extractedError}` : '');
+                  }
+                }
+                
+                // Try to parse as JSON first
+                try {
               errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
+                } catch (jsonError) {
+                  // If not JSON, use extracted error or raw text
+                  errorData = { 
+                    message: extractedError || errorText || `Upload failed with status ${response.status}`,
+                    rawError: errorText,
+                    isHtmlError: errorText.includes('<!DOCTYPE html>'),
+                  };
+                }
             } catch (parseError) {
               errorData = { message: `Upload failed with status ${response.status}` };
             }
             
             if (__DEV__) {
-              console.error(`❌ Error details:`, {
+              // Extract Java exceptions and stack traces from HTML error
+              const javaExceptions = errorText.match(/(?:java\.|Exception|Error|NumberFormatException|NullPointerException|IllegalArgumentException|at\s+[\w\.]+\([^\)]+\))/gi) || [];
+              const stackTrace = errorText.match(/at\s+[\w\.]+\([^\)]+\)/gi) || [];
+              
+              console.error(`❌ [uploadDesign] Error details:`, {
+                status: response.status,
+                statusText: response.statusText,
                 enquiryId,
                 designType,
-                version,
-                hasImages: !!(images && images.length > 0),
-                imagesCount: images?.length || 0,
+                version: versionValue.toString(),
+                versionOriginal: version,
+                imagesCount: imageFiles.length,
+                videosCount: videoFiles.length,
                 hasExcel: !!excel,
                 excelFileName: excel?.name || 'N/A',
-                errorMessage: errorData?.message || errorData?.error || 'Unknown error',
+                errorTextPreview: errorText.substring(0, 500), // First 500 chars
+                errorMessage: errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error',
+                isHtmlError: errorData?.isHtmlError || errorText.includes('<!DOCTYPE html>'),
+                javaExceptions: javaExceptions.slice(0, 10), // First 10 exceptions
+                stackTrace: stackTrace.slice(0, 5), // First 5 stack trace lines
+                fullErrorData: errorData,
+              });
+              
+              // Also log the full error text separately for detailed debugging
+              console.error(`❌ [uploadDesign] Full error text (first 2000 chars):`, errorText.substring(0, 2000));
+              
+              // Log what we're sending
+              console.error(`❌ [uploadDesign] What we sent:`, {
+                endpoint: `${API_BASE_URL}${endpoint}`,
+                method: 'POST',
+                formDataFields: {
+                  version: versionValue.toString(),
+                  ...(designCode ? { code: designCode.trim() } : {}),
+                  videos: videoFiles.map(f => ({ uri: f.uri?.substring(0, 50) + '...', type: f.type, name: f.name })),
+                  images: imageFiles.map(f => ({ uri: f.uri?.substring(0, 50) + '...', type: f.type, name: f.name })),
+                  ...(excel ? { excel: { uri: excel.uri?.substring(0, 50) + '...', type: excel.type, name: excel.name } } : {}),
+                },
               });
             }
             
             // Provide more helpful error message for common backend errors
-            let userFriendlyMessage = errorData?.message || errorData?.error || 'Upload failed';
-            if (errorData?.error && typeof errorData.error === 'string') {
+            let userFriendlyMessage = errorData?.message || errorData?.error || errorData?.rawError || 'Upload failed';
+            
+            // Handle HTML error pages (500 errors from backend)
+            if (errorData?.isHtmlError || (errorText && errorText.includes('<!DOCTYPE html>'))) {
+              // Try to extract meaningful error from HTML
+              const htmlErrorMatch = errorText.match(/(?:Exception|Error|at\s+[\w\.]+\([^\)]+\)|NumberFormatException|For input string[^<\n]+|NullPointerException|IllegalArgumentException)/i);
+              if (htmlErrorMatch) {
+                const extractedError = htmlErrorMatch[0];
+                userFriendlyMessage = `Server error: ${extractedError}\n\nThe backend encountered an error processing your video file. This usually means:\n\n1. Video codec or format not fully supported\n2. File metadata cannot be read\n3. Video file is corrupted\n\nPlease try:\n- Converting video to MP4 (H.264 codec)\n- Using a different video file\n- Recording a new video on your device`;
+              } else {
+                userFriendlyMessage = 'Server error (500): The backend encountered an error processing your video.\n\nPossible causes:\n1. Video codec not supported (try MP4 with H.264)\n2. File metadata issues\n3. Video file corruption\n\nSolutions:\n- Convert video to MP4 format\n- Try a different video file\n- Record a new video on your device\n- Contact support if issue persists';
+              }
+            } else if (errorData?.error && typeof errorData.error === 'string') {
               if (errorData.error.includes('Pricing')) {
                 userFriendlyMessage = 'Excel file processing error: Pricing data is missing or invalid. Please ensure your Excel file contains the required pricing columns and try again.';
               } else if (errorData.error.includes('null')) {
                 userFriendlyMessage = 'Server error: Missing data. Please check that all required fields are provided and try again.';
+              } else if (errorData.error.includes('For input string') || errorText.includes('For input string')) {
+                // Java NumberFormatException - backend trying to parse string as number
+                userFriendlyMessage = `Upload error: ${errorData.error || errorText}. This may be caused by file metadata. Please try selecting the file again or contact support.`;
               }
+            } else if (errorText && errorText.includes('For input string')) {
+              userFriendlyMessage = `Upload error: ${errorText}. This may be caused by file metadata. Please try selecting the file again or contact support.`;
             }
             
             return {
@@ -1832,21 +2145,120 @@ export const api = createApi({
             };
           }
 
-          // Create FormData
-          const formData = new FormData();
+          // Helper function to detect if a file is a video
+          const isVideoFile = (file) => {
+            if (file.type) {
+              return file.type.startsWith('video/');
+            }
+            if (file.name) {
+              return /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i.test(file.name);
+            }
+            return false;
+          };
           
-          // Add images as files - use 'images' field name as per client requirement
-          if (images && images.length > 0) {
-            images.forEach((image, index) => {
-              formData.append('images', {
-                uri: image.uri,
-                type: image.type || 'image/jpeg',
-                name: image.name || `image_${index}_${Date.now()}.jpg`,
-              });
+          // Log input parameters BEFORE processing
+          if (__DEV__) {
+            console.log('🔍 [uploadReferenceImages] Input parameters:', {
+              enquiryId,
+              imagesCount: images?.length || 0,
+              images: images?.map(img => ({
+                uri: img.uri?.substring(0, 50) + '...',
+                type: img.type,
+                name: img.name,
+                hasWidth: 'width' in img,
+                hasHeight: 'height' in img,
+                hasFileSize: 'fileSize' in img,
+                hasSize: 'size' in img,
+                allKeys: Object.keys(img || {}),
+              })) || [],
             });
           }
+          
+          // Separate images and videos
+          const imageFiles = [];
+          const videoFiles = [];
+          
+          if (images && images.length > 0) {
+            images.forEach((image, index) => {
+              const isVideo = isVideoFile(image);
+              const defaultType = isVideo ? 'video/mp4' : 'image/jpeg';
+              const defaultExtension = isVideo ? 'mp4' : 'jpg';
+              const defaultName = `file_${index}_${Date.now()}.${defaultExtension}`;
+              
+              // Create a clean file object with ONLY required fields
+              // Explicitly create new object to avoid any prototype pollution or extra properties
+              // CRITICAL: Only include uri, type, and name - nothing else!
+              const fileObject = Object.create(null); // Creates object with no prototype
+              fileObject.uri = String(image.uri || ''); // Ensure it's a string
+              fileObject.type = String(image.type || defaultType); // Ensure it's a string
+              fileObject.name = String(image.name || defaultName); // Ensure it's a string
+              
+              // Explicitly delete any potential extra properties (defensive)
+              // This shouldn't be necessary but ensures nothing leaks through
+              const allowedKeys = ['uri', 'type', 'name'];
+              Object.keys(fileObject).forEach(key => {
+                if (!allowedKeys.includes(key)) {
+                  delete fileObject[key];
+                }
+              });
+              
+              // Log each file object being created
+              if (__DEV__) {
+                console.log(`🔍 [uploadReferenceImages] File ${index} (${isVideo ? 'VIDEO' : 'IMAGE'}):`, {
+                  originalImage: {
+                    uri: image.uri?.substring(0, 50) + '...',
+                    type: image.type,
+                    name: image.name,
+                    allKeys: Object.keys(image || {}),
+                    hasFileSize: 'fileSize' in (image || {}),
+                    hasDuration: 'duration' in (image || {}),
+                    hasWidth: 'width' in (image || {}),
+                    hasHeight: 'height' in (image || {}),
+                  },
+                  fileObject: {
+                    uri: fileObject.uri?.substring(0, 50) + '...',
+                    type: fileObject.type,
+                    name: fileObject.name,
+                    allKeys: Object.keys(fileObject),
+                  },
+                });
+              }
+              
+              if (isVideo) {
+                videoFiles.push(fileObject);
+              } else {
+                imageFiles.push(fileObject);
+              }
+            });
+          }
+          
+          if (__DEV__) {
+            console.log('🔍 [uploadReferenceImages] Separated files:', {
+              imageFilesCount: imageFiles.length,
+              videoFilesCount: videoFiles.length,
+              });
+          }
+          
+          // Upload images if any
+          if (imageFiles.length > 0) {
+            const formData = new FormData();
+            imageFiles.forEach((file) => {
+              formData.append('images', file);
+            });
 
           const endpoint = `/api/enquiries/${enquiryId}/upload/reference`;
+            
+            if (__DEV__) {
+              console.log('📤 [uploadReferenceImages] Uploading images:', {
+                endpoint: `${API_BASE_URL}${endpoint}`,
+                imagesCount: imageFiles.length,
+                imageFiles: imageFiles.map(f => ({
+                  uri: f.uri?.substring(0, 50) + '...',
+                  type: f.type,
+                  name: f.name,
+                })),
+              });
+            }
           
           const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
@@ -1859,15 +2271,40 @@ export const api = createApi({
 
           if (response.ok) {
             const data = await response.json();
-            return { data };
+              if (__DEV__) {
+                console.log('✅ [uploadReferenceImages] Images uploaded successfully:', {
+                  status: response.status,
+                  data,
+                });
+              }
           } else {
             let errorData;
+              let errorText = '';
             try {
-              const errorText = await response.text();
+                errorText = await response.text();
+                try {
               errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
+                } catch (jsonError) {
+                  errorData = { 
+                    message: errorText || `Upload failed with status ${response.status}`,
+                    rawError: errorText 
+                  };
+                }
             } catch (parseError) {
               errorData = { message: `Upload failed with status ${response.status}` };
             }
+              
+              if (__DEV__) {
+                console.error('❌ [uploadReferenceImages] Images upload error:', {
+                  status: response.status,
+                  statusText: response.statusText,
+                  imagesCount: imageFiles.length,
+                  errorText: errorText.substring(0, 500), // First 500 chars
+                  errorMessage: errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error',
+                  fullErrorData: errorData,
+                  errorTextFull: errorText, // Full error text
+                });
+              }
             
             return {
               error: {
@@ -1876,6 +2313,105 @@ export const api = createApi({
               },
             };
           }
+          }
+          
+          // Upload videos separately if any
+          if (videoFiles.length > 0) {
+            const videoFormData = new FormData();
+            videoFiles.forEach((file) => {
+              videoFormData.append('videos', file);
+            });
+            
+            const videoEndpoint = `/api/enquiries/${enquiryId}/upload/videos`;
+            
+            if (__DEV__) {
+              console.log('📤 [uploadReferenceImages] Uploading videos:', {
+                endpoint: `${API_BASE_URL}${videoEndpoint}`,
+                videosCount: videoFiles.length,
+                videoFiles: videoFiles.map(f => ({
+                  uri: f.uri?.substring(0, 50) + '...',
+                  type: f.type,
+                  name: f.name,
+                })),
+              });
+            }
+            
+            const videoResponse = await fetch(`${API_BASE_URL}${videoEndpoint}`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                // Don't set Content-Type - let fetch set it with boundary for FormData
+              },
+              body: videoFormData,
+            });
+            
+            if (videoResponse.ok) {
+              const data = await videoResponse.json();
+              if (__DEV__) {
+                console.log('✅ [uploadReferenceImages] Videos uploaded successfully:', {
+                  status: videoResponse.status,
+                  data,
+                });
+              }
+            } else {
+              let errorData;
+              let errorText = '';
+              try {
+                errorText = await videoResponse.text();
+                try {
+                  errorData = errorText ? JSON.parse(errorText) : { message: 'Video upload failed' };
+                } catch (jsonError) {
+                  errorData = { 
+                    message: errorText || `Video upload failed with status ${videoResponse.status}`,
+                    rawError: errorText 
+                  };
+                }
+                
+                // Handle "For input string" errors specifically
+                if (errorText && (errorText.includes('For input string') || errorData?.error?.includes('For input string'))) {
+                  errorData.userFriendlyMessage = `Video upload error: ${errorText}. This may be caused by file metadata. Please try selecting the video again.`;
+                  errorData.message = errorData.userFriendlyMessage;
+                }
+              } catch (parseError) {
+                errorData = { message: `Video upload failed with status ${videoResponse.status}` };
+              }
+              
+              if (__DEV__) {
+                console.error('❌ [uploadReferenceImages] Videos upload error:', {
+                  status: videoResponse.status,
+                  statusText: videoResponse.statusText,
+                  videosCount: videoFiles.length,
+                  errorText: errorText.substring(0, 500), // First 500 chars
+                  errorMessage: errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error',
+                  fullErrorData: errorData,
+                  errorTextFull: errorText, // Full error text
+                  videoFiles: videoFiles.map(f => ({
+                    uri: f.uri?.substring(0, 50) + '...',
+                    type: f.type,
+                    name: f.name,
+                    allKeys: Object.keys(f),
+                  })),
+                });
+              }
+              
+              return {
+                error: {
+                  status: videoResponse.status,
+                  data: errorData,
+                },
+              };
+            }
+          }
+          
+          // Return success if we got here (both uploads succeeded or were skipped)
+          if (__DEV__) {
+            console.log('✅ [uploadReferenceImages] All uploads completed:', {
+              imagesUploaded: imageFiles.length,
+              videosUploaded: videoFiles.length,
+            });
+          }
+          
+          return { data: { success: true, imagesUploaded: imageFiles.length, videosUploaded: videoFiles.length } };
         } catch (error) {
           return {
             error: {
@@ -2193,6 +2729,43 @@ export const api = createApi({
         },
       }),
       invalidatesTags: ['MetalPrice'],
+    }),
+
+    // Get full metal price history (all entries, not just latest)
+    getMetalPriceHistory: builder.query({
+      query: (useCache = false) => {
+        const cacheBuster = useCache ? '' : `?t=${Date.now()}`;
+        return `/api/metal-prices${cacheBuster}`;
+      },
+      providesTags: ['MetalPrice'],
+      transformResponse: (data) => {
+        // Backend returns: { gold: [{date, price}, ...], silver: [...], platinum: [...] }
+        if (data && typeof data === 'object') {
+          const history = {};
+          const metals = ['gold', 'silver', 'platinum'];
+          
+          metals.forEach(metal => {
+            const metalData = data[metal];
+            if (Array.isArray(metalData) && metalData.length > 0) {
+              // Sort by date (oldest first)
+              history[metal] = [...metalData].sort((a, b) => {
+                const dateA = new Date(a.date || a.Date || 0);
+                const dateB = new Date(b.date || b.Date || 0);
+                return dateA - dateB;
+              }).map(item => ({
+                date: item.date || item.Date,
+                price: item.price || item.Price || 0,
+              }));
+            } else {
+              history[metal] = [];
+            }
+          });
+          
+          return history;
+        }
+        
+        return { gold: [], silver: [], platinum: [] };
+      },
     }),
 
     // ==================== PRICING CALCULATION ====================
@@ -2551,6 +3124,8 @@ export const api = createApi({
           
           // Handle LastMessage - it can be an object or a string
           let lastMessageText = '';
+          let lastMessageSenderName = '';
+          let lastMessageSenderId = '';
           const lastMessageObj = chat.LastMessage || chat.lastMessage;
           if (lastMessageObj) {
             if (typeof lastMessageObj === 'string') {
@@ -2562,39 +3137,190 @@ export const api = createApi({
                                lastMessageObj.text || 
                                lastMessageObj.Text || 
                                '';
+              // Backend sends Sender as object { _id: ..., name: ... } or as string, or SenderName as string
+              if (lastMessageObj.Sender && typeof lastMessageObj.Sender === 'object') {
+                lastMessageSenderName = lastMessageObj.Sender.name || lastMessageObj.Sender.Name || '';
+                lastMessageSenderId = lastMessageObj.Sender._id || lastMessageObj.Sender.Id || lastMessageObj.Sender.id || '';
+                if (__DEV__ && !lastMessageSenderName && lastMessageSenderId) {
+                  console.log('[API] LastMessage.Sender object has _id but no name:', {
+                    senderObj: lastMessageObj.Sender,
+                    senderId: lastMessageSenderId,
+                  });
+                }
+              } else if (typeof lastMessageObj.Sender === 'string') {
+                // Backend sends Sender as string (the name)
+                lastMessageSenderName = lastMessageObj.Sender;
+              } else {
+                // Try SenderName field (backend might send this separately)
+                lastMessageSenderName = lastMessageObj.SenderName || lastMessageObj.senderName || lastMessageObj.sender || '';
+              }
+              // Also check for SenderId at LastMessage level (backend sends this separately)
+              lastMessageSenderId = lastMessageSenderId || lastMessageObj.SenderId || lastMessageObj.senderId || '';
+              
+              if (__DEV__) {
+                if (lastMessageSenderName) {
+                  console.log('[API] ✅ Extracted sender name from LastMessage:', {
+                    senderName: lastMessageSenderName,
+                    senderId: lastMessageSenderId,
+                    source: typeof lastMessageObj.Sender === 'string' ? 'Sender (string)' : 
+                            typeof lastMessageObj.Sender === 'object' ? 'Sender (object)' :
+                            lastMessageObj.SenderName ? 'SenderName' : 'other',
+                  });
+                } else if (lastMessageSenderId) {
+                  console.log('[API] ❌ Have SenderId but no name from LastMessage:', {
+                    senderId: lastMessageSenderId,
+                    hasSender: !!lastMessageObj.Sender,
+                    senderType: typeof lastMessageObj.Sender,
+                    senderValue: lastMessageObj.Sender,
+                    hasSenderName: !!lastMessageObj.SenderName,
+                    senderNameValue: lastMessageObj.SenderName,
+                    lastMessageKeys: Object.keys(lastMessageObj),
+                  });
+                }
+              }
             }
           } else {
             lastMessageText = chat.message || '';
           }
           
           // Handle LastSender - it can be an object or a string
-          let lastSenderName = '';
+          // Priority 1: Use extracted name from LastMessage (most reliable)
+          let lastSenderName = lastMessageSenderName || '';
+          let lastSenderId = chat.LastSenderId || chat.lastSenderId || lastMessageSenderId;
           const lastSenderObj = chat.LastSender || chat.lastSender;
-          if (lastSenderObj) {
+          if (lastSenderObj && !lastSenderName) {
             if (typeof lastSenderObj === 'string') {
               lastSenderName = lastSenderObj;
             } else if (typeof lastSenderObj === 'object') {
+              lastSenderId = lastSenderId || lastSenderObj.Id || lastSenderObj._id || lastSenderObj.id || lastSenderObj.SenderId || lastSenderObj.senderId;
               lastSenderName = lastSenderObj.Name || 
                               lastSenderObj.name || 
                               lastSenderObj.SenderName || 
                               lastSenderObj.senderName || 
                               '';
             }
-          } else {
+          } else if (!lastSenderName) {
             lastSenderName = chat.sender || '';
+          }
+          // Fallback to lastMessage sender if available
+          if (!lastSenderId && lastMessageObj && typeof lastMessageObj === 'object') {
+            // Try SenderId field first
+            lastSenderId = lastMessageObj.SenderId || lastMessageObj.senderId;
+            // If Sender is an object, extract _id from it
+            if (!lastSenderId && lastMessageObj.Sender && typeof lastMessageObj.Sender === 'object') {
+              lastSenderId = lastMessageObj.Sender._id || lastMessageObj.Sender.Id || lastMessageObj.Sender.id || '';
+            }
+            // Try to get name from Sender object or SenderName field
+            if (!lastSenderName) {
+              if (lastMessageObj.Sender && typeof lastMessageObj.Sender === 'object') {
+                lastSenderName = lastMessageObj.Sender.Name || lastMessageObj.Sender.name || '';
+              } else if (typeof lastMessageObj.Sender === 'string') {
+                lastSenderName = lastMessageObj.Sender;
+              } else {
+                lastSenderName = lastMessageObj.SenderName || lastMessageObj.senderName || '';
+              }
+            }
+          } else if (!lastSenderName && lastMessageObj && typeof lastMessageObj === 'object') {
+            if (lastMessageObj.Sender && typeof lastMessageObj.Sender === 'object') {
+              lastSenderName = lastMessageObj.Sender.Name || lastMessageObj.Sender.name || '';
+            } else if (typeof lastMessageObj.Sender === 'string') {
+              lastSenderName = lastMessageObj.Sender;
+            } else {
+              lastSenderName = lastMessageObj.SenderName || lastMessageObj.senderName || '';
+            }
+          }
+          // lastMessageSenderName is already prioritized above, so no need to check again here
+          // Fallback: derive sender name from participants by ID
+          if (!lastSenderName && lastSenderId && Array.isArray(chat.Participants || chat.participants)) {
+            const participantsArray = chat.Participants || chat.participants || [];
+            const found = participantsArray.find(p => {
+              const pid = p._id || p.id || p.Id;
+              return pid && String(pid) === String(lastSenderId);
+            });
+            if (found) {
+              lastSenderName = found.Name || found.name || '';
+            }
+          }
+          
+          // Extract unread count from multiple possible field names
+          // Backend may send: UnreadCount, unreadCount, Unread, unread, UnreadMessages, unreadMessages, etc.
+          // Also check nested objects like Unread.Count, Metadata.unreadCount, etc.
+          let unreadCount = 0;
+          let unreadCountSource = 'none';
+          
+          // Direct fields (most common)
+          if (chat.UnreadCount !== undefined && chat.UnreadCount !== null) {
+            unreadCount = Number(chat.UnreadCount) || 0;
+            unreadCountSource = 'UnreadCount';
+          } else if (chat.unreadCount !== undefined && chat.unreadCount !== null) {
+            unreadCount = Number(chat.unreadCount) || 0;
+            unreadCountSource = 'unreadCount';
+          } else if (chat.Unread !== undefined && chat.Unread !== null) {
+            unreadCount = Number(chat.Unread) || 0;
+            unreadCountSource = 'Unread';
+          } else if (chat.unread !== undefined && chat.unread !== null) {
+            unreadCount = Number(chat.unread) || 0;
+            unreadCountSource = 'unread';
+          } else if (chat.UnreadMessages !== undefined && chat.UnreadMessages !== null) {
+            unreadCount = Number(chat.UnreadMessages) || 0;
+            unreadCountSource = 'UnreadMessages';
+          } else if (chat.unreadMessages !== undefined && chat.unreadMessages !== null) {
+            unreadCount = Number(chat.unreadMessages) || 0;
+            unreadCountSource = 'unreadMessages';
+          } else if (chat.UnreadMessageCount !== undefined && chat.UnreadMessageCount !== null) {
+            unreadCount = Number(chat.UnreadMessageCount) || 0;
+            unreadCountSource = 'UnreadMessageCount';
+          } else if (chat.unreadMessageCount !== undefined && chat.unreadMessageCount !== null) {
+            unreadCount = Number(chat.unreadMessageCount) || 0;
+            unreadCountSource = 'unreadMessageCount';
+          }
+          // Check nested objects
+          else if (chat.Unread && typeof chat.Unread === 'object' && chat.Unread.Count !== undefined) {
+            unreadCount = Number(chat.Unread.Count) || 0;
+            unreadCountSource = 'Unread.Count';
+          } else if (chat.unread && typeof chat.unread === 'object' && chat.unread.count !== undefined) {
+            unreadCount = Number(chat.unread.count) || 0;
+            unreadCountSource = 'unread.count';
+          } else if (chat.Metadata && typeof chat.Metadata === 'object' && chat.Metadata.unreadCount !== undefined) {
+            unreadCount = Number(chat.Metadata.unreadCount) || 0;
+            unreadCountSource = 'Metadata.unreadCount';
+          } else if (chat.metadata && typeof chat.metadata === 'object' && chat.metadata.unreadCount !== undefined) {
+            unreadCount = Number(chat.metadata.unreadCount) || 0;
+            unreadCountSource = 'metadata.unreadCount';
+          } else if (chat.Stats && typeof chat.Stats === 'object' && chat.Stats.UnreadCount !== undefined) {
+            unreadCount = Number(chat.Stats.UnreadCount) || 0;
+            unreadCountSource = 'Stats.UnreadCount';
+          } else if (chat.stats && typeof chat.stats === 'object' && chat.stats.unreadCount !== undefined) {
+            unreadCount = Number(chat.stats.unreadCount) || 0;
+            unreadCountSource = 'stats.unreadCount';
+          }
+          
+          // Debug logging for unread count - only log when count > 0 to reduce noise
+          if (__DEV__ && unreadCount > 0) {
+            console.log('[API] ✅ Unread count:', {
+              chatId: chatId,
+              enquiryTitle: chat.EnquiryName || chat.enquiryName || 'Unknown',
+              unreadCount: unreadCount,
+              source: unreadCountSource,
+            });
           }
           
           return {
             id: chatId,
             enquiryId: enquiryId || chat.Enquiry?.id || chat.enquiry?.id,
             enquiryTitle: chat.EnquiryName || chat.enquiryName || chat.EnquiryTitle || chat.enquiryTitle || chat.Enquiry?.Name || chat.Enquiry?.title || 'Untitled Chat',
-            clientName: chat.ClientName || chat.clientName || chat.Client?.Name || chat.client?.name || 'Unknown Client',
+            clientName: chat.ClientName || chat.clientName || chat.Client?.Name || chat.client?.name || '',
             lastMessage: lastMessageText,
             lastMessageTime: lastMessageTime || new Date().toISOString(),
-            unreadCount: chat.UnreadCount || chat.unreadCount || chat.unread || 0,
+            unreadCount: unreadCount, // CRITICAL: Always set unreadCount (even if 0)
+            _originalData: chat, // CRITICAL: Preserve original data for fallback
+            unreadCount: unreadCount,
             isGroup: chat.IsGroup || chat.isGroup || false,
             participants: chat.Participants || chat.participants || [],
             lastSender: lastSenderName,
+            lastSenderId: lastSenderId,
+            lastMessageSenderName: lastMessageSenderName,
+            lastMessageSenderId: lastMessageSenderId,
             status: chat.Status || chat.status || 'active',
             isClient: chat.IsClient || chat.isClient || false,
             // Preserve chat type for filtering (important for role-based chat visibility)
@@ -2777,8 +3503,14 @@ export const api = createApi({
               mediaSize: message.Media?.Size || message.media?.size || message.mediaSize,
               IsRead: message.IsRead || message.isRead || false,
               isRead: message.IsRead || message.isRead || false,
-              ReplyTo: message.ReplyTo || message.replyTo || null,
-              replyTo: message.ReplyTo || message.replyTo || null,
+              ReadBy: message.ReadBy || message.readBy || message.read_by || [],
+              readBy: message.ReadBy || message.readBy || message.read_by || [],
+              ReadByTimestamps: message.ReadByTimestamps || message.readByTimestamps || message.read_by_timestamps || message.ReadByTimestamps || {},
+              readByTimestamps: message.ReadByTimestamps || message.readByTimestamps || message.read_by_timestamps || message.ReadByTimestamps || {},
+              ReplyTo: message.ReplyTo || message.replyTo || message.ParentMessageId || message.parentMessageId || null,
+              replyTo: message.ReplyTo || message.replyTo || message.ParentMessageId || message.parentMessageId || null,
+              ParentMessageId: message.ReplyTo || message.replyTo || message.ParentMessageId || message.parentMessageId || null,
+              parentMessageId: message.ReplyTo || message.replyTo || message.ParentMessageId || message.parentMessageId || null,
               ChatId: message.ChatId || message.chatId || chatId,
               chatId: message.ChatId || message.chatId || chatId,
               status: message.status || message.Status || 'sent',
@@ -2991,7 +3723,14 @@ export const api = createApi({
 
           const endpoint = '/api/message/upload';
 
-          
+          if (__DEV__) {
+            console.log('[uploadChatMedia] request', {
+              endpoint,
+              uri: file.uri,
+              type: file.type,
+              name: file.name,
+            });
+          }
 
           const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
@@ -3004,12 +3743,19 @@ export const api = createApi({
 
           if (response.ok) {
             const data = await response.json();
-            
+            if (__DEV__) {
+              console.log('[uploadChatMedia] success', data);
+              if (typeof data === 'string') {
+                console.log('[uploadChatMedia] success (string key)', data);
+              }
+            }
             return { data };
           } else {
             const errorText = await response.text().catch(() => '');
             const errorData = errorText ? JSON.parse(errorText) : { message: 'Upload failed' };
-            
+            if (__DEV__) {
+              console.log('[uploadChatMedia] failed', response.status, errorData);
+            }
             return {
               error: {
                 status: response.status,
@@ -3018,7 +3764,9 @@ export const api = createApi({
             };
           }
         } catch (error) {
-          
+          if (__DEV__) {
+            console.log('[uploadChatMedia] exception', error);
+          }
           return {
             error: {
               status: 'CUSTOM_ERROR',
@@ -3060,6 +3808,7 @@ export const {
   
   // Metal Prices
   useGetMetalPricesQuery,
+  useGetMetalPriceHistoryQuery,
   useAddMetalPriceMutation,
   useUpdateMetalPriceMutation,
   useDeleteMetalPriceMutation,

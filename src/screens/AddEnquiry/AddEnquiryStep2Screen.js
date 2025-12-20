@@ -11,6 +11,7 @@ import {
   Text,
 } from 'react-native';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
+import Video from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
@@ -59,30 +60,57 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
     return true;
   };
 
-  // Request storage permission for Android
+  // Request storage permission for Android (supports both images and videos)
   const requestStoragePermission = async () => {
     if (Platform.OS === 'android') {
       try {
-        // For Android 13+ (API 33+), use READ_MEDIA_IMAGES
-        // For older versions, use READ_EXTERNAL_STORAGE
         const androidVersion = Platform.Version;
-        let permission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
         
+        // For Android 13+ (API 33+), need both READ_MEDIA_IMAGES and READ_MEDIA_VIDEO for mixed media
         if (androidVersion >= 33) {
-          permission = 'android.permission.READ_MEDIA_IMAGES';
-        }
-        
+          const imagePermission = 'android.permission.READ_MEDIA_IMAGES';
+          const videoPermission = 'android.permission.READ_MEDIA_VIDEO';
+          
+          // Request both permissions
+          const imageGranted = await PermissionsAndroid.request(
+            imagePermission,
+            {
+              title: 'Media Permission',
+              message: 'App needs access to your photos and videos',
+              buttonNeutral: 'Ask Me Later',
+              buttonNegative: 'Cancel',
+              buttonPositive: 'OK',
+            }
+          );
+          
+          const videoGranted = await PermissionsAndroid.request(
+            videoPermission,
+            {
+              title: 'Media Permission',
+              message: 'App needs access to your videos',
+              buttonNeutral: 'Ask Me Later',
+              buttonNegative: 'Cancel',
+              buttonPositive: 'OK',
+            }
+          );
+          
+          // Return true if at least one is granted (for mixed media, we need both ideally)
+          return imageGranted === PermissionsAndroid.RESULTS.GRANTED || 
+                 videoGranted === PermissionsAndroid.RESULTS.GRANTED;
+        } else {
+          // For older Android versions, use READ_EXTERNAL_STORAGE
         const granted = await PermissionsAndroid.request(
-          permission,
+            PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
           {
             title: 'Storage Permission',
-            message: 'App needs access to your storage to select images',
+              message: 'App needs access to your storage to select images and videos',
             buttonNeutral: 'Ask Me Later',
             buttonNegative: 'Cancel',
             buttonPositive: 'OK',
           }
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
+        }
       } catch (err) {
         // On newer Android versions, permission might not be needed
         return true;
@@ -124,7 +152,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   const handleGallery = async () => {
     const hasPermission = await requestStoragePermission();
     if (!hasPermission && Platform.OS === 'android') {
-      Alert.alert('Permission Denied', 'Storage permission is required to select images');
+      Alert.alert('Permission Denied', 'Storage permission is required to select images and videos');
       return;
     }
 
@@ -133,18 +161,66 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       quality: 0.8,
       selectionLimit: 10, // Allow multiple selection
       includeBase64: false,
+      // Don't request extra metadata that might cause parsing errors
+      // The native picker will still read fileSize/duration, but we won't use them
     };
 
     launchImageLibrary(options, (response) => {
       if (response.didCancel) {
+        return;
       } else if (response.errorCode) {
-        Alert.alert('Error', `Image Picker Error: ${response.errorMessage}`);
+        const errorMsg = response.errorMessage || 'Unknown error';
+        if (__DEV__) {
+          console.error('❌ [AddEnquiryStep2] Image Picker Error:', {
+            errorCode: response.errorCode,
+            errorMessage: errorMsg,
+            fullResponse: response,
+          });
+        }
+        
+        // Handle specific error: "For input string" - usually means file metadata issue
+        let userMessage = errorMsg;
+        if (errorMsg.includes('For input string') || errorMsg.includes('9223372036854775807')) {
+          userMessage = 'Unable to read file metadata. This may happen with certain video files. Please try:\n\n1. Selecting a different file\n2. Converting the video to a different format\n3. Using a smaller video file';
+        }
+        
+        Alert.alert('Error', `Image Picker Error: ${userMessage}`);
+        return;
       } else if (response.assets && response.assets.length > 0) {
-        const newImages = response.assets.map(asset => ({
+        const newImages = response.assets.map((asset, index) => {
+          // Determine file extension based on type or file name
+          const isVideo = asset.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i.test(asset.fileName || '');
+          const defaultExtension = isVideo ? 'mp4' : 'jpg';
+          const defaultName = asset.fileName || `image_${Date.now()}_${index}.${defaultExtension}`;
+          
+          // Create clean object with ONLY required fields
+          // Explicitly exclude fileSize, duration, width, height, etc.
+          // to prevent any metadata from being included
+          const cleanAsset = {
           uri: asset.uri || '',
-          type: asset.type || 'image/jpeg',
-          name: asset.fileName || `image_${Date.now()}.jpg`,
-        })).filter(img => img.uri);
+            type: asset.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+            name: defaultName,
+          };
+          
+          // Log if there are extra properties (for debugging)
+          if (__DEV__) {
+            const assetKeys = Object.keys(asset || {});
+            const extraKeys = assetKeys.filter(key => !['uri', 'type', 'fileName', 'fileSize', 'width', 'height', 'duration'].includes(key));
+            if (extraKeys.length > 0 || asset.fileSize || asset.duration) {
+              console.log(`⚠️ [AddEnquiryStep2] Asset ${index} has extra properties:`, {
+                hasFileSize: !!asset.fileSize,
+                fileSize: asset.fileSize,
+                hasDuration: !!asset.duration,
+                duration: asset.duration,
+                hasWidth: !!asset.width,
+                hasHeight: !!asset.height,
+                extraKeys,
+              });
+            }
+          }
+          
+          return cleanAsset;
+        }).filter(img => img.uri);
         
         setSelectedImages(prev => [...prev, ...newImages]);
       }
@@ -153,8 +229,8 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
 
   const handleImagePicker = () => {
     Alert.alert(
-      'Select Image Source',
-      'Choose how you want to add images',
+      'Select Media Source',
+      'Choose how you want to add images or videos',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -216,8 +292,8 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
               console.error('❌ Error uploading reference images:', uploadError);
             }
             Alert.alert(
-              'Image Upload Failed',
-              uploadError?.data?.message || uploadError?.data?.error || 'Failed to upload images. The enquiry was created but images could not be uploaded.',
+              'Upload Failed',
+              uploadError?.data?.message || uploadError?.data?.error || 'Failed to upload images/videos. The enquiry was created but media could not be uploaded.',
               [
                 {
                   text: 'Continue Anyway',
@@ -631,19 +707,41 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
 
       {selectedImages.length > 0 && (
         <View style={styles.imagesGrid}>
-          {selectedImages.map((image, index) => (
+          {selectedImages.map((image, index) => {
+            // Check if this is a video
+            const isVideo = image.type?.startsWith('video/') || 
+                          image.isVideo || 
+                          /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i.test(image.name || image.uri || '');
+            
+            return (
             <View key={index} style={styles.imageContainer}>
+                {isVideo ? (
+                  <View style={styles.videoPreviewContainer}>
+                    <Video
+                      source={{ uri: image.uri }}
+                      style={styles.videoPreview}
+                      paused={true}
+                      resizeMode="cover"
+                      controls={false}
+                    />
+                    <View style={styles.videoPlayOverlay}>
+                      <Icon name="play-circle-filled" size={32} color={colors.textWhite} />
+                    </View>
+                  </View>
+                ) : (
               <Image
                 source={{ uri: image.uri || image }}
                 style={styles.image}
               />
+                )}
               <TouchableOpacity
                 style={styles.removeButton}
                 onPress={() => removeImage(index)}>
                 <Icon name="close" size={16} color={colors.textWhite} />
               </TouchableOpacity>
             </View>
-          ))}
+            );
+          })}
         </View>
       )}
     </View>
@@ -665,7 +763,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       <View style={styles.instructionItem}>
         <Icon name="photo-camera" size={18} color={colors.info} />
         <Text style={styles.instructionText}>
-          Upload high-quality reference images for better results
+          Upload high-quality reference images and videos for better results
         </Text>
       </View>
 
@@ -713,16 +811,18 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
                 )}
               </TouchableOpacity>
               
-              <TouchableOpacity
-                onPress={() => navigation.goBack()}
-                style={[styles.adminActionButton, styles.adminActionButtonOutline]}
-                activeOpacity={0.85}
-              >
-                <Icon name="arrow-back" size={18} color={colors.primary} />
-                <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>
-                  Back to Step 1
-                </Text>
-              </TouchableOpacity>
+              {isEditMode && (
+                <TouchableOpacity
+                  onPress={() => navigation.goBack()}
+                  style={[styles.adminActionButton, styles.adminActionButtonOutline]}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="arrow-back" size={18} color={colors.primary} />
+                  <Text style={[styles.adminActionText, styles.adminActionOutlineText]}>
+                    Back to Step 1
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
       {/* Success Animation Modal */}
       <SuccessAnimation
@@ -837,6 +937,30 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 8,
+  },
+  videoPreviewContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: colors.backgroundSecondary,
+    overflow: 'hidden',
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoPreview: {
+    width: 80,
+    height: 80,
+  },
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   removeButton: {
     position: 'absolute',

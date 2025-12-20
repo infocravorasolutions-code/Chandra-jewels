@@ -60,26 +60,73 @@ const UploadDesignScreen = ({ route, navigation }) => {
   
   const [uploadDesign, { isLoading: isUploading }] = useUploadDesignMutation();
   
-  // Request storage permission for Android
+  // Request storage permission for Android (supports both images and videos)
   const requestStoragePermission = async () => {
     if (Platform.OS === 'android') {
       try {
         const androidVersion = Platform.Version;
-        let permission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
         
+        // For Android 13+ (API 33+), need both READ_MEDIA_IMAGES and READ_MEDIA_VIDEO for mixed media
         if (androidVersion >= 33) {
-          permission = 'android.permission.READ_MEDIA_IMAGES';
-        }
-        
-        const granted = await PermissionsAndroid.request(permission, {
+          const imagePermission = 'android.permission.READ_MEDIA_IMAGES';
+          const videoPermission = 'android.permission.READ_MEDIA_VIDEO';
+          
+          // Check current permission status first
+          const imageStatus = await PermissionsAndroid.check(imagePermission);
+          const videoStatus = await PermissionsAndroid.check(videoPermission);
+          
+          // Request image permission if not granted
+          let imageGranted = imageStatus;
+          if (!imageStatus) {
+            imageGranted = await PermissionsAndroid.request(
+              imagePermission,
+              {
+                title: 'Media Permission',
+                message: 'App needs access to your photos and videos',
+                buttonNeutral: 'Ask Me Later',
+                buttonNegative: 'Cancel',
+                buttonPositive: 'OK',
+              }
+            );
+            imageGranted = imageGranted === PermissionsAndroid.RESULTS.GRANTED;
+          }
+          
+          // Request video permission if not granted
+          let videoGranted = videoStatus;
+          if (!videoStatus) {
+            videoGranted = await PermissionsAndroid.request(
+              videoPermission,
+              {
+                title: 'Media Permission',
+                message: 'App needs access to your videos',
+                buttonNeutral: 'Ask Me Later',
+                buttonNegative: 'Cancel',
+                buttonPositive: 'OK',
+              }
+            );
+            videoGranted = videoGranted === PermissionsAndroid.RESULTS.GRANTED;
+          }
+          
+          // For mixed media, we need both permissions
+          // Return true only if both are granted
+          return imageGranted && videoGranted;
+        } else {
+          // For older Android versions, use READ_EXTERNAL_STORAGE
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+            {
           title: 'Storage Permission',
-          message: 'App needs access to your storage to select files',
+              message: 'App needs access to your storage to select images and videos',
           buttonNeutral: 'Ask Me Later',
           buttonNegative: 'Cancel',
           buttonPositive: 'OK',
-        });
+            }
+          );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
+        }
       } catch (err) {
+        console.error('Permission error:', err);
+        // On some devices, permissions might not be needed, so return true
         return true;
       }
     }
@@ -89,34 +136,128 @@ const UploadDesignScreen = ({ route, navigation }) => {
   const handleSelectImages = async () => {
     const hasPermission = await requestStoragePermission();
     if (!hasPermission) {
-      Alert.alert('Permission Denied', 'Storage permission is required to select images');
+      Alert.alert(
+        'Permission Denied', 
+        'Storage permission is required to select images and videos. Please grant both photo and video permissions in app settings.',
+        [
+          { text: 'OK' }
+        ]
+      );
       return;
     }
 
     try {
       const result = await launchImageLibrary({
-        mediaType: 'photo',
+        mediaType: 'mixed', // Allow both images and videos
         quality: 0.8,
         allowsMultiple: true,
         selectionLimit: 20,
+        includeBase64: false,
       });
 
       if (result.didCancel) {
         return;
       }
 
+      if (result.errorCode) {
+        const errorMsg = result.errorMessage || `Failed to select media: ${result.errorCode}`;
+        
+        // Handle specific error: "For input string" - usually means file metadata issue
+        let userMessage = errorMsg;
+        if (errorMsg.includes('For input string') || errorMsg.includes('9223372036854775807')) {
+          userMessage = 'Unable to read file metadata. This may happen with certain video files. Please try:\n\n1. Selecting a different file\n2. Converting the video to a different format\n3. Using a smaller video file';
+        }
+        
+        if (__DEV__) {
+          console.error('❌ [UploadDesign] Image Picker Error:', {
+            errorCode: result.errorCode,
+            errorMessage: errorMsg,
+            fullResponse: result,
+          });
+        }
+        
+        Alert.alert('Error', userMessage, [{ text: 'OK' }]);
+        return;
+      }
+
       if (result.assets && result.assets.length > 0) {
-        const newImages = result.assets.map(asset => ({
+        const maxVideoSize = 100 * 1024 * 1024; // 100MB per backend spec
+        const maxVideoCount = 5; // Max 5 videos per CAD/Coral version per backend spec
+        const errors = [];
+        const validAssets = [];
+        
+        // Validate each asset
+        result.assets.forEach((asset, index) => {
+          const isVideo = asset.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i.test(asset.fileName || '');
+          
+          // Validate video file size
+          if (isVideo && asset.fileSize) {
+            if (asset.fileSize > maxVideoSize) {
+              const sizeMB = (asset.fileSize / (1024 * 1024)).toFixed(2);
+              errors.push(`${asset.fileName || `Video ${index + 1}`}: ${sizeMB}MB exceeds 100MB limit`);
+              return;
+            }
+          }
+          
+          validAssets.push(asset);
+        });
+        
+        // Check video count limit
+        const videoCount = validAssets.filter(asset => {
+          const isVideo = asset.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i.test(asset.fileName || '');
+          return isVideo;
+        }).length;
+        
+        const existingVideoCount = selectedImages.filter(img => img.isVideo).length;
+        
+        if (videoCount + existingVideoCount > maxVideoCount) {
+          Alert.alert(
+            'Video Limit Exceeded',
+            `Maximum ${maxVideoCount} videos allowed per ${designType === 'coral' ? 'Coral' : 'CAD'} version. You already have ${existingVideoCount} video(s) selected.`,
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+        
+        // Show errors if any
+        if (errors.length > 0) {
+          Alert.alert(
+            'File Validation Error',
+            errors.join('\n'),
+            [{ text: 'OK' }]
+          );
+          // Still add valid files if any
+          if (validAssets.length === 0) {
+            return;
+          }
+        }
+        
+        const newImages = validAssets.map((asset, index) => {
+          // Determine file extension based on type or file name
+          const isVideo = asset.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i.test(asset.fileName || '');
+          const defaultExtension = isVideo ? 'mp4' : 'jpg';
+          const defaultName = asset.fileName || `design_${Date.now()}_${index}.${defaultExtension}`;
+          
+          // Only include required fields - exclude width, height, fileSize, etc.
+          // to prevent backend parsing errors
+          return {
           uri: asset.uri,
-          type: asset.type || 'image/jpeg',
-          name: asset.fileName || `image_${Date.now()}.jpg`,
-          width: asset.width,
-          height: asset.height,
-        }));
+            type: asset.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+            name: defaultName,
+            isVideo: isVideo, // Add flag for UI display only
+          };
+        });
         setSelectedImages(prev => [...prev, ...newImages]);
+      } else {
+        Alert.alert('No Selection', 'No files were selected');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to select images');
+      console.error('Error selecting media:', error);
+      Alert.alert(
+        'Error', 
+        error.message || 'Failed to select media files. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -174,7 +315,7 @@ const UploadDesignScreen = ({ route, navigation }) => {
     }
 
     if (selectedImages.length === 0 && !selectedExcel) {
-      Alert.alert('Warning', 'Please select at least one image or Excel file to upload');
+      Alert.alert('Warning', 'Please select at least one image/video or Excel file to upload');
       return;
     }
 
@@ -197,7 +338,7 @@ const UploadDesignScreen = ({ route, navigation }) => {
 
       Alert.alert(
         'Success',
-        `Successfully uploaded ${designType === 'coral' ? 'Coral' : 'CAD'} design${selectedImages.length > 0 ? ` with ${selectedImages.length} image(s)` : ''}${selectedExcel ? ' and Excel file' : ''}`,
+        `Successfully uploaded ${designType === 'coral' ? 'Coral' : 'CAD'} design${selectedImages.length > 0 ? ` with ${selectedImages.length} file(s)` : ''}${selectedExcel ? ' and Excel file' : ''}`,
         [
           {
             text: 'OK',
@@ -299,9 +440,17 @@ const UploadDesignScreen = ({ route, navigation }) => {
       {/* Show selected files */}
       {isMultiple && files.length > 0 && (
         <View style={styles.selectedFilesContainer}>
-          {files.map((file, index) => (
+          {files.map((file, index) => {
+            const isVideo = file.isVideo || file.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp)$/i.test(file.name || '');
+            return (
             <View key={index} style={styles.selectedFileItem}>
+                {isVideo ? (
+                  <View style={styles.videoPreviewContainer}>
+                    <Icon name="videocam" size={24} color={colors.primary} />
+                  </View>
+                ) : (
               <Image source={{ uri: file.uri }} style={styles.previewImage} />
+                )}
               <Text style={styles.fileName} numberOfLines={1}>
                 {file.name}
               </Text>
@@ -312,7 +461,8 @@ const UploadDesignScreen = ({ route, navigation }) => {
                 <Icon name="close" size={20} color={colors.error} />
               </TouchableOpacity>
             </View>
-          ))}
+            );
+          })}
         </View>
       )}
       
@@ -374,9 +524,9 @@ const UploadDesignScreen = ({ route, navigation }) => {
             {renderVersionDropdown()}
           </View>
 
-          {/* Upload Images */}
+          {/* Upload Images/Videos */}
           {renderUploadArea(
-            'Upload Images:',
+            'Upload Images/Videos:',
             handleSelectImages,
             selectedImages,
             handleRemoveImage,
@@ -577,6 +727,15 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 4,
     marginRight: 8,
+  },
+  videoPreviewContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 4,
+    marginRight: 8,
+    backgroundColor: colors.backgroundSecondary || colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   fileName: {
     flex: 1,

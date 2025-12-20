@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -15,6 +15,7 @@ import {
   TextInput,
   Switch,
 } from 'react-native';
+import Video from 'react-native-video';
 import { Card } from '../../components/cards/Cards';
 import { Button, Input, AnimatedLogoLoader, OptimizedImage } from '../../components/common';
 import Icon from '../../components/common/Icon';
@@ -27,6 +28,7 @@ import { useUpdateAssetDescriptionMutation, useGetEnquiryByIdQuery, useApproveDe
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import { API_BASE_URL } from '../../config/apiConfig';
+import { getCachedImage, cacheImage } from '../../utils/imageCache';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const IMAGE_CONTAINER_HEIGHT = SCREEN_HEIGHT * 0.5;
@@ -97,6 +99,14 @@ const DesignViewerScreen = ({ route, navigation }) => {
     if (!currentImageUrl || imageDataUri) return;
     
     try {
+      // Check cache first (same as reference images)
+      const cachedDataUri = await getCachedImage(currentImageUrl);
+      if (cachedDataUri) {
+        setImageDataUri(cachedDataUri);
+        setImageLoadingError(false);
+        return;
+      }
+
       const token = await AsyncStorage.getItem('token');
       if (!token) {
         return;
@@ -125,6 +135,15 @@ const DesignViewerScreen = ({ route, navigation }) => {
             return;
           }
           
+          // Check cache for actual image URL as well
+          const cachedActualImageUri = await getCachedImage(actualImageUrl);
+          if (cachedActualImageUri) {
+            setImageDataUri(cachedActualImageUri);
+            setImageLoadingError(false);
+            // Also cache the original URL pointing to the data URI
+            await cacheImage(currentImageUrl, cachedActualImageUri);
+            return;
+          }
           
           // Fetch the actual image from the URL (likely S3, may not need auth)
           const imageResponse = await fetch(actualImageUrl, {
@@ -167,6 +186,9 @@ const DesignViewerScreen = ({ route, navigation }) => {
           const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
           const dataUri = `data:${imageContentType};base64,${base64}`;
           
+          // Cache the image (both URLs)
+          await cacheImage(actualImageUrl, dataUri);
+          await cacheImage(currentImageUrl, dataUri);
           
           setImageDataUri(dataUri);
           setImageLoadingError(false);
@@ -200,6 +222,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
           const imageContentType = contentType || 'image/jpeg';
           const dataUri = `data:${imageContentType};base64,${base64}`;
           
+          // Cache the image
+          await cacheImage(currentImageUrl, dataUri);
           
           setImageDataUri(dataUri);
           setImageLoadingError(false);
@@ -308,8 +332,62 @@ const DesignViewerScreen = ({ route, navigation }) => {
     ? versionIndex + 1
     : (designData && designData.length > 0 ? designData.length : null);
 
-  // Get images from selected design
-  const images = selectedDesign?.Images || selectedDesign?.images || [];
+  // Get images and videos from selected design
+  const designImages = selectedDesign?.Images || selectedDesign?.images || [];
+  const designVideos = selectedDesign?.Videos || selectedDesign?.videos || [];
+  
+  // Merge images and videos, marking videos explicitly
+  const images = useMemo(() => {
+    const imageArray = Array.isArray(designImages) ? designImages : [];
+    const videoArray = Array.isArray(designVideos) ? designVideos : [];
+    
+    // Mark videos with _isVideo flag for detection
+    const videosWithFlag = videoArray.map(video => ({
+      ...video,
+      _isVideo: true,
+    }));
+    
+    return [...imageArray, ...videosWithFlag];
+  }, [designImages, designVideos]);
+  
+  // Utility function to detect if a file is a video
+  const isVideoFile = useCallback((imageKey, imageUri, image) => {
+    // First check for explicit video flag
+    if (image && typeof image === 'object' && (image._isVideo === true || image.isVideo === true)) {
+      return true;
+    }
+    
+    // Check file extension from key
+    if (imageKey && typeof imageKey === 'string') {
+      const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
+      if (videoExtensions.test(imageKey)) {
+        return true;
+      }
+    }
+    
+    // Check file extension from URI
+    if (imageUri && typeof imageUri === 'string') {
+      const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
+      if (videoExtensions.test(imageUri)) {
+        return true;
+      }
+    }
+    
+    // Check mime type from image object
+    if (image && typeof image === 'object') {
+      const contentType = image.ContentType || image.contentType || image.Type || image.type || image.MimeType || image.mimeType;
+      if (contentType && typeof contentType === 'string' && contentType.startsWith('video/')) {
+        return true;
+      }
+      
+      // Check if it's marked as video type
+      if (image.FileType === 'video' || image.fileType === 'video' || image.MediaType === 'video' || image.mediaType === 'video') {
+        return true;
+      }
+    }
+    
+    return false;
+  }, []);
   
   // Helper function to check if version can be deleted (within 10 minutes)
   const canDeleteVersion = (version) => {
@@ -427,7 +505,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
     }
   };
 
-  // Get current image URL - try multiple endpoint patterns
+  // Get current image/video URL - try multiple endpoint patterns
   const getCurrentImageUrl = () => {
     
     if (images.length === 0 || currentImageIndex >= images.length) {
@@ -487,6 +565,369 @@ const DesignViewerScreen = ({ route, navigation }) => {
     
     return null;
   };
+  
+  // Component to render video with fetch authentication
+  const VideoWithFallback = React.memo(({ image, imageKey, imageId, imageUri, onPress }) => {
+    const [videoUrl, setVideoUrl] = useState(null);
+    const [videoLoading, setVideoLoading] = useState(false);
+    const [videoError, setVideoError] = useState(false);
+    const videoRef = useRef(null);
+    const mountedRef = useRef(true);
+    
+    useEffect(() => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+      };
+    }, []);
+    
+    // Fetch video URL with authentication
+    const fetchVideoUrl = useCallback(async () => {
+      if (!mountedRef.current) return;
+      
+      let videoUrlToUse = null;
+      
+      // If we have a direct URI, use it
+      if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
+        videoUrlToUse = imageUri;
+      } else if (imageKey) {
+        // Fetch presigned URL from API
+        try {
+          setVideoLoading(true);
+          setVideoError(false);
+          
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+          
+          const encodedKey = encodeURIComponent(imageKey);
+          const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${encodedKey}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            
+            // Check if response is JSON (presigned URL)
+            if (contentType.includes('application/json')) {
+              const jsonData = await response.json();
+              videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+            } else {
+              // Direct video response - create blob URL
+              const blob = await response.blob();
+              videoUrlToUse = URL.createObjectURL(blob);
+            }
+          } else {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+        } catch (error) {
+          setVideoError(true);
+          setVideoLoading(false);
+          return;
+        }
+      } else if (imageId) {
+        try {
+          setVideoLoading(true);
+          setVideoError(false);
+          
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+          
+          const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${imageId}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const jsonData = await response.json();
+              videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+            }
+          } else {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+        } catch (error) {
+          setVideoError(true);
+          setVideoLoading(false);
+          return;
+        }
+      }
+      
+      if (videoUrlToUse && mountedRef.current) {
+        setVideoUrl(videoUrlToUse);
+        setVideoLoading(false);
+        setVideoError(false);
+      } else if (mountedRef.current) {
+        setVideoError(true);
+        setVideoLoading(false);
+      }
+    }, [imageKey, imageId, imageUri]);
+    
+    useEffect(() => {
+      fetchVideoUrl();
+    }, [fetchVideoUrl]);
+    
+    if (videoError) {
+      return (
+        <View style={styles.videoContainer}>
+          <View style={styles.videoPlaceholder}>
+            <Icon name="videocam-off" size={24} color={colors.textSecondary} />
+            <CustomText variant="caption" style={styles.placeholderText}>
+              Video unavailable
+            </CustomText>
+          </View>
+        </View>
+      );
+    }
+    
+    if (videoLoading || !videoUrl) {
+      return (
+        <View style={styles.videoContainer}>
+          <View style={styles.videoPlaceholder}>
+            <AnimatedLogoLoader size={60} />
+            <CustomText variant="caption" style={styles.placeholderText}>
+              Loading video...
+            </CustomText>
+          </View>
+        </View>
+      );
+    }
+    
+    return (
+      <TouchableOpacity
+        style={styles.videoContainer}
+        activeOpacity={0.9}
+        onPress={() => {
+          if (onPress && videoUrl) {
+            onPress(videoUrl);
+          }
+        }}
+      >
+        <Video
+          ref={videoRef}
+          source={{ uri: videoUrl }}
+          style={styles.video}
+          resizeMode="cover"
+          paused={true}
+          controls={false}
+          muted={true}
+          repeat={false}
+          onLoad={() => {
+            // Ensure first frame is displayed
+            if (videoRef.current) {
+              videoRef.current.seek(0);
+            }
+          }}
+          onError={(error) => {
+            if (__DEV__) {
+              console.error('Video playback error:', error);
+            }
+            setVideoError(true);
+          }}
+        />
+        <View style={styles.videoPlayOverlay}>
+          <Icon name="play-arrow" size={50} color={colors.textWhite} />
+        </View>
+        {/* Share button */}
+        <TouchableOpacity
+          style={styles.shareImageButton}
+          onPress={handleShare}
+          disabled={isSharing}
+          activeOpacity={0.8}
+        >
+          <Icon name="share" size={24} color={colors.textWhite} />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  });
+
+  // Component to render video in full-screen modal
+  const FullScreenVideo = React.memo(({ image, imageKey, imageId, imageUri, onClose }) => {
+    const [videoUrl, setVideoUrl] = useState(null);
+    const [videoLoading, setVideoLoading] = useState(false);
+    const [videoError, setVideoError] = useState(false);
+    const videoRef = useRef(null);
+    const mountedRef = useRef(true);
+    
+    useEffect(() => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+      };
+    }, []);
+    
+    // Fetch video URL with authentication
+    const fetchVideoUrl = useCallback(async () => {
+      if (!mountedRef.current) return;
+      
+      let videoUrlToUse = null;
+      
+      // If we have a direct URI, use it
+      if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
+        videoUrlToUse = imageUri;
+      } else if (imageKey) {
+        // Fetch presigned URL from API
+        try {
+          setVideoLoading(true);
+          setVideoError(false);
+          
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+          
+          const encodedKey = encodeURIComponent(imageKey);
+          const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${encodedKey}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            
+            // Check if response is JSON (presigned URL)
+            if (contentType.includes('application/json')) {
+              const jsonData = await response.json();
+              videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+            } else {
+              // Direct video response - create blob URL
+              const blob = await response.blob();
+              videoUrlToUse = URL.createObjectURL(blob);
+            }
+          } else {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+        } catch (error) {
+          setVideoError(true);
+          setVideoLoading(false);
+          return;
+        }
+      } else if (imageId) {
+        try {
+          setVideoLoading(true);
+          setVideoError(false);
+          
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+          
+          const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${imageId}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const jsonData = await response.json();
+              videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
+            }
+          } else {
+            setVideoError(true);
+            setVideoLoading(false);
+            return;
+          }
+        } catch (error) {
+          setVideoError(true);
+          setVideoLoading(false);
+          return;
+        }
+      }
+      
+      if (videoUrlToUse && mountedRef.current) {
+        setVideoUrl(videoUrlToUse);
+        setVideoLoading(false);
+        setVideoError(false);
+      } else if (mountedRef.current) {
+        setVideoError(true);
+        setVideoLoading(false);
+      }
+    }, [imageKey, imageId, imageUri]);
+    
+    useEffect(() => {
+      fetchVideoUrl();
+    }, [fetchVideoUrl]);
+    
+    if (videoError) {
+      return (
+        <View style={styles.fullScreenVideoContainer}>
+          <View style={styles.fullScreenVideoPlaceholder}>
+            <Icon name="videocam-off" size={60} color={colors.textSecondary} />
+            <CustomText variant="body" style={styles.placeholderText}>
+              Video unavailable
+            </CustomText>
+            <TouchableOpacity
+              style={styles.fullScreenVideoRetryButton}
+              onPress={fetchVideoUrl}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.fullScreenVideoRetryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+    
+    if (videoLoading || !videoUrl) {
+      return (
+        <View style={styles.fullScreenVideoContainer}>
+          <View style={styles.fullScreenVideoPlaceholder}>
+            <AnimatedLogoLoader size={60} />
+            <CustomText variant="body" style={styles.placeholderText}>
+              Loading video...
+            </CustomText>
+          </View>
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.fullScreenVideoContainer}>
+        <Video
+          ref={videoRef}
+          source={{ uri: videoUrl }}
+          style={styles.fullScreenVideo}
+          resizeMode="contain"
+          controls={true}
+          paused={false}
+          onError={(error) => {
+            if (__DEV__) {
+              console.error('Full-screen video playback error:', error);
+            }
+            setVideoError(true);
+          }}
+        />
+      </View>
+    );
+  });
 
   // Get Excel download URL - use backend endpoint directly (more reliable)
   const getExcelDownloadUrl = () => {
@@ -803,7 +1244,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
         shareMessage += `*Pricing Details:*\n${clientPricingMessage}\n\n`;
       }
       
-      shareMessage += `Total Images: ${images.length}`;
+      const videoCount = images.filter(img => {
+        const imgKey = typeof img === 'object' && img !== null ? (img.Key || img.key || '') : (typeof img === 'string' ? img.split('/').pop() || img : '');
+        const imgUri = typeof img === 'object' && img !== null ? (img.Url || img.url || img.URI || img.uri || '') : (typeof img === 'string' && (img.startsWith('http') || img.startsWith('https')) ? img : '');
+        return isVideoFile(imgKey, imgUri, img);
+      }).length;
+      const imageCount = images.length - videoCount;
+      shareMessage += `Total: ${images.length} (${imageCount} image${imageCount !== 1 ? 's' : ''}, ${videoCount} video${videoCount !== 1 ? 's' : ''})`;
 
       // Download all images to temporary files for sharing
       const imageFiles = [];
@@ -1448,7 +1895,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
         <View style={styles.emptyContainer}>
           <Icon name="image" size={60} color={colors.textSecondary} />
           <CustomText variant="body" style={styles.emptyText}>
-            No {designType === 'coral' ? 'Coral' : 'CAD'} images available
+            No {designType === 'coral' ? 'Coral' : 'CAD'} images/videos available
           </CustomText>
           <Button
             title="Go Back"
@@ -1462,12 +1909,39 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
   const currentImageUrl = getCurrentImageUrl();
   const showNavigation = images.length > 1;
+  
+  // Check if current media is a video
+  const currentMedia = images[currentImageIndex];
+  const currentImageKey = typeof currentMedia === 'object' && currentMedia !== null
+    ? (currentMedia.Key || currentMedia.key || '')
+    : (typeof currentMedia === 'string' ? currentMedia.split('/').pop() || currentMedia : '');
+  const currentImageUri = typeof currentMedia === 'object' && currentMedia !== null
+    ? (currentMedia.Url || currentMedia.url || currentMedia.URI || currentMedia.uri || '')
+    : (typeof currentMedia === 'string' && (currentMedia.startsWith('http') || currentMedia.startsWith('https')) ? currentMedia : '');
+  const isCurrentVideo = isVideoFile(currentImageKey, currentImageUri, currentMedia);
 
-  // Reset data URI when image changes
+  // Reset data URI when image changes, but check cache first
   useEffect(() => {
-    setImageDataUri(null);
-    setImageLoadingError(false);
-  }, [currentImageIndex]);
+    const checkCacheAndSetImage = async () => {
+      if (!currentImageUrl) {
+        setImageDataUri(null);
+        setImageLoadingError(false);
+        return;
+      }
+
+      // Check cache first before resetting
+      const cachedDataUri = await getCachedImage(currentImageUrl);
+      if (cachedDataUri) {
+        setImageDataUri(cachedDataUri);
+        setImageLoadingError(false);
+      } else {
+        setImageDataUri(null);
+        setImageLoadingError(false);
+      }
+    };
+
+    checkCacheAndSetImage();
+  }, [currentImageIndex, currentImageUrl]);
 
   // Log when URL is generated and trigger fetch if needed
   useEffect(() => {
@@ -1482,10 +1956,23 @@ const DesignViewerScreen = ({ route, navigation }) => {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Image Slider Section */}
+        {/* Image/Video Slider Section */}
         <View style={styles.imageSection}>
           <View style={styles.imageContainer}>
             {currentImageUrl ? (
+              <>
+                {/* Render video if current media is a video */}
+                {isCurrentVideo ? (
+                  <VideoWithFallback
+                    image={currentMedia}
+                    imageKey={currentImageKey}
+                    imageId={typeof currentMedia === 'object' && currentMedia !== null
+                      ? (currentMedia.Id || currentMedia.id || currentMedia._id || '')
+                      : ''}
+                    imageUri={currentImageUri}
+                    onPress={(uri) => setIsFullScreen(true)}
+                  />
+                ) : (
               <>
                 {/* Try Image component with headers first (iOS only, Android uses fetch directly) */}
                 {!imageDataUri && !useFetchDirectly && (
@@ -1555,7 +2042,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
                         style={styles.image}
                         resizeMode="contain"
                         showLoader={false}
-                        cacheEnabled={false}
+                        cacheEnabled={true}
                         onLoadStart={() => {
                           // Image loading started
                         }}
@@ -1599,13 +2086,15 @@ const DesignViewerScreen = ({ route, navigation }) => {
                       <AnimatedLogoLoader size={60} />
                     )}
                   </View>
+                    )}
+                  </>
                 )}
               </>
             ) : (
               <View style={styles.imagePlaceholder}>
-                <Icon name="image" size={60} color={colors.textSecondary} />
+                <Icon name={isCurrentVideo ? "videocam-off" : "image"} size={60} color={colors.textSecondary} />
                 <CustomText variant="caption" style={styles.placeholderText}>
-                  Image not available
+                  {isCurrentVideo ? 'Video' : 'Image'} not available
                 </CustomText>
                 {__DEV__ && (
                   <CustomText variant="caption" style={[styles.placeholderText, { marginTop: 8, fontSize: 10 }]}>
@@ -1638,10 +2127,10 @@ const DesignViewerScreen = ({ route, navigation }) => {
             )}
           </View>
 
-          {/* Image Counter */}
+          {/* Image/Video Counter */}
           <View style={styles.imageCounter}>
             <CustomText style={styles.counterText}>
-              Total Images: {images.length} | Current Image: {currentImageIndex + 1}
+              Total {isCurrentVideo ? 'Videos' : 'Images'}: {images.length} | Current {isCurrentVideo ? 'Video' : 'Image'}: {currentImageIndex + 1}
             </CustomText>
           </View>
         </View>
@@ -1985,7 +2474,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
         </View>
       </Modal>
 
-      {/* Full Screen Image Modal */}
+      {/* Full Screen Image/Video Modal */}
       <Modal
         visible={isFullScreen}
         transparent={true}
@@ -2003,8 +2492,22 @@ const DesignViewerScreen = ({ route, navigation }) => {
           </TouchableOpacity>
           
           {currentImageUrl && (
+            <View style={styles.fullScreenImageContainer}>
+              {isCurrentVideo ? (
+                // Render video in full screen
+                <FullScreenVideo
+                  image={currentMedia}
+                  imageKey={currentImageKey}
+                  imageId={typeof currentMedia === 'object' && currentMedia !== null
+                    ? (currentMedia.Id || currentMedia.id || currentMedia._id || '')
+                    : ''}
+                  imageUri={currentImageUri}
+                  onClose={() => setIsFullScreen(false)}
+                />
+              ) : (
+                // Render image in full screen
             <TouchableOpacity
-              style={styles.fullScreenImageContainer}
+                  style={styles.fullScreenImageTouchable}
               activeOpacity={1}
               onPress={() => setIsFullScreen(false)}
             >
@@ -2025,10 +2528,12 @@ const DesignViewerScreen = ({ route, navigation }) => {
                   style={styles.fullScreenImage}
                   resizeMode="contain"
                   showLoader={false}
-                  cacheEnabled={false}
+                  cacheEnabled={true}
                 />
               ) : null}
             </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
       </Modal>
@@ -2244,6 +2749,36 @@ const styles = StyleSheet.create({
   btnDisabled: {
     opacity: 0.5,
   },
+  videoContainer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: colors.backgroundSecondary,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  video: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: colors.backgroundSecondary,
+  },
+  videoPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSecondary,
+  },
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
   imageWrapper: {
     width: '100%',
     height: '100%',
@@ -2285,9 +2820,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  fullScreenImageTouchable: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   fullScreenImage: {
     width: SCREEN_WIDTH,
     height: SCREEN_HEIGHT,
+  },
+  fullScreenVideoContainer: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+  },
+  fullScreenVideo: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+  },
+  fullScreenVideoPlaceholder: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenVideoRetryButton: {
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+  },
+  fullScreenVideoRetryText: {
+    color: colors.textWhite,
+    fontSize: 16,
+    fontWeight: '600',
   },
   fullScreenCloseButton: {
     position: 'absolute',

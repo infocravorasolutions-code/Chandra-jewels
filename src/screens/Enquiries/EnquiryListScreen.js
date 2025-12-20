@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import useDebounce from '../../hooks/useDebounce';
 import {
   View,
   StyleSheet,
@@ -38,8 +37,17 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { API_BASE_URL } from '../../config/apiConfig';
 // Import PDF generator module
-import { downloadAllEnquiriesPDF } from '../../utils/pdfGenerator';
+import * as pdfGeneratorModule from '../../utils/pdfGenerator';
 
+// Debug: Log module import status
+if (__DEV__) {
+  console.log('EnquiryListScreen: pdfGeneratorModule imported:', {
+    moduleExists: !!pdfGeneratorModule,
+    moduleType: typeof pdfGeneratorModule,
+    hasDownloadAllEnquiriesPDF: pdfGeneratorModule ? typeof pdfGeneratorModule.downloadAllEnquiriesPDF : 'no module',
+    moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
+  });
+}
 
 const { width } = Dimensions.get('window');
 const PAGE_SIZE = 10;
@@ -75,8 +83,6 @@ const EnquiryListScreen = ({ navigation }) => {
   // Redux state
   const filters = useSelector(state => state.enquiries.filters);
   const searchQuery = useSelector(state => state.enquiries.searchQuery);
-  // Debounce search query to reduce API calls - UI updates immediately, API calls delayed
-  const debouncedSearchQuery = useDebounce(searchQuery, 300);
   const sortBy = useSelector(state => state.enquiries.sortBy);
   const sortOrder = useSelector(state => state.enquiries.sortOrder);
   const selectedStatus = useSelector(state => state.enquiries.selectedStatus);
@@ -130,9 +136,19 @@ const EnquiryListScreen = ({ navigation }) => {
     // For Client users (role 4), use ClientId from token
     if ((!normalizedFilters.clientId || normalizedFilters.clientId === 'all') && isClient && clientUserId) {
       normalizedFilters.clientId = clientUserId;
+      if (__DEV__) {
+        console.log('🔐 [ENQUIRY LIST] Client user - using ClientId from token:', clientUserId);
+        console.log('🔐 [ENQUIRY LIST] User object:', {
+          id: user?.id,
+          role: user?.role,
+          roleNumber: user?.roleNumber,
+          clientId: user?.clientId,
+        });
+      }
     } else if (isClient && !clientUserId) {
       if (__DEV__) {
         console.error('❌ [ENQUIRY LIST] ERROR: Client user but clientUserId is missing!');
+        console.error('❌ [ENQUIRY LIST] User object:', user);
       }
     }
     
@@ -148,9 +164,8 @@ const EnquiryListScreen = ({ navigation }) => {
     params.append('page', String(pageToLoad));
     params.append('limit', String(PAGE_SIZE));
     
-    // Use debounced search query for API calls (reduces API calls while typing)
-    if (debouncedSearchQuery && debouncedSearchQuery.trim()) {
-      params.append('search', debouncedSearchQuery.trim());
+    if (searchQuery && searchQuery.trim()) {
+      params.append('search', searchQuery.trim());
     }
     
     Object.entries(resolvedFilters).forEach(([key, value]) => {
@@ -187,7 +202,7 @@ const EnquiryListScreen = ({ navigation }) => {
     params.append('sortOrder', sortDirection);
     
     return params;
-  }, [resolvedFilters, debouncedSearchQuery, sortBy, sortOrder]);
+  }, [resolvedFilters, searchQuery, sortBy, sortOrder]);
   
   const fetchEnquiries = useCallback(async ({ pageToLoad = 1, append = false, suppressInlineLoader = false } = {}) => {
     const requestId = ++requestIdRef.current;
@@ -207,6 +222,11 @@ const EnquiryListScreen = ({ navigation }) => {
       const params = buildQueryString(pageToLoad);
       const token = await AsyncStorage.getItem('token');
       const apiUrl = `${API_BASE_URL}/api/enquiries/search?${params.toString()}`;
+      
+      if (__DEV__ && isClient) {
+        console.log('🔐 [ENQUIRY FETCH] Client user - API URL:', apiUrl);
+        console.log('🔐 [ENQUIRY FETCH] Query params:', params.toString());
+      }
       
       const response = await fetch(apiUrl, {
         headers: {
@@ -347,8 +367,13 @@ const EnquiryListScreen = ({ navigation }) => {
     try {
       scrollPositionRef.current = offsetY;
       await AsyncStorage.setItem(scrollPositionKey, String(offsetY));
+      if (__DEV__) {
+        console.log('💾 [ENQUIRY LIST] Saved scroll position:', offsetY);
+      }
     } catch (error) {
-      // Silently handle scroll position save error
+      if (__DEV__) {
+        console.warn('Failed to save scroll position:', error);
+      }
     }
   }, []);
 
@@ -364,12 +389,17 @@ const EnquiryListScreen = ({ navigation }) => {
           setTimeout(() => {
             if (flatListRef.current) {
               flatListRef.current.scrollToOffset({ offset: offsetY, animated: false });
+              if (__DEV__) {
+                console.log('📍 [ENQUIRY LIST] Restored scroll position:', offsetY);
+              }
             }
           }, 200);
         }
       }
     } catch (error) {
-      // Silently handle scroll position restore error
+      if (__DEV__) {
+        console.warn('Failed to restore scroll position:', error);
+      }
     }
   }, []);
 
@@ -520,6 +550,16 @@ const EnquiryListScreen = ({ navigation }) => {
   
   const clients = Array.isArray(clientsData) ? clientsData : [];
   
+  // Debug clients API response (in useEffect to avoid hook order issues)
+  useEffect(() => {
+    if (__DEV__ && clientsData) {
+      console.log('Clients API Response:', {
+        dataLength: Array.isArray(clientsData) ? clientsData.length : 'not array',
+        firstClient: Array.isArray(clientsData) && clientsData.length > 0 ? clientsData[0] : null,
+        error: clientsError
+      });
+    }
+  }, [clientsData, clientsError]);
   
   // Local UI state
   const [showFilters, setShowFilters] = useState(false);
@@ -531,6 +571,9 @@ const EnquiryListScreen = ({ navigation }) => {
   const clientNameMap = useMemo(() => {
     const map = new Map();
     if (!clients || clients.length === 0) {
+      if (__DEV__) {
+        console.log('No clients data available yet');
+      }
       return map;
     }
     
@@ -548,6 +591,11 @@ const EnquiryListScreen = ({ navigation }) => {
         map.set(cleanId.trim(), client.name);
       }
     });
+    
+    if (__DEV__) {
+      console.log('Client Name Map created with', map.size, 'entries');
+      console.log('Sample client IDs in map:', Array.from(map.keys()).slice(0, 5));
+    }
     
     return map;
   }, [clients]);
@@ -722,6 +770,13 @@ const EnquiryListScreen = ({ navigation }) => {
       const isDesigner = user?.role === 'coral' || user?.role === 'cad';
       let mappedStatus = 'all';
       
+      if (__DEV__) {
+        console.log('🔍 ========== ROUTE PARAMS FILTER ==========');
+        console.log('🔍 Route params filter:', rawFilter);
+        console.log('🔍 Status filter (lowercase):', statusFilter);
+        console.log('🔍 Is Designer:', isDesigner);
+      }
+      
       // Map common status filter values
       // For designers, 'pending' should map to 'Design Approval Pending'
       if (statusFilter === 'pending') {
@@ -763,7 +818,16 @@ const EnquiryListScreen = ({ navigation }) => {
         mappedStatus = matchedStatus || (rawFilter.charAt(0).toUpperCase() + rawFilter.slice(1).toLowerCase());
       }
       
+      if (__DEV__) {
+        console.log('🔍 Mapped status:', mappedStatus);
+        console.log('🔍 Current filters.status:', filters.status);
+        console.log('🔍 =========================================');
+      }
+      
       if (mappedStatus !== filters.status) {
+        if (__DEV__) {
+          console.log('✅ Setting filter status to:', mappedStatus);
+        }
         dispatch(setFilters({ 
           status: mappedStatus === 'all' ? 'all' : mappedStatus,
         }));
@@ -833,10 +897,28 @@ const EnquiryListScreen = ({ navigation }) => {
     navigation,
   ]);
   
+  // Debug: Log loading states (only on significant changes, not every render)
+  useEffect(() => {
+    if (__DEV__ && (isInitialLoading || isFetching || isLoadingMore)) {
+      const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
+      console.log('📊 Loading States:', {
+        isLoadingMore,
+        isInitialLoading,
+        isFetching,
+        hasMore,
+        currentPage,
+        totalPages,
+        enrichedCount: displayEnquiriesLength,
+      });
+    }
+  }, [isLoadingMore, isInitialLoading, isFetching, hasMore, currentPage, totalPages, displayEnquiries]);
   
   // Render enquiry card item for FlatList
   const renderEnquiryItem = ({ item: enquiry }) => {
     if (!enquiry || !enquiry.id) {
+      if (__DEV__) {
+        console.warn('Skipping invalid enquiry item:', enquiry);
+      }
       return null;
     }
     
@@ -846,8 +928,14 @@ const EnquiryListScreen = ({ navigation }) => {
           key={enquiry.id}
           enquiry={enquiry}
           onPress={() => {
+            if (__DEV__) {
+              console.log('Navigating to SingleEnquiry with enquiry ID:', enquiry?.id);
+            }
             try {
               if (!enquiry?.id) {
+                if (__DEV__) {
+                  console.warn('Cannot navigate: enquiry missing ID');
+                }
                 Alert.alert('Error', 'Invalid enquiry data. Please refresh the list.');
                 return;
               }
@@ -883,7 +971,7 @@ const EnquiryListScreen = ({ navigation }) => {
       );
     } catch (error) {
       if (__DEV__) {
-        console.error('Error rendering enquiry item:', error);
+        console.error('Error rendering enquiry item:', error, enquiry);
       }
       return null; // Return null on error to prevent crash
     }
@@ -994,12 +1082,16 @@ const EnquiryListScreen = ({ navigation }) => {
   // Handler for downloading all enquiries as PDF
   const handleDownloadAllPDF = async () => {
     try {
-      // Check if function is available
-      if (!downloadAllEnquiriesPDF || typeof downloadAllEnquiriesPDF !== 'function') {
+      // Get the function from the module
+      const downloadFn = pdfGeneratorModule?.downloadAllEnquiriesPDF;
+      
+      if (!downloadFn || typeof downloadFn !== 'function') {
         if (__DEV__) {
           console.error('downloadAllEnquiriesPDF not available:', {
-            functionType: typeof downloadAllEnquiriesPDF,
-            function: downloadAllEnquiriesPDF,
+            module: pdfGeneratorModule,
+            moduleType: typeof pdfGeneratorModule,
+            moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
+            functionType: typeof downloadFn,
           });
         }
         Alert.alert(
@@ -1010,147 +1102,49 @@ const EnquiryListScreen = ({ navigation }) => {
       }
 
       // Use enrichedEnquiries (all enquiries with client names) for the PDF
-      // Fallback to displayEnquiries if enrichedEnquiries is empty
-      const enquiriesToExport = (enrichedEnquiries && enrichedEnquiries.length > 0) 
+      const enquiriesToExport = enrichedEnquiries && enrichedEnquiries.length > 0 
         ? enrichedEnquiries 
-        : (displayEnquiries && displayEnquiries.length > 0)
-        ? displayEnquiries
         : enquiries;
       
       if (!enquiriesToExport || enquiriesToExport.length === 0) {
-        Alert.alert(
-          'No Data', 
-          'No enquiries available to export. Please ensure enquiries are loaded before downloading.'
-        );
+        Alert.alert('No Data', 'No enquiries available to export.');
         return;
       }
 
+      // Debug: Log what we're exporting
       if (__DEV__) {
-        console.log('📥 Starting PDF download for', enquiriesToExport.length, 'enquiries');
+        console.log('========== EXPORTING ENQUIRIES TO PDF ==========');
+        console.log('Total enquiries to export:', enquiriesToExport.length);
+        console.log('Is array:', Array.isArray(enquiriesToExport));
+        console.log('First enquiry keys:', enquiriesToExport[0] ? Object.keys(enquiriesToExport[0]) : 'no data');
+        console.log('Sample enquiry:', enquiriesToExport[0] ? JSON.stringify(enquiriesToExport[0]).substring(0, 300) : 'no data');
+        console.log('================================================');
       }
 
-      // Show loading alert
       Alert.alert(
         'Generating PDF',
-        `Generating PDF for ${enquiriesToExport.length} enquiries...\n\nThis may take a moment.`,
+        `Generating PDF for ${enquiriesToExport.length} enquiries...`,
         [],
         { cancelable: false }
       );
 
-      // Call the download function
-      const result = await downloadAllEnquiriesPDF(enquiriesToExport);
+      await downloadFn(enquiriesToExport);
       
-      // Check if user cancelled
-      if (result && result.cancelled) {
-        return; // User cancelled, don't show success message
-      }
-      
-      // Show success message based on file type and method
-      if (result && result.method === 'print') {
-        // Print dialog was opened
-        Alert.alert(
-          'Print Dialog Opened',
-          `Print dialog opened for ${enquiriesToExport.length} enquiries.\n\n` +
-          `Please select "Save as PDF" in the print dialog to save the file.\n\n` +
-          `This method handles large documents better and avoids timeout issues.`,
-          [{ text: 'OK' }]
-        );
-      } else if (result && result.isHTML) {
-        // Check if it was a timeout (large number of enquiries)
-        const isTimeoutCase = enquiriesToExport.length > 100;
-        const timeoutMessage = isTimeoutCase 
-          ? `PDF generation timed out for ${enquiriesToExport.length} enquiries.\n\n` +
-            `💡 Tip: For faster PDF generation, export fewer enquiries at once (50-100 recommended).\n\n` +
-            `The file has been saved as HTML instead.\n\n`
-          : `PDF generation is not available. The file has been saved as HTML.\n\n`;
-        
-        Alert.alert(
-          'File Saved',
-          `File saved as HTML for ${enquiriesToExport.length} enquiries.\n\n` +
-          timeoutMessage +
-          `To convert to PDF, open the file in a browser and use Print → Save as PDF.`,
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Success',
-          `PDF generated successfully for ${enquiriesToExport.length} enquiries!\n\nCheck your share/download options.`,
-          [{ text: 'OK' }]
-        );
-      }
+      Alert.alert(
+        'Success',
+        `PDF generated successfully for ${enquiriesToExport.length} enquiries! Check your share/download options.`,
+        [{ text: 'OK' }]
+      );
     } catch (error) {
       if (__DEV__) {
-        console.error('❌ Error generating PDF:', error);
-        console.error('Error stack:', error.stack);
-        console.error('Error details:', {
-          message: error?.message,
-          name: error?.name,
-          code: error?.code,
-        });
+        console.error('Error generating PDF:', error);
       }
-      
-      const errorMessage = error?.message || error?.toString() || 'Unknown error occurred';
-      
-      // Check if error message indicates HTML fallback
-      const isHTMLFallback = errorMessage.includes('HTML instead') || errorMessage.includes('HTML format');
-      
-      // Check if it's a timeout error
-      const isTimeoutError = errorMessage.toLowerCase().includes('timeout') || 
-                            errorMessage.toLowerCase().includes('timed out');
-      
-      if (isTimeoutError) {
-        // Timeout error - suggest splitting
-        Alert.alert(
-          'PDF Generation Timeout',
-          errorMessage + '\n\n' +
-          `Tip: Try filtering/searching to show fewer enquiries (50-100), then download.`,
-          [
-            { text: 'OK', style: 'default' },
-            { 
-              text: 'Save as HTML', 
-              style: 'default',
-              onPress: async () => {
-                // Still save as HTML even though PDF timed out
-                try {
-                  const { generateEnquiriesListHTML } = await import('../../utils/pdfGenerator');
-                  const htmlContent = await generateEnquiriesListHTML(enquiriesToExport);
-                  const timestamp = new Date().toISOString().split('T')[0];
-                  const filename = `All_Enquiries_${timestamp}`;
-                  const htmlFilePath = `${require('react-native-fs').default.DownloadDirectoryPath}/${filename}.html`;
-                  await require('react-native-fs').default.writeFile(htmlFilePath, htmlContent, 'utf8');
-                  await require('react-native-share').default.open({
-                    title: 'Download All Enquiries',
-                    url: `file://${htmlFilePath}`,
-                    type: 'text/html',
-                  });
-                } catch (e) {
-                  Alert.alert('Error', 'Failed to save HTML file: ' + e.message);
-                }
-              }
-            }
-          ]
-        );
-      } else if (isHTMLFallback) {
-        // PDF generation failed, but HTML was saved - show info message
-        Alert.alert(
-          'PDF Generation Unavailable',
-          `PDF generation is not available on this device.\n\n` +
-          `The file has been saved as HTML format instead.\n\n` +
-          `To convert to PDF:\n` +
-          `1. Open the HTML file in a browser\n` +
-          `2. Press Ctrl+P (Windows) or Cmd+P (Mac)\n` +
-          `3. Choose "Save as PDF" as destination\n\n` +
-          `Error: ${errorMessage}`,
-          [{ text: 'OK' }]
-        );
-      } else {
-        // Other error - show error message
-        Alert.alert(
-          'Error',
-          `Failed to generate PDF:\n\n${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
-          [{ text: 'OK' }]
-        );
-      }
+      const errorMessage = error?.message || 'Unknown error occurred';
+      Alert.alert(
+        'Error',
+        `Failed to generate PDF: ${errorMessage}. Please try again.`,
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -1371,12 +1365,18 @@ const EnquiryListScreen = ({ navigation }) => {
       // Toggle order if same field
       const newOrder = sortOrder === 'asc' ? 'desc' : 'asc';
       dispatch(setSorting({ sortBy, sortOrder: newOrder }));
+      if (__DEV__) {
+        console.log('Sort order toggled:', newOrder);
+      }
     } else {
       // Default sort order based on field type
       // Date fields default to 'desc' (newest first), others default to 'asc'
       const dateFields = ['AssignedDate', 'CreatedDate', 'ShippingDate'];
       const defaultOrder = dateFields.includes(newSortBy) ? 'desc' : 'asc';
       dispatch(setSorting({ sortBy: newSortBy, sortOrder: defaultOrder }));
+      if (__DEV__) {
+        console.log('Sort changed to:', newSortBy, defaultOrder);
+      }
     }
     setShowSortModal(false);
   };
@@ -1424,6 +1424,10 @@ const EnquiryListScreen = ({ navigation }) => {
               style={styles.compactChip}
               onPress={() => {
                 const filterStatus = status === 'All' ? 'all' : status;
+                if (__DEV__) {
+                  console.log('🔍 Status chip clicked:', status);
+                  console.log('🔍 Setting filter to:', filterStatus);
+                }
                 dispatch(setSelectedStatus(status));
                 dispatch(setFilters({ status: filterStatus }));
               }}
@@ -1649,6 +1653,9 @@ const EnquiryListScreen = ({ navigation }) => {
           if (item?.id) return String(item.id);
           if (item?._id) return String(item._id);
           // Last resort: use index (not ideal but better than Math.random())
+          if (__DEV__) {
+            console.warn('Enquiry item missing ID, using index:', index, item);
+          }
           return `enquiry-${index}`;
         }}
         ListHeaderComponent={null}

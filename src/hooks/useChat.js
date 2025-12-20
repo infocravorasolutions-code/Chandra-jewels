@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/AuthContext';
 import socketService from '../services/socketService';
 import { useGetChatMessagesQuery, useUploadChatMediaMutation } from '../store/api';
-import { API_BASE_URL } from '../config/apiConfig';
+import { API_BASE_URL, FILE_BASE_URL } from '../config/apiConfig';
 
 /**
  * Custom hook for managing chat functionality
@@ -47,10 +47,89 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
   const typingTimeoutRef = useRef(null);
   const [nextCursor, setNextCursor] = useState(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const presignCacheRef = useRef(new Map());
+  const joinedChatsRef = useRef(new Set()); // Track which chats we've already joined to prevent infinite loops
 
   // Upload media mutation
   const [uploadChatMedia, { isLoading: isUploading }] = useUploadChatMediaMutation();
 
+  const getMediaUrlFromKey = useCallback((mediaKey) => {
+    if (!mediaKey) return null;
+    if (typeof mediaKey === 'string' && (mediaKey.startsWith('http://') || mediaKey.startsWith('https://'))) {
+      return mediaKey;
+    }
+    // Default to legacy files path; also log alternative in case backend differs
+    const legacyUrl = `${FILE_BASE_URL}/api/files/${encodeURIComponent(mediaKey)}`;
+    const altUrl = `${FILE_BASE_URL}/api/message/file/${encodeURIComponent(mediaKey)}`;
+    if (__DEV__) {
+      console.log('[media] built media url from key', { mediaKey, legacyUrl, altUrl });
+    }
+    return legacyUrl;
+  }, []);
+
+  const fetchPresignedUrl = useCallback(async (mediaKey) => {
+    if (!mediaKey) return null;
+    const cache = presignCacheRef.current;
+    if (cache.has(mediaKey)) {
+      return cache.get(mediaKey);
+    }
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const resp = await fetch(`${API_BASE_URL}/api/enquiries/files/${encodeURIComponent(mediaKey)}`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+      });
+      if (!resp.ok) {
+        throw new Error(`Presign failed ${resp.status}`);
+      }
+      const data = await resp.json();
+      const url = data?.url;
+      if (url) {
+        cache.set(mediaKey, url);
+        if (__DEV__) {
+          console.log('[media] presign success', { mediaKey, url });
+        }
+        return url;
+      }
+      throw new Error('No url in presign response');
+    } catch (error) {
+      if (__DEV__) {
+        console.log('[media] presign error', mediaKey, error);
+      }
+      return null;
+    }
+  }, [API_BASE_URL]);
+
+  const inferMediaFromName = useCallback((maybeName) => {
+    if (!maybeName || typeof maybeName !== 'string') return null;
+    const trimmed = maybeName.trim();
+    if (!trimmed) return null;
+    const looksLikeMedia = /\.(png|jpe?g|gif|webp|bmp|mp4|mov|avi|mkv)$/i.test(trimmed);
+    if (!looksLikeMedia) return null;
+    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(trimmed);
+    const isVideo = /\.(mp4|mov|avi|mkv)$/i.test(trimmed);
+    const inferredType = isImage ? 'image' : (isVideo ? 'video' : 'file');
+    const mediaKey = trimmed;
+    const mediaUrl = getMediaUrlFromKey(mediaKey);
+    if (__DEV__) {
+      console.log('[media] inferred from name', { trimmed, mediaKey, mediaUrl, inferredType });
+    }
+    return {
+      mediaKey,
+      mediaUrl,
+      mediaName: trimmed,
+      messageType: inferredType,
+    };
+  }, [getMediaUrlFromKey]);
+
+  // Ensure mediaUrl is available by fetching presigned URL if needed
+  const ensurePresignedUrl = useCallback(async (mediaKey) => {
+    if (!mediaKey) return null;
+    const existing = presignCacheRef.current.get(mediaKey);
+    if (existing) return existing;
+    return fetchPresignedUrl(mediaKey);
+  }, [fetchPresignedUrl]);
   // Determine chat type based on user role
   const getChatType = useCallback(() => {
     if (!user) return null;
@@ -271,6 +350,10 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
   // Track last processed API messages to prevent unnecessary updates
   const lastApiMessagesRef = useRef(null);
   const lastChatIdRef = useRef(null);
+  const messagesRef = useRef(messages); // Store latest messages in ref to avoid dependency issues
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   
   // SIMPLIFIED: Always show messages when API provides them
   useEffect(() => {
@@ -331,21 +414,134 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         setMessages(prevMessages => {
           const messageMap = new Map();
           
-          // Add API messages first (source of truth)
-          apiMessages.forEach(msg => {
+          // Add existing messages first to preserve their status
+          prevMessages.forEach(msg => {
             const id = msg._id || msg.id;
-            if (id && !String(id).startsWith('temp-')) {
+            if (id) {
               messageMap.set(id, msg);
             }
           });
+          
+          // Update with API messages (but preserve status if message already exists)
+          apiMessages.forEach(msg => {
+            const id = msg._id || msg.id;
+            if (id && !String(id).startsWith('temp-')) {
+              const existingMsg = messageMap.get(id);
+              
+              if (existingMsg) {
+                // Message already exists - merge carefully to preserve status
+                // Only update ReadBy if API has newer/more complete data
+                const existingReadBy = existingMsg.ReadBy || existingMsg.readBy || [];
+                const apiReadBy = msg.ReadBy || msg.readBy || [];
+                
+                // Merge ReadBy arrays - preserve object structure with timestamps
+                // Handle both formats: array of objects [{userId, readAt}] or array of IDs ['id1', 'id2']
+                const mergeReadBy = (existing, api) => {
+                  const mergedMap = new Map();
+                  
+                  // Process existing ReadBy
+                  existing.forEach(item => {
+                    if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+                      // Object format: { userId: '123', readAt: '...' }
+                      const userId = String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim();
+                      if (userId) {
+                        mergedMap.set(userId, item); // Preserve full object
+                      }
+                    } else {
+                      // ID format: '123' or 123
+                      const userId = String(item).trim();
+                      if (userId) {
+                        // Convert to object format if not already
+                        mergedMap.set(userId, { userId, readAt: null });
+                      }
+                    }
+                  });
+                  
+                  // Process API ReadBy (prefer API data as it's more up-to-date)
+                  api.forEach(item => {
+                    if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+                      // Object format: { userId: '123', readAt: '...' }
+                      const userId = String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim();
+                      if (userId) {
+                        mergedMap.set(userId, item); // Overwrite with API data (newer)
+                      }
+                    } else {
+                      // ID format: '123' or 123
+                      const userId = String(item).trim();
+                      if (userId) {
+                        // Only add if not already present (preserve existing object with timestamp)
+                        if (!mergedMap.has(userId)) {
+                          mergedMap.set(userId, { userId, readAt: null });
+                        }
+                      }
+                    }
+                  });
+                  
+                  return Array.from(mergedMap.values());
+                };
+                
+                const mergedReadBy = mergeReadBy(existingReadBy, apiReadBy);
+                
+                // Calculate status independently for this message
+                const senderId = msg.SenderId || msg.senderId;
+                const isMyMessage = user && String(senderId).trim() === String(user.id).trim();
+                let calculatedStatus = existingMsg.status || 'sent';
+                
+                if (isMyMessage) {
+                  const senderIdStr = String(senderId).trim();
+                  const userIdStr = String(user.id).trim();
+                  
+                  // Check if ReadBy contains anyone OTHER than the sender
+                  // Handle both object and ID formats
+                  const otherReaders = mergedReadBy.filter(item => {
+                    const readerId = typeof item === 'object' && item !== null
+                      ? String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim()
+                      : String(item).trim();
+                    return readerId !== senderIdStr && 
+                           readerId !== userIdStr && 
+                           readerId !== '';
+                  });
+                  
+                  if (otherReaders.length > 0) {
+                    calculatedStatus = 'read';
+                  } else {
+                    // No other readers - keep as 'sent' (unless it's sending/failed)
+                    calculatedStatus = existingMsg.status === 'sending' || existingMsg.status === 'failed' 
+                      ? existingMsg.status 
+                      : 'sent';
+                  }
+                }
+                
+                // Merge message data but preserve calculated status and ReplyTo
+                // Preserve ReplyTo from API if it exists (it might be more complete)
+                const apiReplyTo = msg.ReplyTo || msg.replyTo || msg.ParentMessageId || msg.parentMessageId;
+                const existingReplyTo = existingMsg.ReplyTo || existingMsg.replyTo || existingMsg.ParentMessageId || existingMsg.parentMessageId;
+                const finalReplyTo = apiReplyTo || existingReplyTo;
+                
+                messageMap.set(id, {
+                  ...msg, // API data (newer)
+                  ...existingMsg, // Preserve optimistic updates
+                  ReadBy: mergedReadBy,
+                  readBy: mergedReadBy,
+                  status: calculatedStatus, // Use calculated status
+                  // Preserve ReplyTo from API (more reliable) or keep existing
+                  ReplyTo: finalReplyTo,
+                  replyTo: finalReplyTo,
+                  ParentMessageId: finalReplyTo,
+                  parentMessageId: finalReplyTo,
+                });
+              } else {
+                // New message from API - add it
+                messageMap.set(id, msg);
+              }
+            }
+          });
 
-          // Add WebSocket messages that aren't in API
+          // Keep optimistic messages (temp-*)
           prevMessages.forEach(msg => {
             const id = msg._id || msg.id;
             if (id && String(id).startsWith('temp-')) {
               messageMap.set(id, msg); // Keep optimistic
-            } else if (id && !messageMap.has(id)) {
-              messageMap.set(id, msg); // Keep WebSocket-only
             }
           });
           
@@ -354,8 +550,6 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             const timeB = new Date(b.Timestamp || b.timestamp || 0);
             return timeA - timeB;
           });
-          
-          
           
           return merged;
         });
@@ -388,24 +582,90 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     }
   }, [apiMessages, chatIdForQuery]);
 
+  // Mark messages as read when chat is viewed
+  const markMessagesAsRead = useCallback(() => {
+    if (!chatIdForQuery || !user || !socketService.isConnected()) {
+      return;
+    }
+
+    // Get unread messages (messages not sent by current user)
+    // CRITICAL: Only mark messages that are actually unread
+    const unreadMessages = messages.filter(msg => {
+      const senderId = msg.SenderId || msg.senderId;
+      const isMyMessage = user && String(senderId).trim() === String(user.id).trim();
+      
+      // Skip our own messages - we don't mark them as read
+      if (isMyMessage) {
+        return false;
+      }
+      
+      const isRead = msg.IsRead || msg.isRead || false;
+      const readBy = msg.ReadBy || msg.readBy || [];
+      const userIdStr = String(user.id).trim();
+      // Handle both object format [{userId, readAt}] and ID format ['id1', 'id2']
+      const isReadByMe = Array.isArray(readBy) && readBy.some(item => {
+        const readerId = typeof item === 'object' && item !== null && !Array.isArray(item)
+          ? String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim()
+          : String(item).trim();
+        return readerId === userIdStr;
+      });
+      
+      // Mark as read if: not my message, not already read by me
+      return !isReadByMe;
+    });
+
+    if (unreadMessages.length > 0) {
+      // Only send specific message IDs that need to be marked as read
+      const messageIds = unreadMessages.map(msg => msg._id || msg.id).filter(Boolean);
+      if (messageIds.length > 0) {
+        if (__DEV__) {
+          console.log('📖 Marking specific messages as read:', { count: messageIds.length, messageIds });
+        }
+        socketService.markMessagesRead(chatIdForQuery, user.id, messageIds);
+      }
+    }
+  }, [chatIdForQuery, user, messages]);
+
   // Socket connection and event handlers
+  // CRITICAL: Only depend on chatIdForQuery and user.id, NOT messages
+  // Adding messages to dependencies causes infinite loop (messages change -> useEffect runs -> joinChat -> messages update -> loop)
   useEffect(() => {
     if (!chatIdForQuery || !user) return;
 
-    const setupSocket = async () => {
-    if (!socketService.isConnected()) {
-      try {
-          
-          await socketService.connect(user.id);
-          
-      } catch (err) {
-        
+    // Check if we've already joined this chat to prevent infinite loops
+    const chatKey = `${chatIdForQuery}_${user.id}`;
+    if (joinedChatsRef.current.has(chatKey)) {
+      if (__DEV__) {
+        console.log('🔌 [useChat] Already joined this chat, skipping:', { chatId: chatIdForQuery });
       }
+      return;
     }
 
+    const setupSocket = async () => {
+      if (!socketService.isConnected()) {
+        try {
+          await socketService.connect(user.id);
+        } catch (err) {
+          if (__DEV__) {
+            console.error('❌ [useChat] Socket connection error:', err);
+          }
+        }
+      }
+
       if (socketService.isConnected() && chatIdForQuery) {
-        
-    socketService.joinChat(chatIdForQuery, user.id);
+        // ⚠️ BACKEND ISSUE: joinChat on backend automatically marks chat as read
+        // This resets UnreadCount to 0. Backend should NOT auto-mark as read when joining.
+        // Backend fix needed: Remove auto-mark-as-read from joinChat handler
+        // See: services/chat.service.js and utils/socket.js (joinChat event handler)
+        if (__DEV__) {
+          console.log('🔌 [useChat] Joining chat room - NOTE: Backend may auto-mark as read', {
+            chatId: chatIdForQuery,
+            userId: user.id,
+          });
+        }
+        socketService.joinChat(chatIdForQuery, user.id);
+        // Mark as joined to prevent duplicate joins
+        joinedChatsRef.current.add(chatKey);
       }
     };
 
@@ -423,6 +683,44 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       }
 
       // Normalize message format
+        const senderId = message.SenderId || message.senderId;
+        const readByArray = message.ReadBy || message.readBy || message.read_by || [];
+        const isReadFlag = message.IsRead || message.isRead || false;
+        let statusValue = message.status || 'sent';
+        
+        // CRITICAL: Only mark as "read" if someone OTHER than the sender has read it
+        // If this is my message, check if others have read it
+        if (user && String(senderId) === String(user.id)) {
+          const senderIdStr = String(senderId).trim();
+          const userIdStr = String(user.id).trim();
+          
+          // Check ReadBy array - must contain at least one ID that is NOT the sender
+          // Handle both object format [{userId, readAt}] and ID format ['id1', 'id2']
+          let hasReadByOthers = false;
+          if (Array.isArray(readByArray) && readByArray.length > 0) {
+            // Filter out the sender's ID and check if any OTHER users have read it
+            const otherReaders = readByArray.filter(item => {
+              // Extract userId from object or use item directly if it's an ID
+              const readerId = typeof item === 'object' && item !== null && !Array.isArray(item)
+                ? String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim()
+                : String(item).trim();
+              return readerId !== senderIdStr && 
+                     readerId !== userIdStr && 
+                     readerId !== '';
+            });
+            hasReadByOthers = otherReaders.length > 0;
+          }
+          
+          // IMPORTANT: Don't trust isReadFlag alone - verify ReadBy contains others
+          // Only mark as "read" if we have confirmed that others have read it
+          if (hasReadByOthers) {
+            statusValue = 'read';
+          } else {
+            // Default to 'sent' - NOT 'read' unless confirmed
+            statusValue = statusValue === 'sending' || statusValue === 'failed' ? statusValue : 'sent';
+          }
+        }
+
         const normalizedMessage = {
           _id: message._id || message.id,
           id: message._id || message.id,
@@ -441,12 +739,64 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           messageType: message.MessageType || message.messageType || 'text',
           IsRead: message.IsRead || message.isRead || false,
           isRead: message.IsRead || message.isRead || false,
-          Media: message.Media || message.media,
-          media: message.Media || message.media,
+        Media: message.Media || message.media,
+        media: message.Media || message.media,
+        MediaKey: message.MediaKey || message.mediaKey || message.media?.key,
+        mediaKey: message.MediaKey || message.mediaKey || message.media?.key,
+        MediaUrl: message.MediaUrl || message.mediaUrl || message.media?.url,
+        mediaUrl: message.MediaUrl || message.mediaUrl || message.media?.url,
+        MediaName: message.MediaName || message.mediaName || message.media?.name,
+        mediaName: message.MediaName || message.mediaName || message.media?.name,
+        ReadBy: readByArray,
+        readBy: readByArray,
+          ReplyTo: message.ReplyTo || message.replyTo || message.ParentMessageId || message.parentMessageId || null,
+          replyTo: message.ReplyTo || message.replyTo || message.ParentMessageId || message.parentMessageId || null,
           ChatId: messageChatId,
           chatId: messageChatId,
-        status: 'sent',
+        status: statusValue,
         };
+
+        // Infer media info if missing but looks like a media filename
+        if ((normalizedMessage.messageType === 'image' || normalizedMessage.messageType === 'video' || normalizedMessage.messageType === 'file') &&
+            (!normalizedMessage.mediaKey || !normalizedMessage.mediaUrl)) {
+          const inferred = inferMediaFromName(
+            normalizedMessage.mediaName ||
+            normalizedMessage.MediaName ||
+            normalizedMessage.Message ||
+            normalizedMessage.message
+          );
+          if (inferred) {
+            normalizedMessage.mediaKey = normalizedMessage.mediaKey || inferred.mediaKey;
+            normalizedMessage.MediaKey = normalizedMessage.MediaKey || inferred.mediaKey;
+            normalizedMessage.mediaUrl = normalizedMessage.mediaUrl || inferred.mediaUrl;
+            normalizedMessage.MediaUrl = normalizedMessage.MediaUrl || inferred.mediaUrl;
+            normalizedMessage.mediaName = normalizedMessage.mediaName || inferred.mediaName;
+            normalizedMessage.MediaName = normalizedMessage.MediaName || inferred.mediaName;
+            if (!normalizedMessage.messageType || normalizedMessage.messageType === 'text') {
+              normalizedMessage.messageType = inferred.messageType || normalizedMessage.messageType;
+              normalizedMessage.MessageType = inferred.messageType || normalizedMessage.MessageType;
+            }
+          }
+        }
+
+        // If we still have mediaKey but no mediaUrl, try to presign asynchronously
+        if (normalizedMessage.mediaKey && !normalizedMessage.mediaUrl) {
+          ensurePresignedUrl(normalizedMessage.mediaKey).then((url) => {
+            if (url) {
+              setMessages(prev => prev.map(msg => {
+                const msgId = msg._id || msg.id;
+                if (msgId === (normalizedMessage._id || normalizedMessage.id)) {
+                  return {
+                    ...msg,
+                    mediaUrl: url,
+                    MediaUrl: url,
+                  };
+                }
+                return msg;
+              }));
+            }
+          });
+        }
 
         setMessages(prev => {
           const newMsgId = normalizedMessage._id || normalizedMessage.id;
@@ -469,18 +819,81 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         }
         
         // Check for optimistic message to replace
+          // Match by message content, sender, and if it's a reply, also match by replyTo
           const optimisticIndex = prev.findIndex(msg => {
             const msgId = msg._id || msg.id;
-          return String(msgId).startsWith('temp-') && 
-                   msg.Message === normalizedMessage.Message &&
-                 String(msg.SenderId) === String(normalizedMessage.SenderId);
+            if (!String(msgId).startsWith('temp-')) return false;
+            if (msg.Message !== normalizedMessage.Message) return false;
+            if (String(msg.SenderId) !== String(normalizedMessage.SenderId)) return false;
+            
+            // If both have replyTo, they must match (handle various formats)
+            const msgReplyTo = msg.ReplyTo || msg.replyTo || msg.ParentMessageId || msg.parentMessageId;
+            const normReplyTo = normalizedMessage.ReplyTo || normalizedMessage.replyTo || normalizedMessage.ParentMessageId || normalizedMessage.parentMessageId;
+            
+            if (msgReplyTo || normReplyTo) {
+              // Extract IDs from various formats
+              const extractReplyId = (reply) => {
+                if (!reply) return null;
+                if (typeof reply === 'string') return reply.trim();
+                if (typeof reply === 'object') {
+                  return String(reply._id?.$oid || reply._id || reply.id || reply || '').trim();
+                }
+                return String(reply).trim();
+              };
+              
+              const msgReplyId = extractReplyId(msgReplyTo);
+              const normReplyId = extractReplyId(normReplyTo);
+              
+              // Both must have replyTo and they must match
+              if (!msgReplyId || !normReplyId || msgReplyId !== normReplyId) {
+                return false;
+              }
+            } else {
+              // If one has replyTo and the other doesn't, they don't match
+              if (msgReplyTo || normReplyTo) {
+                return false;
+              }
+            }
+            
+            return true;
           });
           
           if (optimisticIndex !== -1) {
-            // Replace optimistic message with real one
-          return prev.map((msg, index) => 
-            index === optimisticIndex ? normalizedMessage : msg
-          ).sort((a, b) => {
+            // Replace optimistic message with real one, preserving all fields including ReplyTo
+            // Handle ReplyTo from various backend formats
+            const extractReplyTo = (msg) => {
+              const replyTo = msg.ReplyTo || msg.replyTo || msg.ParentMessageId || msg.parentMessageId;
+              if (!replyTo) return null;
+              if (typeof replyTo === 'string') return replyTo;
+              if (typeof replyTo === 'object') {
+                return replyTo._id?.$oid || replyTo._id || replyTo.id || replyTo;
+              }
+              return replyTo;
+            };
+            
+            const backendReplyTo = extractReplyTo(normalizedMessage);
+            
+            const replacedMessage = {
+              ...normalizedMessage,
+              // Ensure ReplyTo is preserved from normalized message (backend response)
+              // Support multiple field names for compatibility
+              ReplyTo: backendReplyTo,
+              replyTo: backendReplyTo,
+              ParentMessageId: backendReplyTo,
+              parentMessageId: backendReplyTo,
+            };
+            
+            if (__DEV__) {
+              console.log('✅ [Reply] Replaced optimistic message with real one:', {
+                messageId: replacedMessage._id || replacedMessage.id,
+                replyTo: backendReplyTo,
+                messageText: (replacedMessage.Message || '').substring(0, 30),
+              });
+            }
+            
+            return prev.map((msg, index) => 
+              index === optimisticIndex ? replacedMessage : msg
+            ).sort((a, b) => {
               const timeA = new Date(a.Timestamp || a.timestamp || 0);
               const timeB = new Date(b.Timestamp || b.timestamp || 0);
               return timeA - timeB;
@@ -495,6 +908,75 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             return timeA - timeB;
           });
         });
+
+      // Mark new message as read if it's not from current user (user is viewing chat)
+      const messageSenderId = normalizedMessage.SenderId || normalizedMessage.senderId;
+      const isNotMyMessage = user && String(messageSenderId).trim() !== String(user.id).trim();
+      if (isNotMyMessage && socketService.isConnected() && chatIdForQuery) {
+        // Mark this message as read immediately since user is viewing the chat
+        const messageId = normalizedMessage._id || normalizedMessage.id;
+        if (messageId) {
+          setTimeout(() => {
+            socketService.markMessagesRead(chatIdForQuery, user.id, [messageId]);
+          }, 300); // Small delay to ensure message is processed
+        }
+      }
+      
+      // CRITICAL: For our own messages, ensure they start as 'sent', not 'read'
+      // Even if backend sends isRead=true, we should verify ReadBy contains others
+      if (user && String(messageSenderId).trim() === String(user.id).trim()) {
+        const senderIdStr = String(messageSenderId).trim();
+        const userIdStr = String(user.id).trim();
+        const readByArray = normalizedMessage.ReadBy || normalizedMessage.readBy || [];
+        
+        // Check message age - if it's very new (less than 2 seconds), it can't be read yet
+        const messageTime = normalizedMessage.Timestamp || normalizedMessage.timestamp;
+        const isVeryNewMessage = messageTime && (() => {
+          try {
+            const msgDate = new Date(messageTime);
+            const now = new Date();
+            const ageSeconds = (now - msgDate) / 1000;
+            return ageSeconds < 2; // Less than 2 seconds old
+          } catch {
+            return false;
+          }
+        })();
+        
+        // Check if ReadBy contains anyone OTHER than the sender
+        // Handle both object format [{userId, readAt}] and ID format ['id1', 'id2']
+        let hasReadByOthers = false;
+        if (Array.isArray(readByArray) && readByArray.length > 0) {
+          // Filter out the sender's ID and check if any OTHER users have read it
+          const otherReaders = readByArray.filter(item => {
+            // Extract userId from object or use item directly if it's an ID
+            const readerId = typeof item === 'object' && item !== null && !Array.isArray(item)
+              ? String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim()
+              : String(item).trim();
+            return readerId !== senderIdStr && 
+                   readerId !== userIdStr && 
+                   readerId !== '';
+          });
+          hasReadByOthers = otherReaders.length > 0;
+        }
+        
+        // SAFEGUARD: Very new messages (just sent) should NEVER be marked as read
+        if (isVeryNewMessage) {
+          normalizedMessage.status = 'sent';
+          normalizedMessage.IsRead = false;
+          normalizedMessage.isRead = false;
+        } else if (!hasReadByOthers && normalizedMessage.status === 'read') {
+          // Backend says read but no other readers - force to 'sent'
+          normalizedMessage.status = 'sent';
+          normalizedMessage.IsRead = false;
+          normalizedMessage.isRead = false;
+        } else if (hasReadByOthers) {
+          // Confirmed others have read it - mark as 'read'
+          normalizedMessage.status = 'read';
+        } else {
+          // Default to 'sent' for our messages
+          normalizedMessage.status = normalizedMessage.status || 'sent';
+        }
+      }
 
       // Trigger refetch to sync with API (but don't wait for it)
       // This ensures API and WebSocket stay in sync
@@ -513,10 +995,77 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     const handleMessagesRead = (data) => {
       if (data.chatId === chatIdForQuery) {
         setMessages(prev => prev.map(msg => {
-          if (data.userIds && data.userIds.includes(msg.SenderId || msg.senderId)) {
-            return { ...msg, IsRead: true, isRead: true };
+          const msgId = msg._id || msg.id;
+          
+          // CRITICAL: Only update messages that were actually marked as read
+          // If messageIds array is provided, only update those specific messages
+          // If not provided, backend might have marked all, but we should be conservative
+          const shouldUpdateThisMessage = !data.messageIds || 
+                                         (Array.isArray(data.messageIds) && data.messageIds.some(id => 
+                                           String(id).trim() === String(msgId).trim()
+                                         ));
+          
+          if (!shouldUpdateThisMessage) {
+            // Don't update this message - return as is
+            return msg;
           }
-          return msg;
+          
+          const updated = { ...msg };
+          const senderId = msg.SenderId || msg.senderId;
+          const senderIdStr = String(senderId).trim();
+          const userIdStr = String(user?.id).trim();
+          
+          // Add userIds to ReadBy array (if provided)
+          if (Array.isArray(data.userIds) && data.userIds.length > 0) {
+            const existingReadBy = new Set(msg.readBy || msg.ReadBy || []);
+            data.userIds.forEach(id => {
+              const readerId = String(id).trim();
+              if (readerId && readerId !== '') {
+                existingReadBy.add(readerId);
+              }
+            });
+            updated.readBy = Array.from(existingReadBy);
+            updated.ReadBy = updated.readBy;
+          }
+
+          // CRITICAL: Only mark as 'read' if this is MY message AND someone OTHER than me has read it
+          if (user && String(senderIdStr) === String(userIdStr)) {
+            // Check if ReadBy contains anyone OTHER than the sender
+            const readByArray = updated.readBy || updated.ReadBy || [];
+            let hasReadByOthers = false;
+            
+            if (Array.isArray(readByArray) && readByArray.length > 0) {
+              // Filter out the sender's ID and check if any OTHER users have read it
+              // Handle both object format [{userId, readAt}] and ID format ['id1', 'id2']
+              const otherReaders = readByArray.filter(item => {
+                // Extract userId from object or use item directly if it's an ID
+                const readerId = typeof item === 'object' && item !== null && !Array.isArray(item)
+                  ? String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim()
+                  : String(item).trim();
+                return readerId !== senderIdStr && 
+                       readerId !== userIdStr && 
+                       readerId !== '';
+              });
+              hasReadByOthers = otherReaders.length > 0;
+            }
+            
+            // Only mark as 'read' if others have actually read THIS specific message
+            if (hasReadByOthers) {
+              updated.isRead = true;
+              updated.IsRead = true;
+              updated.status = 'read';
+            } else {
+              // No other readers - keep as 'sent' (don't change to 'read')
+              // Preserve existing status if it's 'sending' or 'failed'
+              if (updated.status !== 'sending' && updated.status !== 'failed') {
+                updated.status = 'sent';
+              }
+              updated.isRead = false;
+              updated.IsRead = false;
+            }
+          }
+          
+          return updated;
         }));
       }
     };
@@ -540,19 +1089,60 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     socketService.on('messagesRead', handleMessagesRead);
     socketService.on('userTyping', handleUserTyping);
     
+    // Mark messages as read when chat is opened and messages are loaded
+    // Use ref to access latest messages without adding to dependencies
+    let markReadTimeout = null;
+    if (messagesRef.current.length > 0 && socketService.isConnected()) {
+      // Small delay to ensure socket is ready
+      markReadTimeout = setTimeout(() => {
+        // Access messages from ref to avoid dependency issues
+        const currentMessages = messagesRef.current;
+        if (!chatIdForQuery || !user || !socketService.isConnected()) {
+          return;
+        }
+        const unreadMessages = currentMessages.filter(msg => {
+          const senderId = msg.SenderId || msg.senderId;
+          const isMyMessage = user && String(senderId).trim() === String(user.id).trim();
+          if (isMyMessage) return false;
+          const isRead = msg.IsRead || msg.isRead || false;
+          const readBy = msg.ReadBy || msg.readBy || [];
+          const userIdStr = String(user.id).trim();
+          const isReadByMe = Array.isArray(readBy) && readBy.some(item => {
+            const readerId = typeof item === 'object' && item !== null && !Array.isArray(item)
+              ? String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim()
+              : String(item).trim();
+            return readerId === userIdStr;
+          });
+          return !isReadByMe;
+        });
+        if (unreadMessages.length > 0) {
+          const messageIds = unreadMessages.map(msg => msg._id || msg.id).filter(Boolean);
+          if (messageIds.length > 0) {
+            socketService.markMessagesRead(chatIdForQuery, user.id, messageIds);
+          }
+        }
+      }, 500);
+    }
+    
     
 
     // Cleanup
     return () => {
+      if (markReadTimeout) {
+        clearTimeout(markReadTimeout);
+      }
       socketService.off('newMessage', handleNewMessage);
       socketService.off('messagesRead', handleMessagesRead);
       socketService.off('userTyping', handleUserTyping);
       
-      if (chatIdForQuery) {
+      if (chatIdForQuery && user) {
         socketService.leaveChat(chatIdForQuery, user.id);
+        // Remove from joined chats set when leaving
+        const chatKey = `${chatIdForQuery}_${user.id}`;
+        joinedChatsRef.current.delete(chatKey);
       }
     };
-  }, [chatIdForQuery, user]);
+  }, [chatIdForQuery, user?.id]); // CRITICAL: Only depend on chatIdForQuery and user.id, NOT messages or markMessagesAsRead
 
   // Send message
   const sendMessage = useCallback(async (messageText, replyTo = null) => {
@@ -608,6 +1198,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
 
     // Create optimistic message
     const tempMessageId = `temp-${Date.now()}-${Math.random()}`;
+    const replyToId = replyTo?._id || replyTo?.id || null;
     const optimisticMessage = {
       _id: tempMessageId,
       id: tempMessageId,
@@ -626,6 +1217,8 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       isRead: false,
       ChatId: actualChatId,
       chatId: actualChatId,
+      ReplyTo: replyToId ? (replyTo || { _id: replyToId, id: replyToId }) : null,
+      replyTo: replyToId ? (replyTo || { _id: replyToId, id: replyToId }) : null,
       status: 'sending',
     };
 
@@ -673,11 +1266,22 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     }
 
     try {
+      if (__DEV__) {
+        console.log('[sendMedia] start', {
+          chatIdForQuery,
+          userId: user?.id,
+          file,
+        });
+      }
       const uploadResult = await uploadChatMedia({
         uri: file.uri,
         type: file.type || 'image/jpeg',
         name: file.name || `file_${Date.now()}.jpg`,
       }).unwrap();
+
+      if (__DEV__) {
+        console.log('[sendMedia] upload result', uploadResult);
+      }
 
       let messageType = file.messageType || 'file';
       if (!messageType) {
@@ -688,9 +1292,77 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         }
       }
 
-      const mediaUrl = uploadResult.Url || uploadResult.url || uploadResult.key;
-      const mediaName = uploadResult.name || file.name || 'Media file';
-      const mediaKey = uploadResult.key || uploadResult.Key || mediaUrl;
+      // Normalize upload response; backend may return a plain string key
+      const uploadData = typeof uploadResult === 'string'
+        ? { key: uploadResult, name: file.name || uploadResult }
+        : (uploadResult || {});
+
+      const mediaUrl = uploadData.Url || uploadData.url || uploadData.Location || uploadData.location;
+      const mediaName = uploadData.name || uploadData.fileName || file.name || 'Media file';
+      const mediaKey = uploadData.key || uploadData.Key || mediaUrl || uploadResult;
+      let finalMediaUrl = mediaUrl || getMediaUrlFromKey(mediaKey);
+      // Try presign if direct URL missing or looks like an API path
+      if (!finalMediaUrl || finalMediaUrl.includes('/api/files/')) {
+        const presigned = await ensurePresignedUrl(mediaKey);
+        if (presigned) {
+          finalMediaUrl = presigned;
+        }
+      }
+
+      // Create optimistic media message so UI shows thumbnail immediately
+      const tempMediaId = `temp-media-${Date.now()}-${Math.random()}`;
+      const optimisticMediaMessage = {
+        _id: tempMediaId,
+        id: tempMediaId,
+        Message: mediaName,
+        message: mediaName,
+        text: mediaName,
+        SenderId: user.id,
+        senderId: user.id,
+        SenderName: user.name || user.email || 'You',
+        senderName: user.name || user.email || 'You',
+        SenderRole: user.role,
+        senderRole: user.role,
+        Timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        MessageType: messageType,
+        messageType: messageType,
+        MediaKey: mediaKey,
+        mediaKey: mediaKey,
+        MediaUrl: finalMediaUrl,
+        mediaUrl: finalMediaUrl,
+        MediaName: mediaName,
+        mediaName: mediaName,
+        ChatId: chatIdForQuery,
+        chatId: chatIdForQuery,
+        status: 'sending',
+      };
+      setMessages(prev => [...prev, optimisticMediaMessage]);
+
+      if (__DEV__) {
+        console.log('[sendMedia] sending via socket', {
+          chatId: chatIdForQuery,
+          userId: user.id,
+          message: mediaName,
+          messageType,
+          mediaUrl: finalMediaUrl,
+          mediaKey,
+          mediaSize: uploadResult.size || file.size || 0,
+        });
+        if (!mediaKey && !mediaUrl) {
+          console.log('[sendMedia] WARN: mediaKey and mediaUrl are missing; backend returned:', uploadResult);
+        }
+        if (finalMediaUrl) {
+          try {
+            const testUrl = new URL(finalMediaUrl);
+            console.log('[media] finalMediaUrl', testUrl.toString());
+          } catch (e) {
+            console.log('[media] finalMediaUrl (raw)', finalMediaUrl);
+          }
+        } else {
+          console.log('[media] finalMediaUrl missing');
+        }
+      }
 
       const sent = socketService.sendMessage({
         chatId: chatIdForQuery,
@@ -698,13 +1370,25 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         message: mediaName,
         messageType: messageType,
         parentMessageId: null,
-        mediaUrl: mediaUrl,
+        mediaUrl: finalMediaUrl,
         mediaName: mediaName,
         mediaKey: mediaKey,
         mediaSize: uploadResult.size || file.size || 0,
       });
 
+      if (__DEV__) {
+        console.log('[sendMedia] socket send result', sent);
+      }
+
       if (sent) {
+        // Mark optimistic message as sent
+        setMessages(prev => prev.map(msg => {
+          if (msg.id === tempMediaId || msg._id === tempMediaId) {
+            return { ...msg, status: 'sent' };
+          }
+          return msg;
+        }));
+
         // Refetch after delay to ensure message appears
         setTimeout(() => {
           try {
@@ -713,14 +1397,37 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
               refetchFn();
             }
           } catch (error) {
-        
+            if (__DEV__) {
+              console.log('[sendMedia] refetch error', error);
+            }
       }
       }, 1500);
+      } else {
+        // Mark optimistic message as failed
+        setMessages(prev => prev.map(msg => {
+          if (msg.id === tempMediaId || msg._id === tempMediaId) {
+            return { ...msg, status: 'failed' };
+          }
+          return msg;
+        }));
       }
 
       return sent;
     } catch (error) {
-      
+      if (__DEV__) {
+        console.log('[sendMedia] error', error);
+      }
+      // Mark optimistic message as failed on error
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === tempMediaId || msg._id === tempMediaId) {
+          return { ...msg, status: 'failed' };
+        }
+        return msg;
+      }));
+      alert.error(
+        'Error',
+        error.message || 'Failed to send media. Please try again.'
+      );
       return false;
     }
   }, [chatIdForQuery, user, uploadChatMedia]);
@@ -769,10 +1476,120 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             if (id) messageMap.set(id, msg);
           });
           
-          // Add new messages (older messages)
+          // Add new messages (older messages) with normalization
           messagesArray.forEach(msg => {
-            const id = msg._id || msg.id;
-            if (id) messageMap.set(id, msg);
+            const senderId = msg.SenderId || msg.senderId;
+            const readByArray = msg.ReadBy || msg.readBy || msg.read_by || [];
+            const isReadFlag = msg.IsRead || msg.isRead || false;
+            let statusValue = msg.status || 'sent';
+            
+            // CRITICAL: Only mark as "read" if someone OTHER than the sender has read it
+            if (user && String(senderId) === String(user.id)) {
+              const senderIdStr = String(senderId).trim();
+              const userIdStr = String(user.id).trim();
+              
+              // Check ReadBy array - must contain at least one ID that is NOT the sender
+              // Handle both object format [{userId, readAt}] and ID format ['id1', 'id2']
+              let hasReadByOthers = false;
+              if (Array.isArray(readByArray) && readByArray.length > 0) {
+                // Filter out the sender's ID and check if any OTHER users have read it
+                const otherReaders = readByArray.filter(item => {
+                  // Extract userId from object or use item directly if it's an ID
+                  const readerId = typeof item === 'object' && item !== null && !Array.isArray(item)
+                    ? String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim()
+                    : String(item).trim();
+                  return readerId !== senderIdStr && 
+                         readerId !== userIdStr && 
+                         readerId !== '';
+                });
+                hasReadByOthers = otherReaders.length > 0;
+              }
+              
+              // IMPORTANT: Don't trust isReadFlag alone - verify ReadBy contains others
+              // Only mark as "read" if we have confirmed that others have read it
+              if (hasReadByOthers) {
+                statusValue = 'read';
+              } else {
+                // Default to 'sent' - NOT 'read' unless confirmed
+                statusValue = statusValue === 'sending' || statusValue === 'failed' ? statusValue : 'sent';
+              }
+            }
+
+            const normalized = {
+              _id: msg._id || msg.id,
+              id: msg._id || msg.id,
+              Message: msg.Message || msg.message || msg.text || '',
+              message: msg.Message || msg.message || msg.text || '',
+              text: msg.Message || msg.message || msg.text || '',
+              SenderId: msg.SenderId || msg.senderId,
+              senderId: msg.SenderId || msg.senderId,
+              SenderName: msg.SenderName || msg.senderName,
+              senderName: msg.SenderName || msg.senderName,
+              SenderRole: msg.SenderRole || msg.senderRole,
+              senderRole: msg.SenderRole || msg.senderRole,
+              Timestamp: msg.Timestamp || msg.timestamp,
+              timestamp: msg.Timestamp || msg.timestamp,
+              MessageType: msg.MessageType || msg.messageType || 'text',
+              messageType: msg.MessageType || msg.messageType || 'text',
+              IsRead: msg.IsRead || msg.isRead || false,
+              isRead: msg.IsRead || msg.isRead || false,
+              Media: msg.Media || msg.media,
+              media: msg.Media || msg.media,
+              MediaKey: msg.MediaKey || msg.mediaKey || msg.media?.key,
+              mediaKey: msg.MediaKey || msg.mediaKey || msg.media?.key,
+              MediaUrl: msg.MediaUrl || msg.mediaUrl || msg.media?.url,
+              mediaUrl: msg.MediaUrl || msg.mediaUrl || msg.media?.url,
+              MediaName: msg.MediaName || msg.mediaName || msg.media?.name,
+              mediaName: msg.MediaName || msg.mediaName || msg.media?.name,
+              ChatId: msg.ChatId || msg.chatId || msg.EnquiryId || msg.enquiryId,
+              chatId: msg.ChatId || msg.chatId || msg.EnquiryId || msg.enquiryId,
+              ReadBy: readByArray,
+              readBy: readByArray,
+              status: statusValue,
+            };
+
+            if ((normalized.messageType === 'image' || normalized.messageType === 'video' || normalized.messageType === 'file') &&
+                (!normalized.mediaKey || !normalized.mediaUrl)) {
+              const inferred = inferMediaFromName(
+                normalized.mediaName ||
+                normalized.MediaName ||
+                normalized.Message ||
+                normalized.message
+              );
+              if (inferred) {
+                normalized.mediaKey = normalized.mediaKey || inferred.mediaKey;
+                normalized.MediaKey = normalized.MediaKey || inferred.mediaKey;
+                normalized.mediaUrl = normalized.mediaUrl || inferred.mediaUrl;
+                normalized.MediaUrl = normalized.MediaUrl || inferred.mediaUrl;
+                normalized.mediaName = normalized.mediaName || inferred.mediaName;
+                normalized.MediaName = normalized.MediaName || inferred.mediaName;
+                if (!normalized.messageType || normalized.messageType === 'text') {
+                  normalized.messageType = inferred.messageType || normalized.messageType;
+                  normalized.MessageType = inferred.messageType || normalized.MessageType;
+                }
+              }
+            }
+
+            if (normalized.mediaKey && !normalized.mediaUrl) {
+              ensurePresignedUrl(normalized.mediaKey).then((url) => {
+                if (url) {
+                  setMessages(prev => prev.map(existing => {
+                    const mid = existing._id || existing.id;
+                    if (mid === (normalized._id || normalized.id)) {
+                      return {
+                        ...existing,
+                        mediaUrl: url,
+                        MediaUrl: url,
+                      };
+                    }
+                    return existing;
+                  }));
+                }
+              });
+            }
+
+            const id = normalized._id || normalized.id;
+            if (id) messageMap.set(id, normalized);
           });
           
           return Array.from(messageMap.values()).sort((a, b) => {
