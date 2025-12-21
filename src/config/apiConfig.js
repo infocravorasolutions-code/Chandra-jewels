@@ -21,7 +21,7 @@ export const USE_CUSTOM_URL = false;
 export const USE_PHYSICAL_DEVICE = true;
 
 // Custom IP address for physical device (only used if USE_PHYSICAL_DEVICE is true)
-export const PHYSICAL_DEVICE_IP = '192.168.1.3'; // Change to your computer's IP
+export const PHYSICAL_DEVICE_IP = '192.168.1.7'; // Change to your computer's IP
 
 // ==================== URL CONFIGURATION ====================
 
@@ -46,19 +46,19 @@ export const getApiBaseUrl = () => {
     return process.env.API_URL;
   }
 
-  // Priority 2: Custom URL flag
-  if (USE_CUSTOM_URL) {
-    return CUSTOM_API_URL;
-  }
-
-  // Priority 3: Force production URL flag
-  if (USE_PRODUCTION_URL) {
-    return PRODUCTION_API_URL;
-  }
-
-  // Priority 4: Development mode
+  // Priority 2: Check if local/development first
+  // In development mode, use local URLs by default
   if (__DEV__) {
-    // Android
+    // Check for override flags first (within dev mode)
+    if (USE_PRODUCTION_URL) {
+      return PRODUCTION_API_URL;
+    }
+    
+    if (USE_CUSTOM_URL) {
+      return CUSTOM_API_URL;
+    }
+
+    // Default to local development URLs
     if (Platform.OS === 'android') {
       // Use physical device IP if flag is set
       if (USE_PHYSICAL_DEVICE) {
@@ -72,7 +72,7 @@ export const getApiBaseUrl = () => {
     }
   }
 
-  // Priority 5: Production (default for non-dev builds)
+  // Priority 3: Production (default for non-dev builds)
   return PRODUCTION_API_URL;
 };
 

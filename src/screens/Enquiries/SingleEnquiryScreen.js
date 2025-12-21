@@ -161,6 +161,35 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     refetchOnFocus: true, // Refetch when screen comes into focus to get latest data (including pricing)
     refetchOnMountOrArgChange: true, // Refetch when enquiryId changes
   });
+
+  // Auto-retry logic for notification navigation (handles timing issues)
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
+  useEffect(() => {
+    // If we have an error and enquiryId, and haven't retried too many times, auto-retry
+    if (queryError && enquiryId && retryCountRef.current < maxRetries && !loading) {
+      const isServerError = queryError?.status === 500 || queryError?.originalStatus === 500;
+      const isNotFound = queryError?.status === 404 || queryError?.originalStatus === 404;
+      
+      // Only auto-retry for server errors (might be timing issue) or not found (might be newly created)
+      if (isServerError || isNotFound) {
+        retryCountRef.current += 1;
+        const delay = retryCountRef.current * 1000; // 1s, 2s, 3s delays
+        console.log(`[SingleEnquiry] 🔄 Auto-retry ${retryCountRef.current}/${maxRetries} in ${delay}ms for enquiry:`, enquiryId);
+        
+        const retryTimer = setTimeout(() => {
+          refetch();
+        }, delay);
+        
+        return () => clearTimeout(retryTimer);
+      }
+    }
+  }, [queryError, enquiryId, loading, refetch]);
+  
+  // Reset retry count when enquiryId changes
+  useEffect(() => {
+    retryCountRef.current = 0;
+  }, [enquiryId]);
   
 
   // Watch for status changes and log them
@@ -1084,8 +1113,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
   }, [cleanupImageCache]);
 
-  // Handle error state
-  const error = queryError ? (queryError.data?.error || queryError.message || 'Failed to load enquiry') : null;
+  // Handle error state with better error messages
+  const error = queryError ? (queryError.data?.error || queryError.data?.message || queryError.message || 'Failed to load enquiry') : null;
+  const errorStatus = queryError?.status || queryError?.originalStatus;
+  
+  // Log error details for debugging
+  useEffect(() => {
+    if (queryError && enquiryId) {
+      console.error('[SingleEnquiry] ❌ Error fetching enquiry:', {
+        enquiryId,
+        error: queryError.data?.error || queryError.message,
+        status: errorStatus,
+        fullError: JSON.stringify(queryError, null, 2),
+      });
+    }
+  }, [queryError, enquiryId, errorStatus]);
 
   // Show loading state
   if (loading) {
@@ -1098,16 +1140,49 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   // Safety check - don't render if enquiry is not available
   if (error || !enquiry || !enquiry.id) {
+    // Check if it's a 500 error (Internal Server Error)
+    const isServerError = errorStatus === 500 || error?.toLowerCase().includes('internal server error');
+    const isNotFound = errorStatus === 404 || error?.toLowerCase().includes('not found');
+    
     return (
       <View style={styles.container}>
-        <Text style={[styles.errorText, { color: colors.textPrimary, fontSize: fonts.lg }]}>
-          {error || 'Enquiry not found'}
-        </Text>
-        <Button
-          title="Go Back"
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-        />
+        <View style={styles.errorContainer}>
+          <Icon name="error-outline" size={48} color={colors.error} />
+          <Text style={[styles.errorText, { color: colors.textPrimary, fontSize: fonts.lg, marginTop: 16 }]}>
+            {isServerError 
+              ? 'Server Error' 
+              : isNotFound 
+              ? 'Enquiry Not Found' 
+              : error || 'Failed to load enquiry'}
+          </Text>
+          {isServerError && (
+            <Text style={[styles.errorSubtext, { color: colors.textSecondary, fontSize: fonts.sm, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 }]}>
+              The enquiry might still be saving. Please try again in a moment.
+            </Text>
+          )}
+          {enquiryId && (
+            <Text style={[styles.errorSubtext, { color: colors.textLight, fontSize: fonts.xs, marginTop: 8 }]}>
+              Enquiry ID: {enquiryId}
+            </Text>
+          )}
+        </View>
+        <View style={styles.errorActions}>
+          <Button
+            title="Retry"
+            onPress={() => {
+              console.log('[SingleEnquiry] 🔄 Retrying fetch for enquiry:', enquiryId);
+              refetch();
+            }}
+            variant="primary"
+            style={styles.retryButton}
+          />
+          <Button
+            title="Go Back"
+            onPress={() => navigation.goBack()}
+            variant="secondary"
+            style={styles.backButton}
+          />
+        </View>
       </View>
     );
   }
@@ -3184,9 +3259,30 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 40,
+  },
   errorText: {
     textAlign: 'center',
     marginBottom: 20,
+    fontFamily: fonts.bold,
+  },
+  errorSubtext: {
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  errorActions: {
+    width: '100%',
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  retryButton: {
+    marginBottom: 8,
   },
   backButton: {
     marginTop: 20,

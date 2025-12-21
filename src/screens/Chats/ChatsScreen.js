@@ -8,9 +8,10 @@ import {
   Text,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
-import { useGetChatsQuery, useGetEnquiriesQuery, useGetChatMessagesQuery } from '../../store/api';
-import { useSelector } from 'react-redux';
+import { useGetChatsQuery, useGetEnquiriesQuery, useGetChatMessagesQuery, api } from '../../store/api';
+import { useSelector, useDispatch } from 'react-redux';
 import { Card } from '../../components/cards/Cards';
 import { SearchInput } from '../../components/common';
 // Removed custom Text components to fix crashes
@@ -22,11 +23,14 @@ import Icon from '../../components/common/Icon';
 import { formatDateTime, truncateText } from '../../utils/helpers';
 import { getUserName } from '../../utils/userUtils';
 import { useUsers } from '../../features/users/usersHooks';
+import socketService from '../../services/socketService';
 
 const ChatsScreen = ({ navigation }) => {
   const { user } = useAuth();
+  const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [forceUpdate, setForceUpdate] = useState(0); // Force re-render when cache updates
   
   // Load users to enable name lookup by ID
   const { users: usersList } = useUsers();
@@ -71,7 +75,22 @@ const ChatsScreen = ({ navigation }) => {
 
   const { chatType1, chatType2, isAdmin } = getChatTypes();
 
+  // Log component mount and initial state
+  useEffect(() => {
+    console.log('🚀 [ChatsScreen] Component mounted/updated', {
+      timestamp: new Date().toISOString(),
+      userId: user?.id,
+      chatType1,
+      chatType2,
+      isAdmin,
+      roleId,
+      roleString,
+      isConnected: socketService.isConnected(),
+    });
+  }, []);
+
   // Fetch first chat type (or only type for non-admins)
+  // Hybrid approach: WebSocket for instant updates + shorter polling as safety net
   const { 
     data: chatsFromAPI1 = [], 
     isLoading: chatsLoading1, 
@@ -82,6 +101,7 @@ const ChatsScreen = ({ navigation }) => {
     {
       skip: !user,
       refetchOnFocus: true, // Refetch when screen comes into focus
+      pollingInterval: 5000, // Poll every 5 seconds as safety net (WebSocket handles instant updates)
     }
   );
 
@@ -96,8 +116,32 @@ const ChatsScreen = ({ navigation }) => {
     {
       skip: !user || !isAdmin || !chatType2,
       refetchOnFocus: true, // Refetch when screen comes into focus
+      pollingInterval: 5000, // Poll every 5 seconds as safety net (WebSocket handles instant updates)
     }
   );
+
+  // Log when chat data changes
+  useEffect(() => {
+    console.log('📊 [ChatsScreen] Chat data updated', {
+      timestamp: new Date().toISOString(),
+      chatsFromAPI1Count: chatsFromAPI1?.length || 0,
+      chatsFromAPI2Count: chatsFromAPI2?.length || 0,
+      chatsLoading1,
+      chatsLoading2,
+      chatsError1: !!chatsError1,
+      chatsError2: !!chatsError2,
+      firstFewChatIds1: chatsFromAPI1?.slice(0, 3).map(c => ({
+        id: c.id || c._id,
+        enquiryId: c.enquiryId || c.EnquiryId,
+        unreadCount: c.unreadCount || c.UnreadCount,
+      })) || [],
+      firstFewChatIds2: chatsFromAPI2?.slice(0, 3).map(c => ({
+        id: c.id || c._id,
+        enquiryId: c.enquiryId || c.EnquiryId,
+        unreadCount: c.unreadCount || c.UnreadCount,
+      })) || [],
+    });
+  }, [chatsFromAPI1, chatsFromAPI2, chatsLoading1, chatsLoading2, chatsError1, chatsError2]);
 
   // Helper function to filter chats by role (as per specification)
   const filterChatsByRole = useCallback((chats, userRoleId) => {
@@ -127,7 +171,17 @@ const ChatsScreen = ({ navigation }) => {
   }, []);
 
   // Merge both chat types for admins, and filter by type for non-admins
+  // Include forceUpdate in dependencies to trigger re-computation when cache updates
   const chatsFromAPI = useMemo(() => {
+    console.log('🔄 [ChatsScreen] Computing chatsFromAPI', {
+      timestamp: new Date().toISOString(),
+      isAdmin,
+      chatType2,
+      chatsFromAPI1Count: chatsFromAPI1?.length || 0,
+      chatsFromAPI2Count: chatsFromAPI2?.length || 0,
+      forceUpdate,
+    });
+
     if (isAdmin && chatType2) {
       // Merge both arrays and remove duplicates by chat ID
       const allChats = [...(chatsFromAPI1 || []), ...(chatsFromAPI2 || [])];
@@ -135,16 +189,35 @@ const ChatsScreen = ({ navigation }) => {
         new Map(allChats.map(chat => [chat.id || chat._id, chat])).values()
       );
       // Apply role-based filtering (for admin, this returns all chats)
-      return filterChatsByRole(uniqueChats, roleId);
+      const result = filterChatsByRole(uniqueChats, roleId);
+      console.log('✅ [ChatsScreen] Combined chats (admin)', {
+        allChatsCount: allChats.length,
+        uniqueChatsCount: uniqueChats.length,
+        resultCount: result.length,
+        firstFewChats: result.slice(0, 3).map(c => ({
+          id: c.id || c._id,
+          enquiryId: c.enquiryId || c.EnquiryId,
+          unreadCount: c.unreadCount || c.UnreadCount,
+          lastMessage: (c.lastMessage || c.LastMessage || '').substring(0, 30),
+        })),
+      });
+      return result;
     }
     
     // For non-admins, filter chats by role
     const chats = chatsFromAPI1 || [];
     if (chats.length > 0 && roleId) {
       const filteredChats = filterChatsByRole(chats, roleId);
-      
-      
-      
+      console.log('✅ [ChatsScreen] Combined chats (non-admin, role-based)', {
+        inputCount: chats.length,
+        resultCount: filteredChats.length,
+        firstFewChats: filteredChats.slice(0, 3).map(c => ({
+          id: c.id || c._id,
+          enquiryId: c.enquiryId || c.EnquiryId,
+          unreadCount: c.unreadCount || c.UnreadCount,
+          lastMessage: (c.lastMessage || c.LastMessage || '').substring(0, 30),
+        })),
+      });
       return filteredChats;
     }
     
@@ -157,14 +230,30 @@ const ChatsScreen = ({ navigation }) => {
         }
         return true; // Assume backend filtered correctly
       });
-      
-      
-      
+      console.log('✅ [ChatsScreen] Combined chats (non-admin, type-based)', {
+        inputCount: chats.length,
+        resultCount: filteredChats.length,
+        firstFewChats: filteredChats.slice(0, 3).map(c => ({
+          id: c.id || c._id,
+          enquiryId: c.enquiryId || c.EnquiryId,
+          unreadCount: c.unreadCount || c.UnreadCount,
+          lastMessage: (c.lastMessage || c.LastMessage || '').substring(0, 30),
+        })),
+      });
       return filteredChats;
     }
     
+    console.log('✅ [ChatsScreen] Combined chats (fallback)', {
+      resultCount: chats.length,
+      firstFewChats: chats.slice(0, 3).map(c => ({
+        id: c.id || c._id,
+        enquiryId: c.enquiryId || c.EnquiryId,
+        unreadCount: c.unreadCount || c.UnreadCount,
+        lastMessage: (c.lastMessage || c.LastMessage || '').substring(0, 30),
+      })),
+    });
     return chats;
-  }, [chatsFromAPI1, chatsFromAPI2, isAdmin, chatType2, chatType1, roleId, filterChatsByRole]);
+  }, [chatsFromAPI1, chatsFromAPI2, isAdmin, chatType2, chatType1, roleId, filterChatsByRole, forceUpdate]);
 
   // Combined loading and error states
   const chatsLoading = chatsLoading1 || (isAdmin && chatsLoading2);
@@ -199,6 +288,47 @@ const ChatsScreen = ({ navigation }) => {
       throw error;
     }
   }, [refetchChats1, refetchChats2, isAdmin, chatType2, chatType1]);
+
+  // Refetch chats when screen comes into focus (e.g., when returning from ChatDetailScreen)
+  // This ensures unread counts are updated immediately after viewing messages
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) return;
+      
+      let timer1, timer2;
+      
+      // Delay to allow backend to process mark-as-read and update unread counts
+      // The backend needs time to:
+      // 1. Receive mark-as-read WebSocket event
+      // 2. Update database (mark messages as read)
+      // 3. Recalculate unread count for the chat
+      // 4. Return updated count in API response
+      timer1 = setTimeout(() => {
+        if (__DEV__) {
+          console.log('🔄 [ChatsScreen] Screen focused - invalidating cache and refetching chats');
+        }
+        // Invalidate Chat cache to force fresh fetch (bypasses RTK Query cache)
+        dispatch(api.util.invalidateTags(['Chat']));
+        // Then refetch with a delay to ensure cache invalidation is processed
+        timer2 = setTimeout(() => {
+          refetchChats().then(() => {
+            if (__DEV__) {
+              console.log('✅ [ChatsScreen] Chats refetched after focus');
+            }
+          }).catch((error) => {
+            if (__DEV__) {
+              console.error('❌ [ChatsScreen] Error refetching chats:', error);
+            }
+          });
+        }, 300);
+      }, 1200); // 1.2 second delay to allow backend to fully process mark-as-read
+      
+      return () => {
+        if (timer1) clearTimeout(timer1);
+        if (timer2) clearTimeout(timer2);
+      };
+    }, [refetchChats, user, dispatch])
+  );
 
   // Fetch enquiries to create chats from them if chats API doesn't exist
   const { data: enquiriesResponse, isLoading: enquiriesLoading } = useGetEnquiriesQuery(user?.role, {
@@ -465,11 +595,579 @@ const ChatsScreen = ({ navigation }) => {
     }
   }, [chats, searchQuery]);
 
-  // Removed WebSocket listener - chat list will update via pull-to-refresh or when screen comes into focus
-  // Real-time updates are handled in ChatDetailScreen for individual chats
+  // WebSocket listener for real-time unread count updates
+  // When messages are marked as read, backend sends 'messagesRead' event
+  // This updates the chat list immediately without needing to refetch (like old version)
+  useEffect(() => {
+    if (!user) {
+      console.log('⚠️ [ChatsScreen] messagesRead listener skipped - no user');
+      return;
+    }
+
+    console.log('🔌 [ChatsScreen] Setting up messagesRead WebSocket listener', {
+      timestamp: new Date().toISOString(),
+      userId: user?.id,
+      chatType1,
+      chatType2,
+      isAdmin,
+      searchQuery,
+      isConnected: socketService.isConnected(),
+    });
+
+    const handleMessagesRead = (data) => {
+      console.log('📖 [ChatsScreen] ⚡⚡⚡ messagesRead WebSocket event received ⚡⚡⚡', {
+        timestamp: new Date().toISOString(),
+        data,
+        chatId: data?.chatId,
+        userId: data?.userId,
+        unreadCount: data?.unreadCount,
+        hasChatId: !!data?.chatId,
+      });
+      
+      // Data should contain: { chatId, userId, unreadCount }
+      // Update cache directly for instant UI update (like old version)
+      if (data?.chatId) {
+        const chatId = data.chatId;
+        const newUnreadCount = data.unreadCount !== undefined ? Number(data.unreadCount) : 0;
+        
+        console.log('🔄 [ChatsScreen] Processing messagesRead update', {
+          chatId,
+          newUnreadCount,
+          chatType1,
+          chatType2,
+        });
+        
+        // Update both chat type queries optimistically
+        // This updates the UI instantly without refetch
+        try {
+          let foundInType1 = false;
+          let foundInType2 = false;
+
+          // Update chatType1 query cache
+          console.log('🔍 [ChatsScreen] Searching for chat in type1 cache', { chatId, chatType1 });
+          dispatch(
+            api.util.updateQueryData('getChats', { page: 1, limit: 50, search: searchQuery, type: chatType1 }, (draft) => {
+              if (!Array.isArray(draft)) {
+                console.warn('⚠️ [ChatsScreen] Draft is not an array (type1):', typeof draft);
+                return;
+              }
+              
+              console.log('🔍 [ChatsScreen] Type1 cache state', {
+                draftLength: draft.length,
+                searchingForChatId: chatId,
+                firstFewChatIds: draft.slice(0, 3).map(c => ({
+                  id: c.id,
+                  _id: c._id,
+                  chatId: c.chatId,
+                })),
+              });
+
+              const chat = draft.find(c => {
+                const cId = c.id || c._id;
+                const matches = cId && String(cId).trim() === String(chatId).trim();
+                if (matches) {
+                  console.log('✅ [ChatsScreen] Found chat in type1 cache', {
+                    chatId: cId,
+                    currentUnreadCount: c.unreadCount || c.UnreadCount,
+                    newUnreadCount,
+                  });
+                }
+                return matches;
+              });
+              
+              if (chat) {
+                foundInType1 = true;
+                const oldUnreadCount = chat.unreadCount || chat.UnreadCount || 0;
+                chat.unreadCount = newUnreadCount;
+                chat.UnreadCount = newUnreadCount;
+                if (chat._originalData) {
+                  chat._originalData.UnreadCount = newUnreadCount;
+                  chat._originalData.unreadCount = newUnreadCount;
+                }
+                console.log('✅ [ChatsScreen] Updated unread count in type1 cache', {
+                  chatId,
+                  oldUnreadCount,
+                  newUnreadCount,
+                  chatTitle: chat.enquiryTitle || chat.EnquiryName,
+                });
+              } else {
+                console.warn('⚠️ [ChatsScreen] Chat not found in type1 cache', {
+                  chatId,
+                  draftLength: draft.length,
+                });
+              }
+            })
+          );
+          
+          // Update chatType2 query cache (if admin)
+          if (isAdmin && chatType2) {
+            console.log('🔍 [ChatsScreen] Searching for chat in type2 cache', { chatId, chatType2 });
+            dispatch(
+              api.util.updateQueryData('getChats', { page: 1, limit: 50, search: searchQuery, type: chatType2 }, (draft) => {
+                if (!Array.isArray(draft)) {
+                  console.warn('⚠️ [ChatsScreen] Draft is not an array (type2):', typeof draft);
+                  return;
+                }
+
+                const chat = draft.find(c => {
+                  const cId = c.id || c._id;
+                  const matches = cId && String(cId).trim() === String(chatId).trim();
+                  if (matches) {
+                    console.log('✅ [ChatsScreen] Found chat in type2 cache', {
+                      chatId: cId,
+                      currentUnreadCount: c.unreadCount || c.UnreadCount,
+                      newUnreadCount,
+                    });
+                  }
+                  return matches;
+                });
+                
+                if (chat) {
+                  foundInType2 = true;
+                  const oldUnreadCount = chat.unreadCount || chat.UnreadCount || 0;
+                  chat.unreadCount = newUnreadCount;
+                  chat.UnreadCount = newUnreadCount;
+                  if (chat._originalData) {
+                    chat._originalData.UnreadCount = newUnreadCount;
+                    chat._originalData.unreadCount = newUnreadCount;
+                  }
+                  console.log('✅ [ChatsScreen] Updated unread count in type2 cache', {
+                    chatId,
+                    oldUnreadCount,
+                    newUnreadCount,
+                    chatTitle: chat.enquiryTitle || chat.EnquiryName,
+                  });
+                } else {
+                  console.warn('⚠️ [ChatsScreen] Chat not found in type2 cache', {
+                    chatId,
+                    draftLength: draft.length,
+                  });
+                }
+              })
+            );
+          }
+
+          // Force re-render
+          setTimeout(() => {
+            setForceUpdate(prev => {
+              const next = prev + 1;
+              console.log('🔄 [ChatsScreen] Force update triggered (messagesRead)', {
+                prev,
+                next,
+                foundInType1,
+                foundInType2,
+              });
+              return next;
+            });
+          }, 0);
+
+          // Hybrid approach: Cache update provides instant UI, delayed refetch ensures consistency
+          if (!foundInType1 && (!isAdmin || !chatType2 || !foundInType2)) {
+            console.warn('⚠️ [ChatsScreen] Chat not found in any cache - invalidating and refetching');
+            dispatch(api.util.invalidateTags(['Chat']));
+            refetchChats();
+          } else {
+            // Chat found - cache update provides instant UI update
+            // But also refetch after delay to ensure backend consistency
+            console.log('✅ [ChatsScreen] Chat updated via cache - scheduling delayed refetch for consistency');
+            setTimeout(() => {
+              console.log('🔄 [ChatsScreen] Delayed refetch for consistency after messagesRead');
+              refetchChats().then(() => {
+                console.log('✅ [ChatsScreen] Chats refetched for consistency (messagesRead)');
+              }).catch((error) => {
+                console.error('❌ [ChatsScreen] Error in delayed refetch (messagesRead):', error);
+              });
+            }, 800); // 800ms delay - allows cache update to show first, then syncs with backend
+          }
+        } catch (error) {
+          console.error('❌ [ChatsScreen] Error updating cache for messagesRead:', error);
+          // Fallback: invalidate and refetch if cache update fails
+          dispatch(api.util.invalidateTags(['Chat']));
+          refetchChats();
+        }
+      } else {
+        console.warn('⚠️ [ChatsScreen] messagesRead event missing chatId', { data });
+      }
+    };
+
+    // Subscribe to messagesRead event
+    const unsubscribeMessagesRead = socketService.on('messagesRead', handleMessagesRead);
+    console.log('✅ [ChatsScreen] Subscribed to messagesRead WebSocket event');
+
+    return () => {
+      // Cleanup: unsubscribe when component unmounts
+      if (unsubscribeMessagesRead) {
+        unsubscribeMessagesRead();
+        console.log('🔌 [ChatsScreen] Unsubscribed from messagesRead event');
+      }
+    };
+  }, [user, dispatch, chatType1, chatType2, isAdmin, searchQuery, refetchChats]);
+
+  // WebSocket listener for real-time chat list updates when new messages arrive
+  // When sender sends message, receiver's chat list should update instantly:
+  // - Move chat to top (most recent first)
+  // - Update unread count badge
+  // - Update last message preview
+  // - Update timestamp
+  useEffect(() => {
+    if (!user) return;
+
+    const handleNewMessage = (message) => {
+      // ALWAYS log this - critical for debugging real-time updates
+      console.log('📨 [ChatsScreen] ⚡⚡⚡ newMessage WebSocket event received ⚡⚡⚡', {
+        timestamp: new Date().toISOString(),
+        hasMessage: !!message,
+        messageKeys: message ? Object.keys(message) : [],
+        chatId: message?.ChatId || message?.chatId,
+        enquiryId: message?.EnquiryId || message?.enquiryId,
+        senderId: message?.SenderId || message?.senderId,
+        messageText: message?.Message || message?.message || '',
+      });
+
+      // Get chat ID from message - try multiple fields
+      const messageChatId = message.ChatId || message.chatId || message.Chat?._id || message.Chat?.id;
+      const messageEnquiryId = message.EnquiryId || message.enquiryId || message.Enquiry?.id || message.Enquiry?._id;
+      
+      console.log('🔍 [ChatsScreen] Extracted IDs from message:', {
+        messageChatId,
+        messageEnquiryId,
+        messageKeys: Object.keys(message),
+        fullMessage: JSON.stringify(message, null, 2).substring(0, 500),
+      });
+
+      if (!messageChatId && !messageEnquiryId) {
+        console.error('❌ [ChatsScreen] newMessage missing both chatId and enquiryId:', {
+          message,
+          messageKeys: Object.keys(message),
+        });
+        return;
+      }
+
+      // Check if message is from current user (we don't increment unread count for our own messages)
+      const senderId = message.SenderId || message.senderId;
+      const isMyMessage = user && senderId && String(senderId).trim() === String(user.id).trim();
+
+      // Get message text and timestamp
+      const messageText = message.Message || message.message || message.Text || message.text || '';
+      const messageTimestamp = message.Timestamp || message.timestamp || message.CreatedAt || message.createdAt || new Date().toISOString();
+
+      console.log('📝 [ChatsScreen] Processing newMessage:', {
+        messageChatId,
+        messageEnquiryId,
+        messageText: messageText.substring(0, 50),
+        messageTimestamp,
+        isMyMessage,
+        senderId,
+        userId: user?.id,
+        senderMatchesUser: senderId && user?.id ? String(senderId).trim() === String(user.id).trim() : false,
+      });
+
+      // Update cache directly for instant UI update (WebSocket-driven, no refetch needed)
+      try {
+        let chatFoundInCache = false;
+        let foundInType1 = false;
+        let foundInType2 = false;
+
+        console.log('🔄 [ChatsScreen] Starting cache update for newMessage', {
+          messageChatId,
+          messageEnquiryId,
+          chatType1,
+          chatType2,
+          isAdmin,
+        });
+
+        const updateChatCache = (queryParams, typeLabel) => {
+          console.log(`🔍 [ChatsScreen] Updating cache for ${typeLabel}`, queryParams);
+          
+          const updateDraft = (draft) => {
+              if (!Array.isArray(draft)) {
+                console.warn(`⚠️ [ChatsScreen] Draft is not an array (${typeLabel}):`, typeof draft);
+                return false;
+              }
+
+              console.log(`🔍 [ChatsScreen] Searching in ${typeLabel} cache`, {
+                draftLength: draft.length,
+                searchingForChatId: messageChatId,
+                searchingForEnquiryId: messageEnquiryId,
+                firstFewChats: draft.slice(0, 3).map(c => ({
+                  id: c.id,
+                  _id: c._id,
+                  chatId: c.chatId,
+                  ChatId: c.ChatId,
+                  enquiryId: c.enquiryId,
+                  EnquiryId: c.EnquiryId,
+                  title: c.enquiryTitle || c.EnquiryName,
+                })),
+              });
+
+              // Try to find chat by chatId first, then by enquiryId
+              const chatIndex = draft.findIndex(c => {
+                const chatId = c.id || c._id || c.chatId || c.ChatId;
+                const enquiryId = c.enquiryId || c.EnquiryId;
+                
+                // Match by chatId
+                if (messageChatId && chatId) {
+                  const matches = String(chatId).trim() === String(messageChatId).trim();
+                  if (matches) {
+                    console.log(`✅ [ChatsScreen] Found chat by chatId in ${typeLabel}`, {
+                      chatId,
+                      messageChatId,
+                      chatTitle: c.enquiryTitle || c.EnquiryName,
+                    });
+                    return true;
+                  }
+                }
+                
+                // Match by enquiryId (fallback)
+                if (messageEnquiryId && enquiryId) {
+                  const matches = String(enquiryId).trim() === String(messageEnquiryId).trim();
+                  if (matches) {
+                    console.log(`✅ [ChatsScreen] Found chat by enquiryId in ${typeLabel}`, {
+                      enquiryId,
+                      messageEnquiryId,
+                      chatTitle: c.enquiryTitle || c.EnquiryName,
+                    });
+                    return true;
+                  }
+                }
+                
+                return false;
+              });
+
+              if (chatIndex !== -1) {
+                const chat = draft[chatIndex];
+                const oldUnreadCount = Number(chat.unreadCount || chat.UnreadCount || 0);
+                const oldLastMessage = chat.lastMessage || chat.LastMessage;
+                
+                console.log(`📝 [ChatsScreen] Updating chat in ${typeLabel} cache`, {
+                  chatId: chat.id || chat._id,
+                  enquiryId: chat.enquiryId || chat.EnquiryId,
+                  oldUnreadCount,
+                  oldLastMessage: oldLastMessage?.substring(0, 30),
+                  newMessageText: messageText.substring(0, 30),
+                  isMyMessage,
+                });
+                
+                // Update last message
+                chat.lastMessage = messageText;
+                chat.LastMessage = messageText;
+                
+                // Update last message time (this will move chat to top when sorted)
+                chat.lastMessageTime = messageTimestamp;
+                chat.LastMessageTime = messageTimestamp;
+                
+                // Update last sender info
+                chat.lastMessageSenderId = senderId;
+                chat.lastSenderId = senderId;
+                
+                // Update unread count (only if message is not from current user)
+                if (!isMyMessage) {
+                  const newUnreadCount = oldUnreadCount + 1;
+                  chat.unreadCount = newUnreadCount;
+                  chat.UnreadCount = newUnreadCount;
+                  if (chat._originalData) {
+                    chat._originalData.UnreadCount = newUnreadCount;
+                    chat._originalData.unreadCount = newUnreadCount;
+                  }
+                  console.log(`📊 [ChatsScreen] Unread count updated in ${typeLabel}`, {
+                    oldUnreadCount,
+                    newUnreadCount,
+                  });
+                } else {
+                  console.log(`ℹ️ [ChatsScreen] Message from current user - not incrementing unread count in ${typeLabel}`);
+                }
+                
+                // Update _originalData if it exists
+                if (chat._originalData) {
+                  if (chat._originalData.LastMessage) {
+                    chat._originalData.LastMessage.Message = messageText;
+                    chat._originalData.LastMessage.Timestamp = messageTimestamp;
+                    chat._originalData.LastMessage.SenderId = senderId;
+                  } else {
+                    chat._originalData.LastMessage = {
+                      Message: messageText,
+                      Timestamp: messageTimestamp,
+                      SenderId: senderId,
+                    };
+                  }
+                  chat._originalData.LastMessageTime = messageTimestamp;
+                }
+
+                // Move chat to top of array (most recent first)
+                draft.splice(chatIndex, 1);
+                draft.unshift(chat);
+
+                // Sort entire array by lastMessageTime to ensure correct order
+                // Most recent messages first (descending order)
+                draft.sort((a, b) => {
+                  try {
+                    const timeA = new Date(a.lastMessageTime || a.LastMessageTime || 0);
+                    const timeB = new Date(b.lastMessageTime || b.LastMessageTime || 0);
+                    return timeB - timeA; // Descending: newest first
+                  } catch (e) {
+                    return 0;
+                  }
+                });
+
+                console.log(`✅ [ChatsScreen] Chat updated in ${typeLabel} cache via WebSocket`, {
+                  chatId: messageChatId,
+                  enquiryId: messageEnquiryId,
+                  unreadCount: chat.unreadCount,
+                  movedToTop: true,
+                  sorted: true,
+                  chatTitle: chat.enquiryTitle || chat.EnquiryName,
+                });
+                
+                return true; // Chat found and updated
+              } else {
+                console.warn(`⚠️ [ChatsScreen] Chat not found in ${typeLabel} cache`, {
+                  messageChatId,
+                  messageEnquiryId,
+                  draftLength: draft.length,
+                });
+                return false; // Chat not found
+              }
+          };
+          
+          const result = dispatch(
+            api.util.updateQueryData('getChats', queryParams, updateDraft)
+          );
+          
+          // Force re-render by updating state AFTER cache update completes
+          setTimeout(() => {
+            setForceUpdate(prev => {
+              const next = prev + 1;
+              console.log(`🔄 [ChatsScreen] Force update triggered (${typeLabel})`, {
+                prev,
+                next,
+              });
+              return next;
+            });
+          }, 0);
+          
+          return result;
+        };
+
+        // Update both chat type queries
+        console.log('🔄 [ChatsScreen] Updating type1 cache', { chatType1 });
+        const result1 = updateChatCache({ page: 1, limit: 50, search: searchQuery, type: chatType1 }, 'type1');
+        foundInType1 = !!result1;
+        
+        if (isAdmin && chatType2) {
+          console.log('🔄 [ChatsScreen] Updating type2 cache', { chatType2 });
+          const result2 = updateChatCache({ page: 1, limit: 50, search: searchQuery, type: chatType2 }, 'type2');
+          foundInType2 = !!result2;
+          chatFoundInCache = foundInType1 || foundInType2;
+        } else {
+          chatFoundInCache = foundInType1;
+        }
+
+        console.log('📊 [ChatsScreen] Cache update summary', {
+          chatFoundInCache,
+          foundInType1,
+          foundInType2,
+          messageChatId,
+          messageEnquiryId,
+        });
+
+        // Hybrid approach: Update cache instantly, then refetch after delay for consistency
+        // This ensures UI updates immediately AND stays in sync with backend
+        if (!chatFoundInCache) {
+          console.log('🔄 [ChatsScreen] Chat not in cache - refetching to get new chat', {
+            messageChatId,
+            messageEnquiryId,
+          });
+          // Chat not found - might be a new chat, refetch to get it
+          setTimeout(() => {
+            refetchChats().then(() => {
+              console.log('✅ [ChatsScreen] Chats refetched - new chat added');
+            }).catch((error) => {
+              console.error('❌ [ChatsScreen] Error refetching after new message:', error);
+            });
+          }, 300); // Small delay to allow backend to process
+        } else {
+          console.log('✅ [ChatsScreen] Chat updated via WebSocket cache - scheduling delayed refetch for consistency', {
+            foundInType1,
+            foundInType2,
+          });
+          // Chat found in cache - cache update provides instant UI update
+          // But also refetch after a delay to ensure backend consistency
+          // This handles cases where WebSocket event arrives before backend fully processes
+          setTimeout(() => {
+            console.log('🔄 [ChatsScreen] Delayed refetch for consistency after cache update');
+            refetchChats().then(() => {
+              console.log('✅ [ChatsScreen] Chats refetched for consistency');
+            }).catch((error) => {
+              console.error('❌ [ChatsScreen] Error in delayed refetch:', error);
+            });
+          }, 1000); // 1 second delay - allows cache update to show first, then syncs with backend
+        }
+      } catch (error) {
+        console.error('❌ [ChatsScreen] Error updating cache for newMessage:', error);
+        // Fallback: invalidate and refetch if cache update fails
+        dispatch(api.util.invalidateTags(['Chat']));
+        refetchChats();
+      }
+    };
+
+    // Ensure WebSocket is connected before subscribing
+    if (!socketService.isConnected()) {
+      console.warn('⚠️ [ChatsScreen] ⚡⚡⚡ WebSocket NOT connected, attempting to connect...');
+      if (user?.id) {
+        socketService.connect(user.id).then(() => {
+          console.log('✅ [ChatsScreen] ⚡⚡⚡ WebSocket connected successfully');
+        }).catch(err => {
+          console.error('❌ [ChatsScreen] Failed to connect WebSocket:', err);
+        });
+      }
+    } else {
+      console.log('✅ [ChatsScreen] ⚡⚡⚡ WebSocket already connected');
+    }
+
+    // Subscribe to newMessage event immediately
+    // Even if socket isn't connected yet, the listener will be active once it connects
+    const unsubscribeNewMessage = socketService.on('newMessage', handleNewMessage);
+
+    // ALWAYS log subscription - critical for debugging real-time updates
+    console.log('✅ [ChatsScreen] ⚡⚡⚡ Subscribed to newMessage WebSocket event ⚡⚡⚡', {
+      timestamp: new Date().toISOString(),
+      isConnected: socketService.isConnected(),
+      userId: user?.id,
+      socketUrl: socketService.getSocket()?.io?.uri || 'unknown',
+    });
+
+    // Monitor WebSocket connection status periodically
+    // This helps debug if WebSocket disconnects
+    const connectionMonitor = setInterval(() => {
+      const isConnected = socketService.isConnected();
+      if (!isConnected) {
+        console.warn('⚠️ [ChatsScreen] WebSocket disconnected - will rely on polling');
+        // Try to reconnect
+        if (user?.id) {
+          socketService.connect(user.id).catch(() => {
+            // Silent fail - polling will handle updates
+          });
+        }
+      }
+    }, 10000); // Check every 10 seconds
+
+    return () => {
+      // Cleanup: unsubscribe when component unmounts
+      if (unsubscribeNewMessage) {
+        unsubscribeNewMessage();
+        console.log('🔌 [ChatsScreen] Unsubscribed from newMessage event');
+      }
+      // Clear connection monitor
+      if (connectionMonitor) {
+        clearInterval(connectionMonitor);
+      }
+    };
+  }, [user, dispatch, chatType1, chatType2, isAdmin, searchQuery, refetchChats]);
 
   const onRefresh = async () => {
     setRefreshing(true);
+    // Invalidate cache before refreshing
+    dispatch(api.util.invalidateTags(['Chat']));
     await refetchChats();
     setRefreshing(false);
   };
@@ -498,19 +1196,51 @@ const ChatsScreen = ({ navigation }) => {
 
     // Get unread count - check multiple sources
     const getUnreadCount = () => {
+      let count = 0;
+      let source = 'none';
+      
       if (chat.unreadCount !== undefined && chat.unreadCount !== null) {
-        return Number(chat.unreadCount) || 0;
+        count = Number(chat.unreadCount) || 0;
+        source = 'chat.unreadCount';
+      } else if (chat.UnreadCount !== undefined && chat.UnreadCount !== null) {
+        count = Number(chat.UnreadCount) || 0;
+        source = 'chat.UnreadCount';
+      } else if (chat._originalData?.UnreadCount !== undefined && chat._originalData?.UnreadCount !== null) {
+        count = Number(chat._originalData.UnreadCount) || 0;
+        source = '_originalData.UnreadCount';
+      } else if (chat._originalData?.unreadCount !== undefined && chat._originalData?.unreadCount !== null) {
+        count = Number(chat._originalData.unreadCount) || 0;
+        source = '_originalData.unreadCount';
       }
-      if (chat.UnreadCount !== undefined && chat.UnreadCount !== null) {
-        return Number(chat.UnreadCount) || 0;
+      
+      // Debug logging to help diagnose missing unread counts
+      if (__DEV__) {
+        if (count > 0) {
+          console.log('[ChatsScreen] ✅ Unread count found:', {
+            chatId: chat.id,
+            enquiryTitle: chat.enquiryTitle,
+            unreadCount: count,
+            source,
+          });
+        } else {
+          // Log first few chats with 0 unread to see what's available
+          const chatIndex = filteredChats.findIndex(c => c?.id === chat.id);
+          if (chatIndex < 3) {
+            console.log('[ChatsScreen] ⚠️ Unread count is 0:', {
+              chatId: chat.id,
+              enquiryTitle: chat.enquiryTitle,
+              source,
+              'chat.unreadCount': chat.unreadCount,
+              'chat.UnreadCount': chat.UnreadCount,
+              '_originalData.UnreadCount': chat._originalData?.UnreadCount,
+              '_originalData.unreadCount': chat._originalData?.unreadCount,
+              '_originalData keys': chat._originalData ? Object.keys(chat._originalData).slice(0, 10) : 'no _originalData',
+            });
+          }
+        }
       }
-      if (chat._originalData?.UnreadCount !== undefined && chat._originalData?.UnreadCount !== null) {
-        return Number(chat._originalData.UnreadCount) || 0;
-      }
-      if (chat._originalData?.unreadCount !== undefined && chat._originalData?.unreadCount !== null) {
-        return Number(chat._originalData.unreadCount) || 0;
-      }
-      return 0;
+      
+      return count;
     };
     
     const unreadCount = getUnreadCount();
@@ -744,7 +1474,12 @@ const ChatsScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.chatFooter}>
-              {/* Unread count badge on the left */}
+              <Text style={styles.chatMessage}>
+                {chat.lastMessage && typeof chat.lastMessage === 'string'
+                  ? `${senderLabel}: ${truncateText(chat.lastMessage, 50)}`
+                  : 'No messages yet'}
+              </Text>
+              {/* Unread count badge on the right */}
               {unreadCount > 0 && (
                 <View style={styles.unreadBadge}>
                   <Text style={styles.unreadBadgeText}>
@@ -752,11 +1487,6 @@ const ChatsScreen = ({ navigation }) => {
                   </Text>
                 </View>
               )}
-              <Text style={styles.chatMessage}>
-                {chat.lastMessage && typeof chat.lastMessage === 'string'
-                  ? `${senderLabel}: ${truncateText(chat.lastMessage, 50)}`
-                  : 'No messages yet'}
-              </Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -876,7 +1606,7 @@ const styles = StyleSheet.create({
   },
   chatFooter: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
   },
@@ -894,7 +1624,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 6,
-    marginRight: 4,
+    marginLeft: 8,
   },
   unreadBadgeText: {
     color: colors.textWhite,

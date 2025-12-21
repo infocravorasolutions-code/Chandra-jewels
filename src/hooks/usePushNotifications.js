@@ -14,6 +14,7 @@ import {
 } from '../services/pushNotificationService';
 import { navigationRef } from '../navigation/navigationRef';
 import { isFirstLaunch, markFirstLaunchComplete } from '../utils/firstLaunch';
+import { navigateFromNotification as navigateFromNotificationUtil } from '../utils/notificationNavigation';
 
 const invalidateNotificationTags = (dispatch) => {
   dispatch(
@@ -200,41 +201,8 @@ export const usePushNotifications = () => {
   }, [createNotificationChannel]);
 
   const navigateFromNotification = useCallback((remoteMessage) => {
-    const link = remoteMessage?.data?.link || remoteMessage?.data?.Link;
-    if (!navigationRef.isReady()) {
-      return;
-    }
-
-    if (!link) {
-      navigationRef.navigate('Notifications');
-      return;
-    }
-
-    const normalizedLink = link.replace(/^\//, '');
-    if (normalizedLink.startsWith('notifications')) {
-      navigationRef.navigate('Notifications');
-    } else if (normalizedLink.startsWith('enquiries/')) {
-      const enquiryId = normalizedLink.split('/')[1];
-      navigationRef.navigate('SingleEnquiry', { enquiryId });
-    } else if (normalizedLink.startsWith('chats/')) {
-      // Handle chat notification: chats/{chatId}
-      const parts = normalizedLink.split('/');
-      const chatId = parts[1];
-      const enquiryId = remoteMessage?.data?.enquiryId || remoteMessage?.data?.EnquiryId;
-      const chatType = remoteMessage?.data?.chatType || remoteMessage?.data?.ChatType;
-      
-      if (chatId) {
-        navigationRef.navigate('ChatDetail', {
-          chatId: chatId,
-          enquiryId: enquiryId,
-          chatType: chatType,
-        });
-      } else {
-        navigationRef.navigate('Notifications');
-      }
-    } else {
-      navigationRef.navigate('Notifications');
-    }
+    // Use the shared utility function for consistent navigation logic
+    navigateFromNotificationUtil(remoteMessage);
   }, []);
 
 
@@ -383,38 +351,13 @@ export const usePushNotifications = () => {
       }
 
       unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
-        if (type === 1) {
+        if (type === 1) { // PRESS event - user tapped the notification
           invalidateNotificationTags(dispatch);
-          const link = detail.notification?.data?.link || detail.notification?.data?.Link;
-          if (link) {
-            const normalizedLink = link.replace(/^\//, '');
-            if (normalizedLink.startsWith('notifications')) {
-              navigationRef.navigate('Notifications');
-            } else if (normalizedLink.startsWith('enquiries/')) {
-              const enquiryId = normalizedLink.split('/')[1];
-              navigationRef.navigate('SingleEnquiry', { enquiryId });
-            } else if (normalizedLink.startsWith('chats/')) {
-              // Handle chat notification: chats/{chatId}
-              const parts = normalizedLink.split('/');
-              const chatId = parts[1];
-              const enquiryId = detail.notification?.data?.enquiryId || detail.notification?.data?.EnquiryId;
-              const chatType = detail.notification?.data?.chatType || detail.notification?.data?.ChatType;
-              
-              if (chatId) {
-                navigationRef.navigate('ChatDetail', {
-                  chatId: chatId,
-                  enquiryId: enquiryId,
-                  chatType: chatType,
-                });
-              } else {
-                navigationRef.navigate('Notifications');
-              }
-            } else {
-              navigationRef.navigate('Notifications');
-            }
-          } else {
-            navigationRef.navigate('Notifications');
-          }
+          // Convert notifee notification format to remoteMessage format for consistent handling
+          const remoteMessage = {
+            data: detail.notification?.data || {},
+          };
+          navigateFromNotification(remoteMessage);
         }
       });
     };

@@ -3295,14 +3295,59 @@ export const api = createApi({
             unreadCountSource = 'stats.unreadCount';
           }
           
-          // Debug logging for unread count - only log when count > 0 to reduce noise
-          if (__DEV__ && unreadCount > 0) {
-            console.log('[API] ✅ Unread count:', {
-              chatId: chatId,
-              enquiryTitle: chat.EnquiryName || chat.enquiryName || 'Unknown',
-              unreadCount: unreadCount,
-              source: unreadCountSource,
-            });
+          // Debug logging for unread count - log always to help diagnose missing counts
+          if (__DEV__) {
+            if (unreadCount > 0) {
+              console.log('[API] ✅ Unread count found:', {
+                chatId: chatId,
+                enquiryTitle: chat.EnquiryName || chat.enquiryName || 'Unknown',
+                unreadCount: unreadCount,
+                source: unreadCountSource,
+              });
+            } else {
+              // Log when unread count is 0 to see what backend sent
+              console.log('[API] ⚠️ Unread count is 0:', {
+                chatId: chatId,
+                enquiryTitle: chat.EnquiryName || chat.enquiryName || 'Unknown',
+                source: unreadCountSource,
+                availableFields: {
+                  UnreadCount: chat.UnreadCount,
+                  unreadCount: chat.unreadCount,
+                  Unread: chat.Unread,
+                  unread: chat.unread,
+                  UnreadMessages: chat.UnreadMessages,
+                  unreadMessages: chat.unreadMessages,
+                  LastMessage: chat.LastMessage ? 'exists' : 'missing',
+                  LastMessageIsRead: chat.LastMessage?.IsRead,
+                  LastMessageReadBy: chat.LastMessage?.ReadBy,
+                },
+              });
+            }
+          }
+          
+          // If unread count is still 0, try to calculate from LastMessage ReadBy
+          // This is a fallback if backend doesn't send unread count directly
+          if (unreadCount === 0 && lastMessageObj && typeof lastMessageObj === 'object') {
+            const lastMessageSenderId = lastMessageObj.SenderId || lastMessageObj.senderId;
+            const lastMessageIsRead = lastMessageObj.IsRead || lastMessageObj.isRead || false;
+            const lastMessageReadBy = lastMessageObj.ReadBy || lastMessageObj.readBy || [];
+            
+            // If last message is not from current user and not read, count as 1 unread
+            // Note: This is a simplified calculation - backend should provide accurate count
+            // We can't calculate full unread count without fetching all messages
+            if (lastMessageSenderId && !lastMessageIsRead && Array.isArray(lastMessageReadBy)) {
+              // Check if current user has read it (would need user context, but we'll use a heuristic)
+              // For now, if IsRead is false, assume it's unread
+              // This is a fallback - backend should provide UnreadCount
+              if (__DEV__) {
+                console.log('[API] 🔄 Attempting to infer unread from LastMessage:', {
+                  chatId: chatId,
+                  lastMessageIsRead,
+                  lastMessageReadByLength: lastMessageReadBy.length,
+                  note: 'Backend should provide UnreadCount field',
+                });
+              }
+            }
           }
           
           return {
@@ -3314,7 +3359,6 @@ export const api = createApi({
             lastMessageTime: lastMessageTime || new Date().toISOString(),
             unreadCount: unreadCount, // CRITICAL: Always set unreadCount (even if 0)
             _originalData: chat, // CRITICAL: Preserve original data for fallback
-            unreadCount: unreadCount,
             isGroup: chat.IsGroup || chat.isGroup || false,
             participants: chat.Participants || chat.participants || [],
             lastSender: lastSenderName,
@@ -3326,8 +3370,6 @@ export const api = createApi({
             // Preserve chat type for filtering (important for role-based chat visibility)
             type: chat.Type || chat.type || null,
             Type: chat.Type || chat.type || null,
-            // Preserve original data
-            _originalData: chat,
           };
         });
         

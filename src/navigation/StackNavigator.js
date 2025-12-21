@@ -21,7 +21,11 @@ import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
 import DesignViewerScreen from '../screens/DesignViewer/DesignViewerScreen';
 import PricingScreen from '../screens/Pricing/PricingScreen';
 import UploadDesignScreen from '../screens/UploadDesign/UploadDesignScreen';
-import FontTest from '../components/FontTest';
+// TEST SCREENS - Commented out for production
+// Uncomment these lines if you need to test notifications in the future
+// import FontTest from '../components/FontTest';
+// import NotificationTestScreen from '../screens/Test/NotificationTestScreen';
+// import GetFCMTokenScreen from '../screens/Test/GetFCMTokenScreen';
 // import ResponsiveDemoScreen from '../components/ResponsiveDemoScreen';
 
 const Stack = createStackNavigator();
@@ -163,6 +167,9 @@ const StackNavigator = ({ isAuthenticated }) => {
               headerShown: false,
             }}
           />
+          {/* TEST SCREENS - Commented out for production
+              To re-enable: Uncomment the imports at the top and uncomment these screens below
+          
           <Stack.Screen
             name="FontTest"
             component={FontTest}
@@ -170,13 +177,28 @@ const StackNavigator = ({ isAuthenticated }) => {
               title: 'Font Test',
             }}
           />
-          {/* <Stack.Screen
+          <Stack.Screen
+            name="NotificationTest"
+            component={NotificationTestScreen}
+            options={{
+              title: 'Notification Test',
+            }}
+          />
+          <Stack.Screen
+            name="GetFCMToken"
+            component={GetFCMTokenScreen}
+            options={{
+              title: 'Get FCM Token',
+            }}
+          />
+          <Stack.Screen
             name="ResponsiveDemo"
             component={ResponsiveDemoScreen}
             options={{
               title: 'Responsive Demo',
             }}
-          /> */}
+          />
+          */}
         </>
       ) : (
         // Unauthenticated screens

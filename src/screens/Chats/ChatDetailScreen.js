@@ -115,6 +115,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
     sendTyping = () => {},
     refetchMessages = () => Promise.resolve(),
     refetchChat = () => Promise.resolve(),
+    loadMoreMessages = () => Promise.resolve(false),
+    hasMore = false,
+    isLoadingMore = false,
+    nextCursor = null,
   } = chatHookResult || {};
   
   // Use routeChat if it has an _id and hook hasn't loaded yet, otherwise use hookChat
@@ -138,26 +142,13 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }, [chat?._id, refetchMessages, messagesLoading])
   );
 
-  // ⚠️ IMPORTANT: Don't mark messages as read immediately when screen opens
-  // This should only happen when user actually scrolls to bottom and views messages
-  // The current implementation marks as read too early, which resets unread count
-  // 
-  // TODO: Change this to only mark as read when:
-  // 1. User scrolls to bottom of chat
-  // 2. User has been viewing messages for a few seconds
-  // 3. User explicitly marks as read
-  //
-  // NOTE: Backend's joinChat also auto-marks as read, which is a separate issue
-  // Backend fix needed: Remove auto-mark-as-read from joinChat handler in utils/socket.js
-  //
-  // For now, we delay marking as read to give user time to see unread count
-  // But ideally, this should be triggered by scroll-to-bottom event
+  // Mark messages as read when user views the chat
+  // This ensures unread counts are updated when user opens and views messages
   useFocusEffect(
     React.useCallback(() => {
       if (chat?._id && messages.length > 0 && !messagesLoading) {
-        // ⚠️ DELAYED: Mark messages as read after user has had time to see them
-        // This is a workaround - ideally should only mark when user scrolls to bottom
-        const markReadTimer = setTimeout(() => {
+        // Helper function to mark messages as read
+        const markMessagesAsRead = () => {
           // Get unread messages (messages not sent by current user)
           const unreadMessages = messages.filter(msg => {
             const senderId = msg.SenderId || msg.senderId;
@@ -179,18 +170,28 @@ const ChatDetailScreen = ({ route, navigation }) => {
             const messageIds = unreadMessages.map(msg => msg._id || msg.id).filter(Boolean);
             if (messageIds.length > 0 && socketService.isConnected()) {
               if (__DEV__) {
-                console.log('📖 [ChatDetailScreen] Marking messages as read (delayed)', {
+                console.log('📖 [ChatDetailScreen] Marking messages as read', {
                   chatId: chat?._id,
                   messageCount: messageIds.length,
-                  note: 'This should ideally only happen when user scrolls to bottom',
                 });
               }
               socketService.markMessagesRead(chat?._id || chat?.id, user?.id, messageIds);
             }
           }
-        }, 3000); // Increased delay to 3 seconds - gives user time to see unread count before it disappears
+        };
+
+        // Mark as read after a short delay (gives user time to see messages)
+        const markReadTimer = setTimeout(() => {
+          markMessagesAsRead();
+        }, 1000); // Reduced to 1 second for faster update
         
-        return () => clearTimeout(markReadTimer);
+        // Cleanup: Also mark as read when user leaves the screen
+        // This ensures messages are marked even if user leaves quickly
+        return () => {
+          clearTimeout(markReadTimer);
+          // Mark as read immediately when leaving (user has viewed the chat)
+          markMessagesAsRead();
+        };
       }
     }, [chat?._id, messages, messagesLoading, user])
   );
@@ -208,6 +209,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const isUserAtBottomRef = useRef(true); // Track if user is at bottom
   const lastMessageCountRef = useRef(0);
   const scrollPositionRef = useRef({ y: 0, contentHeight: 0, layoutHeight: 0 });
+  const isLoadingMoreRef = useRef(false); // Track if currently loading more to prevent duplicate calls
+  const hasLoadedMoreRef = useRef(false); // Track if we've already triggered load more in this scroll session
+  const scrollOffsetBeforeLoadRef = useRef(0); // Store scroll position before loading more
+  const messagesCountBeforeLoadRef = useRef(0); // Store message count before loading more
 
   const loading = isLoadingChat || messagesLoading;
   const messagesError = chatError;
@@ -395,7 +400,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Initialize scroll hook after enrichedMessages is defined
   const { scrollToMessage, storeMessagePosition } = useMessageScroll(enrichedMessages, scrollViewRef);
 
-  // Track scroll position to determine if user is at bottom
+  // Track scroll position to determine if user is at bottom and detect scroll-to-top for pagination
   const handleScroll = useCallback((event) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     
@@ -421,13 +426,57 @@ const ChatDetailScreen = ({ route, navigation }) => {
         // Also set scrolling flag to prevent any auto-scroll attempts
         isUserScrollingRef.current = true;
       }
+
+      // PAGINATION: Check if user scrolled to top (to load older messages)
+      // Since messages are oldest first (inverted=false), top = older messages
+      const distanceFromTop = contentOffset.y;
+      const isNearTop = distanceFromTop <= 100; // Within 100px from top
+      
+      // Load more messages when user scrolls near top
+      if (isNearTop && hasMore && !isLoadingMore && !isLoadingMoreRef.current && !hasLoadedMoreRef.current) {
+        isLoadingMoreRef.current = true;
+        hasLoadedMoreRef.current = true;
+        
+        // Store current scroll position and message count before loading
+        scrollOffsetBeforeLoadRef.current = contentOffset.y;
+        messagesCountBeforeLoadRef.current = enrichedMessages.length;
+        
+        if (__DEV__) {
+          console.log('📜 [Pagination] User scrolled to top, loading older messages...', {
+            scrollOffset: contentOffset.y,
+            messageCount: enrichedMessages.length,
+          });
+        }
+        
+        loadMoreMessages().then((success) => {
+          isLoadingMoreRef.current = false;
+          
+          // Reset flag after a delay to allow another load if user continues scrolling
+          setTimeout(() => {
+            hasLoadedMoreRef.current = false;
+          }, 1000);
+          
+          if (__DEV__ && success) {
+            console.log('📜 [Pagination] Successfully loaded older messages');
+          }
+        }).catch((error) => {
+          isLoadingMoreRef.current = false;
+          hasLoadedMoreRef.current = false;
+          if (__DEV__) {
+            console.error('📜 [Pagination] Error loading more messages:', error);
+          }
+        });
+      }
     }
-  }, []);
+  }, [hasMore, isLoadingMore, loadMoreMessages]);
 
   // Track when user starts scrolling
   const handleScrollBeginDrag = useCallback(() => {
     // IMMEDIATELY set scrolling flag to block all auto-scroll
     isUserScrollingRef.current = true;
+    
+    // Reset load more flag when user starts scrolling (allows new load attempt)
+    hasLoadedMoreRef.current = false;
     
     // When user starts scrolling, check if they're at bottom
     // If not, disable auto-scroll IMMEDIATELY
@@ -473,6 +522,45 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }, 500);
   }, []);
 
+  // Maintain scroll position when older messages are loaded (pagination)
+  useEffect(() => {
+    // Only maintain position if we were loading more and messages increased
+    if (isLoadingMoreRef.current && messagesCountBeforeLoadRef.current > 0) {
+      const currentCount = messages.length;
+      const previousCount = messagesCountBeforeLoadRef.current;
+      const messagesAdded = currentCount - previousCount;
+      
+      // If messages were added (older messages loaded), maintain scroll position
+      if (messagesAdded > 0 && scrollViewRef.current && scrollOffsetBeforeLoadRef.current > 0) {
+        // Estimate height of new messages (average ~100px per message, adjust based on your message height)
+        const estimatedNewHeight = messagesAdded * 100;
+        const newOffset = scrollOffsetBeforeLoadRef.current + estimatedNewHeight;
+        
+        // Use requestAnimationFrame to ensure DOM is updated
+        requestAnimationFrame(() => {
+          if (scrollViewRef.current) {
+            scrollViewRef.current.scrollToOffset({
+              offset: Math.max(0, newOffset),
+              animated: false, // Instant scroll to maintain position
+            });
+            
+            if (__DEV__) {
+              console.log('📜 [Pagination] Maintained scroll position', {
+                messagesAdded,
+                oldOffset: scrollOffsetBeforeLoadRef.current,
+                newOffset,
+              });
+            }
+          }
+        });
+        
+        // Reset tracking refs
+        messagesCountBeforeLoadRef.current = 0;
+        scrollOffsetBeforeLoadRef.current = 0;
+      }
+    }
+  }, [messages.length, isLoadingMore]);
+
   // Scroll to bottom only when new messages arrive AND user is at bottom
   useEffect(() => {
     if (!messages || messages.length === 0) {
@@ -490,7 +578,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
     // Only auto-scroll if:
     // 1. New messages were added (not just updated)
     // 2. User is at or near the bottom (not scrolling up)
-    if (hasNewMessages) {
+    // 3. We're NOT loading older messages (pagination)
+    if (hasNewMessages && !isLoadingMoreRef.current) {
       // CRITICAL: Check if user is ACTUALLY scrolling or has scrolled up
       // If user is actively scrolling, NEVER auto-scroll
       if (isUserScrollingRef.current) {
@@ -1282,6 +1371,18 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   }
                 }, 100);
               }}
+              ListHeaderComponent={
+                // Show loading indicator at top when loading older messages
+                isLoadingMore ? (
+                  <View style={styles.loadMoreContainer}>
+                    <Text style={styles.loadMoreText}>Loading older messages...</Text>
+                  </View>
+                ) : hasMore ? (
+                  <View style={styles.loadMoreContainer}>
+                    <Text style={styles.loadMoreHint}>Scroll up to load older messages</Text>
+                  </View>
+                ) : null
+              }
               ListFooterComponent={
                 isTyping ? (
                   <View style={styles.typingIndicator}>
@@ -2077,6 +2178,18 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: fonts.sm,
     fontFamily: fonts.medium,
+  },
+  loadMoreContainer: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadMoreHint: {
+    fontSize: fonts.sm,
+    color: colors.textLight,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
   typingIndicator: {
     padding: 8,

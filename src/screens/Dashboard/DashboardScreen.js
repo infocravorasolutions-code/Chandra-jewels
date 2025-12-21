@@ -814,9 +814,26 @@ const DashboardScreen = ({ navigation }) => {
       );
     }
 
+    // TEST BUTTON - Commented out for production
+    // To re-enable: Uncomment the test screens in StackNavigator.js first, then uncomment this
+    // if (__DEV__) {
+    //   actions.push({
+    //     title: 'Test Notifications',
+    //     icon: 'notifications',
+    //     onPress: () => navigation.navigate('NotificationTest'),
+    //   });
+    // }
+
     return (
       <Card style={styles.quickActionsCard}>
         <Text style={styles.quickActionsTitle}>Quick Actions</Text>
+        {/* DEV MODE BADGE - Commented out for production
+        {__DEV__ && (
+          <View style={styles.devBadge}>
+            <Text style={styles.devBadgeText}>DEV MODE</Text>
+          </View>
+        )}
+        */}
         <View style={styles.actionsGrid}>
           {actions.map((action, index) => (
             <TouchableOpacity
@@ -1303,6 +1320,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
     letterSpacing: 0.2,
+  },
+  devBadge: {
+    backgroundColor: colors.warning + '20',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: colors.warning,
+  },
+  devBadgeText: {
+    fontSize: 10,
+    fontFamily: fonts.bold,
+    color: colors.warning,
+    letterSpacing: 0.5,
   },
 
   // Recent Activity Section
