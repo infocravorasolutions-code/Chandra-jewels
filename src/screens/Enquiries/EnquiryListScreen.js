@@ -748,11 +748,34 @@ const EnquiryListScreen = ({ navigation }) => {
       : null;
     let routeFilterHandled = false;
 
+    // Log route params for debugging
+    if (__DEV__ && rawFilter) {
+      console.log('🔍 ========== ROUTE PARAMS FILTER ==========');
+      console.log('🔍 Route params:', {
+        filter: rawFilter,
+        filterType,
+        filterSource,
+        filterAppliedAt,
+        dashboardToken,
+      });
+      console.log('🔍 User role:', user?.role);
+      console.log('🔍 Current filters:', filters);
+    }
+
     // When navigating from dashboard, clear all existing filters so only the clicked filter applies
     if (filterSource === 'dashboard' && rawFilter) {
       if (lastDashboardFilterRef.current !== dashboardToken) {
+        if (__DEV__) {
+          console.log('🧹 Clearing filters for dashboard navigation');
+          console.log('🧹 Dashboard token:', dashboardToken);
+          console.log('🧹 Last dashboard token:', lastDashboardFilterRef.current);
+        }
         dispatch(clearFilters());
         lastDashboardFilterRef.current = dashboardToken;
+      } else {
+        if (__DEV__) {
+          console.log('⏭️ Skipping filter update - same dashboard token');
+        }
       }
       routeFilterHandled = true;
     }
@@ -763,28 +786,46 @@ const EnquiryListScreen = ({ navigation }) => {
         dispatch(setSelectedStatus('All'));
       }
       routeFilterHandled = routeFilterHandled || Boolean(rawFilter);
-    } else if (rawFilter && !filterType) {
+    } else if (rawFilter && (filterType === undefined || filterType === null || filterType === 'status')) {
+      // Handle status filters from dashboard (filterType is undefined/null) or explicit status filters
       // Map status filter values from Dashboard to filter format
       // Handle various status name formats from aggregate API
-      const statusFilter = rawFilter.toLowerCase();
+      // This matches the filter values sent from DashboardScreen:
+      // - 'coral' -> 'Coral' (for "Pending Designs" card)
+      // - 'design approval pending' -> 'Design Approval Pending' (for "Approval Pending" card)
+      // - 'completed' -> 'Completed' (for "Completed Designs" card)
+      const statusFilter = rawFilter.toLowerCase().trim();
       const isDesigner = user?.role === 'coral' || user?.role === 'cad';
       let mappedStatus = 'all';
       
       if (__DEV__) {
-        console.log('🔍 ========== ROUTE PARAMS FILTER ==========');
-        console.log('🔍 Route params filter:', rawFilter);
-        console.log('🔍 Status filter (lowercase):', statusFilter);
-        console.log('🔍 Is Designer:', isDesigner);
+        console.log('🔍 Processing status filter:', {
+          rawFilter,
+          statusFilter,
+          isDesigner,
+        });
       }
       
-      // Map common status filter values
-      // For designers, 'pending' should map to 'Design Approval Pending'
-      if (statusFilter === 'pending') {
+      // Map common status filter values from DashboardScreen
+      // Priority order matches DashboardScreen navigation calls
+      if (statusFilter === 'coral') {
+        // "Pending Designs" card navigates with filter: 'coral'
+        mappedStatus = 'Coral';
+        if (__DEV__) {
+          console.log('🎯 Mapping coral filter -> Coral status');
+        }
+      } else if (statusFilter === 'design approval pending' || statusFilter === 'designapprovalpending') {
+        // "Approval Pending" card navigates with filter: 'design approval pending'
+        mappedStatus = 'Design Approval Pending';
+      } else if (statusFilter === 'completed') {
+        // "Completed Designs" card navigates with filter: 'completed'
+        mappedStatus = 'Completed';
+      } else if (statusFilter === 'pending') {
         mappedStatus = isDesigner ? 'Design Approval Pending' : 'Enquiry Created';
       } else if (statusFilter === 'enquiry created' || 
           (statusFilter.includes('pending') && !statusFilter.includes('approval') && !statusFilter.includes('cam'))) {
         mappedStatus = 'Enquiry Created';
-      } else if (statusFilter === 'approval_pending' || statusFilter === 'design approval pending' || 
+      } else if (statusFilter === 'approval_pending' || 
                  (statusFilter.includes('approval') && statusFilter.includes('pending'))) {
         mappedStatus = 'Design Approval Pending';
       } else if (statusFilter === 'approved cad' || statusFilter === 'approvedcad' || statusFilter === 'approved_cad') {
@@ -795,12 +836,10 @@ const EnquiryListScreen = ({ navigation }) => {
         mappedStatus = 'CAM Pending';
       } else if (statusFilter === 'production') {
         mappedStatus = 'Production';
-      } else if (statusFilter === 'completed' || statusFilter.includes('approved') || statusFilter.includes('completed')) {
+      } else if (statusFilter.includes('approved') || statusFilter.includes('completed')) {
         mappedStatus = 'Completed';
       } else if (statusFilter === 'rejected') {
         mappedStatus = 'Rejected';
-      } else if (statusFilter === 'coral') {
-        mappedStatus = 'Coral';
       } else if (statusFilter === 'cad') {
         mappedStatus = 'CAD';
       } else if (statusFilter === 'all') {
@@ -819,19 +858,31 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       
       if (__DEV__) {
-        console.log('🔍 Mapped status:', mappedStatus);
-        console.log('🔍 Current filters.status:', filters.status);
+        console.log('🔍 Status mapping result:', {
+          rawFilter,
+          statusFilter,
+          mappedStatus,
+          currentFiltersStatus: filters.status,
+        });
         console.log('🔍 =========================================');
       }
       
       if (mappedStatus !== filters.status) {
         if (__DEV__) {
           console.log('✅ Setting filter status to:', mappedStatus);
+          console.log('✅ Previous status was:', filters.status);
         }
         dispatch(setFilters({ 
           status: mappedStatus === 'all' ? 'all' : mappedStatus,
         }));
         dispatch(setSelectedStatus(mappedStatus === 'all' ? 'All' : mappedStatus));
+        if (__DEV__) {
+          console.log('✅ Filter status updated successfully');
+        }
+      } else {
+        if (__DEV__) {
+          console.log('⏭️ Filter status already set to:', mappedStatus);
+        }
       }
       routeFilterHandled = true;
     }

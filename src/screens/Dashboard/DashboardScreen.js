@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
-import { useGetDashboardDataQuery, useGetEnquiriesQuery, useGetStatusStatisticsQuery } from '../../store/api';
+import { useGetDashboardDataQuery, useGetEnquiriesQuery, useGetStatusStatisticsQuery, useGetNotificationsQuery } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
 import { useStatuses } from '../../features/statuses/statusesHooks';
 import { StatusCard, Card, EnquiryStatusCard } from '../../components/cards/Cards';
@@ -248,6 +248,16 @@ const DashboardScreen = ({ navigation }) => {
     skip: !user || user?.role !== 'admin',
   });
 
+  // Fetch recent notifications (top 5)
+  const { 
+    data: notificationsData = [], 
+    isLoading: notificationsLoading,
+    refetch: refetchNotifications
+  } = useGetNotificationsQuery({ limit: 5 }, {
+    skip: !user,
+    refetchOnFocus: true,
+  });
+
   // Extract enquiries array from response (new API returns { data, pagination })
   const enquiriesData = enquiriesResponse?.data || [];
   
@@ -363,7 +373,7 @@ const DashboardScreen = ({ navigation }) => {
     });
   }, [clientsData, dashboardData?.clientAggregateData, enquiriesData, user?.role]);
 
-  const loading = dashboardLoading || clientsLoading || enquiriesLoading || statusStatisticsLoading;
+  const loading = dashboardLoading || clientsLoading || enquiriesLoading || statusStatisticsLoading || notificationsLoading;
 
   const navigateWithDashboardFilter = useCallback((params = {}) => {
     navigation.navigate('Enquiries', {
@@ -384,6 +394,7 @@ const DashboardScreen = ({ navigation }) => {
       refetchDashboard(),
       user?.role === 'admin' && refetchClients(),
       user?.role === 'admin' && refetchStatusStatistics(),
+      refetchNotifications(),
     ]);
     setRefreshing(false);
   };
@@ -825,47 +836,131 @@ const DashboardScreen = ({ navigation }) => {
     );
   };
 
-  const renderRecentActivity = () => (
-    <Card style={styles.recentActivityCard}>
-      <Text style={styles.recentActivityTitle}>Recent Activity</Text>
+  // Helper function to format time ago
+  const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return '';
+    
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) return '';
       
-      <View style={styles.activityItem}>
-        <View style={styles.activityIcon}>
-          <Icon name="assignment" size={16} color={colors.primary} />
-        </View>
-        <View style={styles.activityTextContainer}>
-          <Text style={styles.activityText}>
-            New enquiry received from John Smith
-          </Text>
-          <Text style={styles.activityTime}>2 hours ago</Text>
-        </View>
-      </View>
+      const now = new Date();
+      const diffTime = Math.abs(now - date);
+      const diffSeconds = Math.floor(diffTime / 1000);
+      const diffMinutes = Math.floor(diffTime / (1000 * 60));
+      const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffSeconds < 60) return 'Just now';
+      if (diffMinutes < 60) return `${diffMinutes} ${diffMinutes === 1 ? 'minute' : 'minutes'} ago`;
+      if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+      if (diffDays < 7) return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
+      
+      // For older notifications, show date
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      const year = date.getFullYear();
+      const currentYear = now.getFullYear();
+      
+      if (year === currentYear) {
+        return `${month}/${day}`;
+      } else {
+        return `${month}/${day}/${year}`;
+      }
+    } catch (error) {
+      return '';
+    }
+  };
 
-      <View style={styles.activityItem}>
-        <View style={[styles.activityIcon, { backgroundColor: 'rgba(76, 175, 80, 0.1)' }]}>
-          <Icon name="check-circle" size={16} color={colors.primary} />
-        </View>
-        <View style={styles.activityTextContainer}>
-          <Text style={styles.activityText}>
-            Design approved for Diamond Ring
-          </Text>
-          <Text style={styles.activityTime}>1 day ago</Text>
-        </View>
-      </View>
+  // Get icon name based on notification type
+  const getNotificationIcon = (type) => {
+    const typeLower = (type || '').toLowerCase();
+    if (typeLower.includes('enquiry') || typeLower.includes('new')) return 'assignment';
+    if (typeLower.includes('approv') || typeLower.includes('approved')) return 'check-circle';
+    if (typeLower.includes('reject') || typeLower.includes('rejected')) return 'cancel';
+    if (typeLower.includes('design') || typeLower.includes('cad') || typeLower.includes('coral')) return 'palette';
+    if (typeLower.includes('payment') || typeLower.includes('order')) return 'payment';
+    if (typeLower.includes('message') || typeLower.includes('chat')) return 'message';
+    if (typeLower.includes('status') || typeLower.includes('update')) return 'update';
+    return 'notifications';
+  };
 
-      <View style={styles.activityItem}>
-        <View style={[styles.activityIcon]}>
-          <Icon name="schedule" size={16} color={colors.primary} />
-        </View>
-        <View style={styles.activityTextContainer}>
-          <Text style={styles.activityText}>
-            Payment pending for Gold Necklace
-          </Text>
-          <Text style={styles.activityTime}>2 days ago</Text>
-        </View>
-      </View>
-    </Card>
-  );
+  // Get icon background color based on notification type
+  const getNotificationIconColor = (type) => {
+    const typeLower = (type || '').toLowerCase();
+    if (typeLower.includes('approv') || typeLower.includes('approved')) return 'rgba(76, 175, 80, 0.1)';
+    if (typeLower.includes('reject') || typeLower.includes('rejected')) return 'rgba(239, 68, 68, 0.1)';
+    if (typeLower.includes('payment') || typeLower.includes('order')) return 'rgba(139, 69, 19, 0.1)';
+    return 'rgba(33, 150, 243, 0.1)';
+  };
+
+  const renderRecentActivity = () => {
+    const notifications = Array.isArray(notificationsData) ? notificationsData : [];
+    
+    return (
+      <Card style={styles.recentActivityCard}>
+        <Text style={styles.recentActivityTitle}>Recent Activity</Text>
+        
+        {notifications.length > 0 ? (
+          notifications.map((notification) => {
+            const iconName = getNotificationIcon(notification.type);
+            const iconBgColor = getNotificationIconColor(notification.type);
+            const timeAgo = formatTimeAgo(notification.timestamp || notification.createdAt);
+            
+            return (
+              <TouchableOpacity
+                key={notification.id || notification._id}
+                style={styles.activityItem}
+                onPress={() => {
+                  // Navigate to notification link if available
+                  if (notification.link) {
+                    // Handle navigation based on link type
+                    if (notification.link.includes('enquiry')) {
+                      const enquiryId = notification.link.split('/').pop();
+                      navigation.navigate('SingleEnquiry', { enquiryId });
+                    } else if (notification.link.includes('chat')) {
+                      navigation.navigate('Chats');
+                    } else {
+                      navigation.navigate('Notifications');
+                    }
+                  } else {
+                    navigation.navigate('Notifications');
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.activityIcon, { backgroundColor: iconBgColor }]}>
+                  <Icon name={iconName} size={16} color={colors.primary} />
+                </View>
+                <View style={styles.activityTextContainer}>
+                  <Text style={styles.activityText} numberOfLines={2}>
+                    {notification.title || notification.message || 'Notification'}
+                  </Text>
+                  {notification.message && notification.title && (
+                    <Text style={styles.activitySubtext} numberOfLines={1}>
+                      {notification.message}
+                    </Text>
+                  )}
+                  <Text style={styles.activityTime}>{timeAgo}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
+        ) : (
+          <View style={styles.activityItem}>
+            <View style={styles.activityIcon}>
+              <Icon name="notifications-none" size={16} color={colors.textLight} />
+            </View>
+            <View style={styles.activityTextContainer}>
+              <Text style={[styles.activityText, { color: colors.textLight }]}>
+                No recent activity
+              </Text>
+            </View>
+          </View>
+        )}
+      </Card>
+    );
+  };
 
   if (loading) {
     return <AnimatedLogoLoader size={80} />;
@@ -1262,6 +1357,15 @@ const styles = StyleSheet.create({
     color: colors.textLight,
     lineHeight: 16,
     letterSpacing: 0.1,
+    marginTop: 2,
+  },
+  activitySubtext: {
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    lineHeight: 16,
+    marginTop: 2,
+    marginBottom: 2,
   },
   // Floating Action Button
   fab: {

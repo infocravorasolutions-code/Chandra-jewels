@@ -3607,7 +3607,15 @@ export const api = createApi({
 
     // ==================== NOTIFICATIONS ====================
     getNotifications: builder.query({
-      query: () => '/api/notifications',
+      query: (params = {}) => {
+        const { limit } = params;
+        const queryParams = new URLSearchParams();
+        if (limit) {
+          queryParams.append('limit', limit.toString());
+        }
+        const queryString = queryParams.toString();
+        return `/api/notifications${queryString ? `?${queryString}` : ''}`;
+      },
       transformResponse: (response) => {
         const notificationsArray = Array.isArray(response)
           ? response

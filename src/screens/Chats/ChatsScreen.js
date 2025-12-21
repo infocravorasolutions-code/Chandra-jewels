@@ -531,6 +531,10 @@ const ChatsScreen = ({ navigation }) => {
                           (chat._originalData?.LastSender && typeof chat._originalData.LastSender === 'object' 
                             ? (chat._originalData.LastSender.Id || chat._originalData.LastSender._id || chat._originalData.LastSender.id || chat._originalData.LastSender.SenderId || chat._originalData.LastSender.senderId)
                             : null);
+
+              const chatType = chat.type || chat.Type || chat._originalData?.Type || chat._originalData?.type || '';
+
+      console.log('chatloggggggggg', chat);
       
       // Debug: Log LastMessage data to see what backend sent
       if (__DEV__ && chat._originalData?.LastMessage) {
@@ -732,7 +736,7 @@ const ChatsScreen = ({ navigation }) => {
           <View style={styles.chatContent}>
             <View style={styles.chatHeader}>
               <Text style={styles.chatTitle}>
-                {chat.enquiryTitle || 'Untitled Chat'}
+                {chat.enquiryTitle || 'Untitled Chat'} - <Text style={{ fontSize: fonts.sm, fontFamily: fonts.regular }}>{(chat.Type || chat.type).split('-')[1]}</Text>
               </Text>
               <Text style={styles.chatTime}>
                 {chat.lastMessageTime ? formatDateTime(chat.lastMessageTime) : ''}
