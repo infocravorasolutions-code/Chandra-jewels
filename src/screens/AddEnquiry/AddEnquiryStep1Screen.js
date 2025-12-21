@@ -401,6 +401,10 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       };
 
       console.log('📤 Creating enquiry (Step 1):', JSON.stringify(enquiryData, null, 2));
+      console.log('📋 [ENQUIRY CREATION] Initial Status:', enquiryStatus);
+      console.log('📋 [ENQUIRY CREATION] User Role:', user?.role);
+      console.log('📋 [ENQUIRY CREATION] Is Client:', isClient);
+      console.log('📋 [ENQUIRY CREATION] Status Flow: Enquiry Created → Coral → CAD → Design Approval Pending → Completed');
 
       // Create enquiry first - show loading spinner
       const createResult = await createEnquiry(enquiryData).unwrap();
@@ -467,7 +471,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   const metalColorOptions = [
     { label: 'None', value: '' }, // Option to clear selection
-    { label: 'Gold', value: 'Gold' },
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
     { label: 'Yellow Gold', value: 'Yellow Gold' },

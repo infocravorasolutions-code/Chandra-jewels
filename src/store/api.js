@@ -1453,19 +1453,25 @@ export const api = createApi({
           } else if (role === 'coral' || role === 'cad') {
             const assignedEnquiries = categorizedCounts['All'] || statusCounts.total || normalizedEnquiries.length;
             const completedDesigns = categorizedCounts['Completed'] || statusCounts.completed || normalizedEnquiries.filter(e => e.status === 'completed').length;
-            // For "Pending Designs", count "CAD" status (but clicking will filter by "Coral")
-            const pendingDesigns = specificStatusCounts['cad'] || 0;
+            // For "Pending Designs", show role-specific count:
+            // - Coral role → Coral count
+            // - CAD role → CAD count
+            const pendingDesigns = role === 'coral' 
+              ? (specificStatusCounts['coral'] || 0)
+              : (specificStatusCounts['cad'] || 0);
             const approvalPendingDesigns = categorizedCounts['Approval Pending'] || 0;
             const averageRating = 4.8; // TODO: Fetch from API when available
             
             console.log('🔍 [DASHBOARD DEBUG] DESIGNER DASHBOARD CALCULATIONS (from aggregate API):');
             console.log('🔍 [DASHBOARD DEBUG] - Role:', role, '(should use aggregate endpoint)');
             console.log('🔍 [DASHBOARD DEBUG] - Assigned Enquiries:', assignedEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs (CAD status count):', pendingDesigns, '(from specificStatusCounts["cad"]:', specificStatusCounts['cad'], '| categorizedCounts.Pending:', categorizedCounts['Pending'], ')');
+            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs (role-specific):', pendingDesigns, 
+              role === 'coral' 
+                ? '(from specificStatusCounts["coral"]:' + specificStatusCounts['coral'] + ')'
+                : '(from specificStatusCounts["cad"]:' + specificStatusCounts['cad'] + ')'
+            );
             console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Designs:', approvalPendingDesigns, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], ')');
             console.log('🔍 [DASHBOARD DEBUG] - Completed Designs:', completedDesigns, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (CAD + Approval Pending + Completed):', pendingDesigns + approvalPendingDesigns + completedDesigns);
-            console.log('🔍 [DASHBOARD DEBUG] - Note: Sum may not match assigned if there are other statuses (Coral, Enquiry Created, etc.)');
             console.log('🔍 [DASHBOARD DEBUG] - All status counts:', JSON.stringify(specificStatusCounts, null, 2));
             
             return {

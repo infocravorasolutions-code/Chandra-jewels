@@ -1075,6 +1075,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
             isVideo && styles.videoMessageBubble,
             isFile && styles.fileMessageBubble,
             isHighlighted && styles.highlightedMessageBubble, // Add highlight to bubble
+            repliedMessage && styles.messageBubbleWithReply, // Ensure enough width for reply preview text
           ]}>
             {/* Reply Preview */}
             {repliedMessage && (
@@ -1325,9 +1326,13 @@ const ChatDetailScreen = ({ route, navigation }) => {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
 
           {loading && enrichedMessages.length === 0 ? (
-            <EmptyState loading={loading} error={null} />
+            <View style={styles.messagesContainer}>
+              <EmptyState loading={loading} error={null} />
+            </View>
           ) : !loading && enrichedMessages.length === 0 && !messagesError ? (
-            <EmptyState loading={false} error={null} />
+            <View style={styles.messagesContainer}>
+              <EmptyState loading={false} error={null} />
+            </View>
           ) : enrichedMessages.length > 0 ? (
             <FlatList
               ref={scrollViewRef}
@@ -1392,7 +1397,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
               }
             />
           ) : (
-            <EmptyState loading={loading} error={messagesError} />
+            <View style={styles.messagesContainer}>
+              <EmptyState loading={loading} error={messagesError} />
+            </View>
           )}
 
           <View style={styles.inputContainer}>
@@ -1916,6 +1923,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     flexShrink: 1,
   },
+  // Ensure reply preview text has room, even for very short messages
+  messageBubbleWithReply: {
+    minWidth: width * 0.55, // ~55% of screen width
+  },
   myMessageBubble: {
     backgroundColor: colors.primary,
     borderBottomRightRadius: 4,
@@ -2420,6 +2431,7 @@ const styles = StyleSheet.create({
   replyPreview: {
     flexDirection: 'row',
     marginBottom: 4, // Reduced further for better proportions with short messages
+    alignItems: 'center', // Keep icon/name/text vertically centered for short replies
     paddingLeft: 8,
     paddingRight: 8,
     paddingTop: 5, // Reduced further for compact display
@@ -2427,8 +2439,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     borderRadius: 6,
     marginHorizontal: 4,
-    minHeight: 36, // Reduced minimum height for better proportions
-    maxHeight: 50, // Reduced maximum height to prevent it from dominating short messages
+    minHeight: 40, // Slightly higher to fit icon + two lines without clipping
     overflow: 'hidden', // Ensure content doesn't overflow
   },
   replyPreviewIcon: {
@@ -2473,6 +2484,8 @@ const styles = StyleSheet.create({
     width: 3,
     marginRight: 8,
     borderRadius: 2,
+    alignSelf: 'stretch',
+    minHeight: 32,
   },
   replyPreviewLineMy: {
     backgroundColor: colors.textWhite,
@@ -2482,6 +2495,7 @@ const styles = StyleSheet.create({
   },
   replyPreviewContent: {
     flex: 1,
+    justifyContent: 'center',
   },
   replyPreviewName: {
     fontSize: fonts.sm,

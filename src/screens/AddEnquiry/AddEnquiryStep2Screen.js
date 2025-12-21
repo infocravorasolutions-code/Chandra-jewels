@@ -339,7 +339,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         Priority: mappedPriority,
         Quantity: parseInt(formData.quantity) || 1, // Convert to number as per API
         Metal: {
-          Color: formData.metalColor || 'Gold',
+          Color: formData.metalColor || null,
           Quality: formData.metalQuality || '10K',
         },
         StyleNumber: formData.styleNumber || null,
@@ -409,7 +409,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           deadline: formData.deadline || null,
           category: formData.category,
           stoneType: formData.stoneType,
-          metalType: `${formData.metalColor || 'Gold'} (${formData.metalQuality || '10K'})`,
+          metalType: formData.metalColor ? `${formData.metalColor} (${formData.metalQuality || '10K'})` : null,
           updatedAt: new Date().toISOString(),
           // API format fields (for consistency)
           Name: formData.title,

@@ -161,7 +161,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     refetchOnFocus: true, // Refetch when screen comes into focus to get latest data (including pricing)
     refetchOnMountOrArgChange: true, // Refetch when enquiryId changes
   });
-
+  
   // Auto-retry logic for notification navigation (handles timing issues)
   const retryCountRef = useRef(0);
   const maxRetries = 3;
@@ -1154,7 +1154,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               : isNotFound 
               ? 'Enquiry Not Found' 
               : error || 'Failed to load enquiry'}
-          </Text>
+        </Text>
           {isServerError && (
             <Text style={[styles.errorSubtext, { color: colors.textSecondary, fontSize: fonts.sm, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 }]}>
               The enquiry might still be saving. Please try again in a moment.
@@ -1176,12 +1176,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             variant="primary"
             style={styles.retryButton}
           />
-          <Button
-            title="Go Back"
-            onPress={() => navigation.goBack()}
+        <Button
+          title="Go Back"
+          onPress={() => navigation.goBack()}
             variant="secondary"
-            style={styles.backButton}
-          />
+          style={styles.backButton}
+        />
         </View>
       </View>
     );

@@ -739,6 +739,21 @@ const DashboardScreen = ({ navigation }) => {
       return name === 'design approval pending';
     })?.count || 0;
     
+    // ========== PENDING DESIGNS COUNT LOGGING ==========
+    const pendingDesignsValue1 = dashboardData?.pendingDesigns;
+    const pendingDesignsValue2 = dashboardData?.categorizedCounts?.['Pending'];
+    const pendingDesignsValue3 = pendingDesignsFromStatusStats;
+    // For Coral role: "Pending Designs" = Coral count ONLY (not "Pending" category)
+    // Priority: dashboardData.pendingDesigns (from API, role-specific) > statusStats > default 0
+    const finalPendingDesignsValue = pendingDesignsValue1 || pendingDesignsValue3 || 0;
+    
+    console.log('📊 [DASHBOARD] ========== CORAL PENDING DESIGNS COUNT ==========');
+    console.log('📊 [DASHBOARD] User Role: coral');
+    console.log('📊 [DASHBOARD] dashboardData?.pendingDesigns (Coral count from API):', pendingDesignsValue1);
+    console.log('📊 [DASHBOARD] pendingDesignsFromStatusStats (Coral fallback):', pendingDesignsFromStatusStats);
+    console.log('📊 [DASHBOARD] Final Coral count displayed:', finalPendingDesignsValue);
+    console.log('📊 [DASHBOARD] ===================================================');
+    
     return (
       <View style={styles.statsGrid}>
         <StatusCard
@@ -750,10 +765,15 @@ const DashboardScreen = ({ navigation }) => {
         />
         <StatusCard
           title="Pending Designs"
-          value={dashboardData?.pendingDesigns || dashboardData?.categorizedCounts?.['Pending'] || pendingDesignsFromStatusStats || '0'}
+          value={finalPendingDesignsValue}
           icon={<Icon name="pending" size={20} color={colors.textWhite} />}
           color={colors.primaryDark}
-          onPress={() => navigateWithDashboardFilter({ filter: 'coral' })}
+          onPress={() => {
+            console.log('🎯 [DASHBOARD] "Pending Designs" tile pressed (Coral role)');
+            console.log('🎯 [DASHBOARD] Coral count displayed:', finalPendingDesignsValue);
+            console.log('🎯 [DASHBOARD] Filter being applied: "coral" → shows Coral status enquiries');
+            navigateWithDashboardFilter({ filter: 'coral' });
+          }}
         />
         <StatusCard
           title="Approval Pending"
