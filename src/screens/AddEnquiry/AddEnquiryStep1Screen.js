@@ -163,13 +163,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         const clientId = userClient.id || userClient._id;
         const clientName = userClient.name || userClient.Name || '';
         
-        if (__DEV__) {
-          console.log('🔐 [ADD ENQUIRY] Pre-selecting client for Client user:', {
-            userClientId: user.clientId,
-            foundClientId: clientId,
-            clientName: clientName,
-          });
-        }
+     
         
         setFormData(prev => ({
           ...prev,

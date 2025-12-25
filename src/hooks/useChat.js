@@ -44,6 +44,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
   const [isLoadingChat, setIsLoadingChat] = useState(true);
   const [chatError, setChatError] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [typingUser, setTypingUser] = useState(null); // Store typing user info { userId, name, email }
   const typingTimeoutRef = useRef(null);
   const [nextCursor, setNextCursor] = useState(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -729,8 +730,8 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           text: message.Message || message.message || message.text || '',
           SenderId: message.SenderId || message.senderId,
           senderId: message.SenderId || message.senderId,
-          SenderName: message.SenderName || message.senderName,
-          senderName: message.SenderName || message.senderName,
+          SenderName: message.SenderId?.Name || message.sender?.name,
+          senderName: message.Sender || message.sender,
           SenderRole: message.SenderRole || message.senderRole,
           senderRole: message.SenderRole || message.senderRole,
           Timestamp: message.Timestamp || message.timestamp,
@@ -1071,17 +1072,53 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     };
 
     const handleUserTyping = (data) => {
-      if (data.userId !== user.id && data.chatId === chatIdForQuery) {
+      if (__DEV__) {
+        console.log('🔤 [Typing] Event received:', {
+          data,
+          userId: data.userId,
+          currentUserId: user?.id,
+          dataChatId: data.chatId,
+          chatIdForQuery,
+          chatIdMatch: String(data.chatId || '').trim() === String(chatIdForQuery || '').trim(),
+          userIdMatch: String(data.userId || '').trim() === String(user?.id || '').trim(),
+          isTyping: data.isTyping,
+        });
+      }
+      
+      // Use string comparison to handle type mismatches
+      const dataUserId = String(data.userId || '').trim();
+      const currentUserId = String(user?.id || '').trim();
+      const dataChatId = String(data.chatId || '').trim();
+      const currentChatId = String(chatIdForQuery || '').trim();
+      
+      if (dataUserId !== currentUserId && dataChatId === currentChatId) {
+        if (__DEV__) {
+          console.log('✅ [Typing] Setting typing indicator:', data.isTyping, 'User:', data.user);
+        }
         setIsTyping(data.isTyping);
+        
+        // Store typing user info if available
+        if (data.isTyping && data.user) {
+          setTypingUser({
+            userId: data.userId,
+            name: data.user.name || data.user.Name || data.user.email || data.user.Email || 'Someone',
+            email: data.user.email || data.user.Email,
+          });
+        } else if (!data.isTyping) {
+          // Clear typing user when typing stops
+          setTypingUser(null);
+        }
+        
         if (typingTimeoutRef.current) {
           clearTimeout(typingTimeoutRef.current);
         }
         if (data.isTyping) {
           typingTimeoutRef.current = setTimeout(() => {
             setIsTyping(false);
+            setTypingUser(null);
           }, 3000);
         }
-      }
+      } 
     };
 
     // Register event listeners
@@ -1146,8 +1183,46 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
 
   // Send message
   const sendMessage = useCallback(async (messageText, replyTo = null) => {
-    if (!messageText?.trim() || !chat || !user) {
+    // Detailed validation with logging
+    if (!messageText?.trim()) {
+      if (__DEV__) {
+        console.error('❌ [useChat] Cannot send message: Message text is empty', {
+          messageText,
+          hasMessageText: !!messageText,
+        });
+      }
       return false;
+    }
+    
+    if (!chat) {
+      if (__DEV__) {
+        console.error('❌ [useChat] Cannot send message: Chat is null/undefined', {
+          chat,
+          chatIdForQuery,
+          enquiryId,
+          chatType,
+        });
+      }
+      return false;
+    }
+    
+    if (!user) {
+      if (__DEV__) {
+        console.error('❌ [useChat] Cannot send message: User is null/undefined', {
+          user,
+        });
+      }
+      return false;
+    }
+    
+    if (__DEV__) {
+      console.log('📤 [useChat] Attempting to send message', {
+        messageLength: messageText.trim().length,
+        chatId: chat?._id || chat?.id || chatIdForQuery,
+        userId: user?.id,
+        hasReply: !!replyTo,
+        socketConnected: socketService.isConnected(),
+      });
     }
 
     let actualChatId = chatIdForQuery;
@@ -1225,6 +1300,31 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     // Add optimistic message immediately
     setMessages(prev => [...prev, optimisticMessage]);
 
+    // Ensure socket is connected before sending
+    if (!socketService.isConnected()) {
+      if (__DEV__) {
+        console.warn('⚠️ [useChat] Socket not connected, attempting to reconnect...', {
+          chatId: actualChatId,
+          userId: user.id,
+        });
+      }
+      
+      try {
+        await socketService.connect(user.id);
+        // Wait a bit for connection to establish
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Rejoin chat room after reconnection
+        if (socketService.isConnected() && actualChatId) {
+          socketService.joinChat(actualChatId, user.id);
+        }
+      } catch (error) {
+        if (__DEV__) {
+          console.error('❌ [useChat] Failed to reconnect socket:', error);
+        }
+      }
+    }
+
     // Send via WebSocket
     const sent = socketService.sendMessage({
       chatId: actualChatId,
@@ -1235,6 +1335,15 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     });
 
     if (!sent) {
+      if (__DEV__) {
+        console.error('❌ [useChat] Failed to send message via WebSocket', {
+          chatId: actualChatId,
+          userId: user.id,
+          socketConnected: socketService.isConnected(),
+          messageLength: messageText.trim().length,
+        });
+      }
+      
       // Mark message as failed
       setMessages(prev => prev.map(msg => 
         msg._id === tempMessageId 
@@ -1242,6 +1351,10 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           : msg
       ));
       return false;
+    }
+    
+    if (__DEV__) {
+      console.log('✅ [useChat] Message sent successfully via WebSocket');
     }
 
     // Refetch as backup after delay
@@ -1716,6 +1829,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     messagesLoading,
     chatError: chatError || messagesError,
     isTyping,
+    typingUser, // { userId, name, email } - User who is currently typing
     isUploading,
     nextCursor,
     isLoadingMore,

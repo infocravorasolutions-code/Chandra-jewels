@@ -35,6 +35,7 @@ import { formatDateTime, spacing, responsivePadding } from '../../utils';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import { FILE_BASE_URL } from '../../config/apiConfig';
 import { getUserName } from '../../utils/userUtils';
+import { useUsers } from '../../features/users/usersHooks';
 import { SwipeableMessage, EmptyState, ChatHeader } from '../../components/chat';
 import { useMessageScroll } from '../../hooks/useMessageScroll';
 import { formatMessageTime, getMessageStatusIcon, getMessageStatusColor, getSenderColor, isMyMessage as checkIsMyMessage, formatReadTimestamp } from '../../utils/messageUtils';
@@ -109,6 +110,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
     messagesLoading = false,
     chatError,
     isTyping = false,
+    typingUser = null, // User who is currently typing { userId, name, email }
     isUploading = false,
     sendMessage: sendChatMessage = () => false,
     sendMedia = () => false,
@@ -225,6 +227,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
     skip: !user,
   });
 
+  // Fetch all users to enable name lookup by ID
+  const { users: usersList } = useUsers();
+
   // Always fetch enquiry data if we have enquiryId to ensure we have complete client information
   const { data: fetchedEnquiryData, isLoading: isLoadingEnquiry } = useGetEnquiryByIdQuery(enquiryId, {
     skip: !enquiryId,
@@ -242,14 +247,58 @@ const ChatDetailScreen = ({ route, navigation }) => {
            name.trim() !== 'Unknown Client';
   };
 
+  // Helper function to get user name from SenderId using cached users
+  const getSenderNameFromId = useCallback((senderId) => {
+    if (!senderId || !usersList || usersList.length === 0) {
+      return null;
+    }
+    
+    const idStr = String(senderId).trim();
+    
+    // Try to find user in usersList
+    const foundUser = usersList.find(u => {
+      const userId = String(u.id || u._id || '').trim();
+      const noSpacesId = idStr.replace(/\s/g, '');
+      const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
+      return userId === idStr || userId === noSpacesId || userId === cleanId;
+    });
+    
+    if (foundUser) {
+      return foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || null;
+    }
+    
+    // Fallback to getUserName utility
+    const name = getUserName(senderId);
+    return name && name !== senderId ? name : null;
+  }, [usersList]);
+
   // Create sender lookup map (senderId -> { name, role })
   const senderMap = useMemo(() => {
     const map = new Map();
+    
+    // Add clients to map
     clients.forEach(client => {
       const idStr = String(client.id).trim();
       map.set(idStr, { name: client.name, role: 'client' });
     });
-    // Add current user to map
+    
+    // Add all users to map (this includes admins, designers, workers, etc.)
+    if (usersList && usersList.length > 0) {
+      usersList.forEach(userItem => {
+        const idStr = String(userItem.id || userItem._id || '').trim();
+        if (idStr) {
+          // Only add if not already in map (clients take priority)
+          if (!map.has(idStr)) {
+            map.set(idStr, { 
+              name: userItem.name || userItem.Name || userItem.email || userItem.Email || 'Unknown',
+              role: userItem.role || userItem.Role || 'user'
+            });
+          }
+        }
+      });
+    }
+    
+    // Add current user to map (override if exists)
     if (user) {
       const userIdStr = String(user.id).trim();
       map.set(userIdStr, { 
@@ -257,8 +306,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
         role: user.role || 'user' 
       });
     }
+    
     return map;
-  }, [clients, user]);
+  }, [clients, usersList, user]);
 
   // Enrich messages with sender names from senderMap
   // Optimized: Cache current time to avoid creating new Date() on every message
@@ -379,12 +429,32 @@ const ChatDetailScreen = ({ route, navigation }) => {
         };
       }
       
+      // Try to get sender name from cached users using helper function
+      const senderNameFromCache = getSenderNameFromId(senderIdStr);
+      if (senderNameFromCache) {
+        return {
+          ...normalizedMsg,
+          senderName: senderNameFromCache,
+          senderRole: normalizedMsg.senderRole || 'user',
+        };
+      }
+      
       // Fallback to current user if senderId matches
       if (user && String(user.id).trim() === senderIdStr) {
         return {
           ...normalizedMsg,
           senderName: user.name || user.email || 'You',
           senderRole: user.role || 'user',
+        };
+      }
+      
+      // Final fallback: try getUserName utility
+      const userNameFromUtil = getUserName(senderIdStr);
+      if (userNameFromUtil && userNameFromUtil !== senderIdStr) {
+        return {
+          ...normalizedMsg,
+          senderName: userNameFromUtil,
+          senderRole: normalizedMsg.senderRole || 'user',
         };
       }
       
@@ -395,7 +465,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         senderRole: normalizedMsg.senderRole || 'user',
       };
     });
-  }, [messages, senderMap, user]);
+  }, [messages, senderMap, user, getSenderNameFromId]);
 
   // Initialize scroll hook after enrichedMessages is defined
   const { scrollToMessage, storeMessagePosition } = useMessageScroll(enrichedMessages, scrollViewRef);
@@ -652,9 +722,41 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }, []);
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !chat) return;
+    // Detailed validation with logging
+    if (!newMessage.trim()) {
+      if (__DEV__) {
+        console.warn('⚠️ [ChatDetailScreen] Cannot send: Message is empty', {
+          newMessage,
+          hasNewMessage: !!newMessage,
+        });
+      }
+      return;
+    }
+    
+    if (!chat) {
+      if (__DEV__) {
+        console.error('❌ [ChatDetailScreen] Cannot send: Chat is null/undefined', {
+          chat,
+          hookChat,
+          routeChat,
+          chatId: specificChatId,
+          enquiryId,
+        });
+      }
+      alert.error('Error', 'Chat not loaded. Please wait a moment and try again.');
+      return;
+    }
 
     const messageText = newMessage.trim();
+    
+    if (__DEV__) {
+      console.log('📤 [ChatDetailScreen] Preparing to send message', {
+        messageLength: messageText.length,
+        chatId: chat?._id || chat?.id,
+        hasReply: !!replyingTo,
+        socketConnected: socketService.isConnected(),
+      });
+    }
     // Get reply target before clearing state
     // IMPORTANT: You can reply to ANY message - your own or others (like WhatsApp)
     const replyToMessage = replyingTo ? {
@@ -692,7 +794,28 @@ const ChatDetailScreen = ({ route, navigation }) => {
     const sent = await sendChatMessage(messageText, replyToMessage);
     
     if (!sent) {
-      alert.error('Error', 'Failed to send message. Please check your connection and try again.');
+      if (__DEV__) {
+        console.error('❌ [ChatDetailScreen] sendChatMessage returned false', {
+          messageText: messageText.substring(0, 50),
+          chatId: chat?._id || chat?.id,
+          socketConnected: socketService.isConnected(),
+          hasUser: !!user,
+        });
+      }
+      
+      // Check specific reasons for failure
+      let errorMessage = 'Failed to send message. ';
+      if (!socketService.isConnected()) {
+        errorMessage += 'Not connected to server. Please check your internet connection.';
+      } else if (!chat) {
+        errorMessage += 'Chat not loaded. Please wait a moment and try again.';
+      } else if (!user) {
+        errorMessage += 'User not authenticated. Please log in again.';
+      } else {
+        errorMessage += 'Please check your connection and try again.';
+      }
+      
+      alert.error('Error', errorMessage);
       setNewMessage(messageText); // Restore message on error
       setReplyingTo(replyToMessage); // Restore reply on error
     } else {
@@ -1391,7 +1514,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
               ListFooterComponent={
                 isTyping ? (
                   <View style={styles.typingIndicator}>
-                    <Text style={styles.typingText}>Someone is typing...</Text>
+                    <Text style={styles.typingText}>
+                      {typingUser?.name ? `${typingUser.name} is typing...` : 'Someone is typing...'}
+                    </Text>
                   </View>
                 ) : null
               }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -31,10 +31,51 @@ const ChatsScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [forceUpdate, setForceUpdate] = useState(0); // Force re-render when cache updates
+  // Track typing status per chat: { chatId: { isTyping: boolean, userName: string } }
+  const [typingStatus, setTypingStatus] = useState({});
+  const typingTimeoutsRef = useRef({}); // Store timeouts per chat
   
   // Load users to enable name lookup by ID
   const { users: usersList } = useUsers();
   const usersMap = useSelector(state => state.users?.usersMap || {});
+
+  // Helper function to get user name from SenderId using cached users
+  const getSenderNameFromId = useCallback((senderId) => {
+    if (!senderId || !usersMap || Object.keys(usersMap).length === 0) {
+      return null;
+    }
+    
+    const idStr = String(senderId).trim();
+    
+    // Try exact match
+    if (usersMap[idStr]) {
+      return usersMap[idStr].name || usersMap[idStr].Name || usersMap[idStr].email || usersMap[idStr].Email || null;
+    }
+    
+    // Try with spaces removed
+    const noSpacesId = idStr.replace(/\s/g, '');
+    if (usersMap[noSpacesId]) {
+      return usersMap[noSpacesId].name || usersMap[noSpacesId].Name || usersMap[noSpacesId].email || usersMap[noSpacesId].Email || null;
+    }
+    
+    // Try ObjectId format cleanup
+    const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
+    if (usersMap[cleanId]) {
+      return usersMap[cleanId].name || usersMap[cleanId].Name || usersMap[cleanId].email || usersMap[cleanId].Email || null;
+    }
+    
+    // Try iterating through usersMap to find by id or _id
+    const foundUser = Object.values(usersMap).find(user => {
+      const userIdFromMap = String(user.id || user._id || '').trim();
+      return userIdFromMap === idStr || userIdFromMap === noSpacesId || userIdFromMap === cleanId;
+    });
+    
+    if (foundUser) {
+      return foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || null;
+    }
+    
+    return null;
+  }, [usersMap]);
 
   // Get role ID (preferred) or fallback to role string
   const roleId = user?.roleId || user?.roleNumber;
@@ -143,6 +184,40 @@ const ChatsScreen = ({ navigation }) => {
     });
   }, [chatsFromAPI1, chatsFromAPI2, chatsLoading1, chatsLoading2, chatsError1, chatsError2]);
 
+  // Helper function to enrich chats with sender names from cached users
+  const enrichChatsWithSenderNames = useCallback((chats) => {
+    if (!Array.isArray(chats) || Object.keys(usersMap).length === 0) {
+      return chats;
+    }
+    
+    return chats.map(chat => {
+      console.log('🔄 [ChatsScreen] Enriching chat with sender name', {
+        chatId: chat.id || chat._id,
+        senderId: chat._originalData?.LastMessage?.SenderId,
+        senderName: chat._originalData?.LastMessage?.Sender,
+      });
+      // Check if chat has _originalData.LastMessage with SenderId but no Sender name
+      if (chat._originalData?.LastMessage?.SenderId && !chat._originalData.LastMessage.Sender) {
+        const senderId = chat._originalData.LastMessage.SenderId;
+        const senderName = getSenderNameFromId(senderId);
+        if (senderName) {
+          // Create a new chat object with enriched data
+          return {
+            ...chat,
+            _originalData: {
+              ...chat._originalData,
+              LastMessage: {
+                ...chat._originalData.LastMessage,
+                Sender: senderName,
+              },
+            },
+          };
+        }
+      }
+      return chat;
+    });
+  }, [usersMap, getSenderNameFromId]);
+
   // Helper function to filter chats by role (as per specification)
   const filterChatsByRole = useCallback((chats, userRoleId) => {
     if (!Array.isArray(chats)) return [];
@@ -189,7 +264,9 @@ const ChatsScreen = ({ navigation }) => {
         new Map(allChats.map(chat => [chat.id || chat._id, chat])).values()
       );
       // Apply role-based filtering (for admin, this returns all chats)
-      const result = filterChatsByRole(uniqueChats, roleId);
+      const filteredChats = filterChatsByRole(uniqueChats, roleId);
+      // Enrich with sender names from cached users
+      const result = enrichChatsWithSenderNames(filteredChats);
       console.log('✅ [ChatsScreen] Combined chats (admin)', {
         allChatsCount: allChats.length,
         uniqueChatsCount: uniqueChats.length,
@@ -208,17 +285,19 @@ const ChatsScreen = ({ navigation }) => {
     const chats = chatsFromAPI1 || [];
     if (chats.length > 0 && roleId) {
       const filteredChats = filterChatsByRole(chats, roleId);
+      // Enrich with sender names from cached users
+      const enrichedChats = enrichChatsWithSenderNames(filteredChats);
       console.log('✅ [ChatsScreen] Combined chats (non-admin, role-based)', {
         inputCount: chats.length,
-        resultCount: filteredChats.length,
-        firstFewChats: filteredChats.slice(0, 3).map(c => ({
+        resultCount: enrichedChats.length,
+        firstFewChats: enrichedChats.slice(0, 3).map(c => ({
           id: c.id || c._id,
           enquiryId: c.enquiryId || c.EnquiryId,
           unreadCount: c.unreadCount || c.UnreadCount,
           lastMessage: (c.lastMessage || c.LastMessage || '').substring(0, 30),
         })),
       });
-      return filteredChats;
+      return enrichedChats;
     }
     
     // If no role ID, fallback to type-based filtering
@@ -230,30 +309,34 @@ const ChatsScreen = ({ navigation }) => {
         }
         return true; // Assume backend filtered correctly
       });
+      // Enrich with sender names from cached users
+      const enrichedChats = enrichChatsWithSenderNames(filteredChats);
       console.log('✅ [ChatsScreen] Combined chats (non-admin, type-based)', {
         inputCount: chats.length,
-        resultCount: filteredChats.length,
-        firstFewChats: filteredChats.slice(0, 3).map(c => ({
+        resultCount: enrichedChats.length,
+        firstFewChats: enrichedChats.slice(0, 3).map(c => ({
           id: c.id || c._id,
           enquiryId: c.enquiryId || c.EnquiryId,
           unreadCount: c.unreadCount || c.UnreadCount,
           lastMessage: (c.lastMessage || c.LastMessage || '').substring(0, 30),
         })),
       });
-      return filteredChats;
+      return enrichedChats;
     }
     
+    // Enrich with sender names from cached users
+    const enrichedChats = enrichChatsWithSenderNames(chats);
     console.log('✅ [ChatsScreen] Combined chats (fallback)', {
-      resultCount: chats.length,
-      firstFewChats: chats.slice(0, 3).map(c => ({
+      resultCount: enrichedChats.length,
+      firstFewChats: enrichedChats.slice(0, 3).map(c => ({
         id: c.id || c._id,
         enquiryId: c.enquiryId || c.EnquiryId,
         unreadCount: c.unreadCount || c.UnreadCount,
         lastMessage: (c.lastMessage || c.LastMessage || '').substring(0, 30),
       })),
     });
-    return chats;
-  }, [chatsFromAPI1, chatsFromAPI2, isAdmin, chatType2, chatType1, roleId, filterChatsByRole, forceUpdate]);
+    return enrichedChats;
+  }, [chatsFromAPI1, chatsFromAPI2, isAdmin, chatType2, chatType1, roleId, filterChatsByRole, enrichChatsWithSenderNames, forceUpdate]);
 
   // Combined loading and error states
   const chatsLoading = chatsLoading1 || (isAdmin && chatsLoading2);
@@ -879,10 +962,12 @@ const ChatsScreen = ({ navigation }) => {
         const updateChatCache = (queryParams, typeLabel) => {
           console.log(`🔍 [ChatsScreen] Updating cache for ${typeLabel}`, queryParams);
           
+          let chatFound = false; // Track if chat was found and updated
+          
           const updateDraft = (draft) => {
               if (!Array.isArray(draft)) {
                 console.warn(`⚠️ [ChatsScreen] Draft is not an array (${typeLabel}):`, typeof draft);
-                return false;
+                return; // Don't return - just return (Immer doesn't allow returning values when mutating)
               }
 
               console.log(`🔍 [ChatsScreen] Searching in ${typeLabel} cache`, {
@@ -935,10 +1020,11 @@ const ChatsScreen = ({ navigation }) => {
               });
 
               if (chatIndex !== -1) {
+                chatFound = true; // Mark that we found and updated the chat
                 const chat = draft[chatIndex];
                 const oldUnreadCount = Number(chat.unreadCount || chat.UnreadCount || 0);
                 const oldLastMessage = chat.lastMessage || chat.LastMessage;
-                
+                console.log('chat._originalData.LastMessage', chat._originalData.LastMessage);
                 console.log(`📝 [ChatsScreen] Updating chat in ${typeLabel} cache`, {
                   chatId: chat.id || chat._id,
                   enquiryId: chat.enquiryId || chat.EnquiryId,
@@ -979,15 +1065,23 @@ const ChatsScreen = ({ navigation }) => {
                 
                 // Update _originalData if it exists
                 if (chat._originalData) {
+                  // Get sender name from cached users
+                  const senderName = senderId ? getSenderNameFromId(senderId) : null;
+                  
                   if (chat._originalData.LastMessage) {
                     chat._originalData.LastMessage.Message = messageText;
                     chat._originalData.LastMessage.Timestamp = messageTimestamp;
                     chat._originalData.LastMessage.SenderId = senderId;
+                    // Add sender name if available
+                    if (senderName) {
+                      chat._originalData.LastMessage.Sender = senderName;
+                    }
                   } else {
                     chat._originalData.LastMessage = {
                       Message: messageText,
                       Timestamp: messageTimestamp,
                       SenderId: senderId,
+                      ...(senderName && { Sender: senderName }),
                     };
                   }
                   chat._originalData.LastMessageTime = messageTimestamp;
@@ -1018,20 +1112,24 @@ const ChatsScreen = ({ navigation }) => {
                   chatTitle: chat.enquiryTitle || chat.EnquiryName,
                 });
                 
-                return true; // Chat found and updated
+                // Don't return - just modify the draft (Immer requirement)
               } else {
                 console.warn(`⚠️ [ChatsScreen] Chat not found in ${typeLabel} cache`, {
                   messageChatId,
                   messageEnquiryId,
                   draftLength: draft.length,
                 });
-                return false; // Chat not found
+                // Don't return - just modify the draft (Immer requirement)
               }
           };
           
-          const result = dispatch(
-            api.util.updateQueryData('getChats', queryParams, updateDraft)
-          );
+          try {
+            dispatch(
+              api.util.updateQueryData('getChats', queryParams, updateDraft)
+            );
+          } catch (error) {
+            console.error(`❌ [ChatsScreen] Error updating cache for ${typeLabel}:`, error);
+          }
           
           // Force re-render by updating state AFTER cache update completes
           setTimeout(() => {
@@ -1045,7 +1143,7 @@ const ChatsScreen = ({ navigation }) => {
             });
           }, 0);
           
-          return result;
+          return chatFound; // Return whether chat was found
         };
 
         // Update both chat type queries
@@ -1162,7 +1260,142 @@ const ChatsScreen = ({ navigation }) => {
         clearInterval(connectionMonitor);
       }
     };
-  }, [user, dispatch, chatType1, chatType2, isAdmin, searchQuery, refetchChats]);
+  }, [user, dispatch, chatType1, chatType2, isAdmin, searchQuery, refetchChats, getSenderNameFromId]);
+
+  // Listen to typing events from socket
+  useEffect(() => {
+    if (!user) return;
+
+    const handleUserTyping = (data) => {
+      if (__DEV__) {
+        console.log('🔤 [ChatsScreen] Typing event received:', {
+          chatId: data.chatId,
+          userId: data.userId,
+          isTyping: data.isTyping,
+          userName: data.user?.name,
+          hasUser: !!data.user,
+        });
+      }
+
+      if (!data.chatId) {
+        if (__DEV__) {
+          console.warn('⚠️ [ChatsScreen] Typing event missing chatId:', data);
+        }
+        return;
+      }
+
+      const chatId = String(data.chatId).trim();
+      const typingUserId = String(data.userId || '').trim();
+      const currentUserId = String(user?.id || '').trim();
+
+      // Ignore typing events from current user
+      if (typingUserId === currentUserId) {
+        if (__DEV__) {
+          console.log('🔤 [ChatsScreen] Ignoring typing event from current user');
+        }
+        return;
+      }
+
+      // Clear existing timeout for this chat
+      if (typingTimeoutsRef.current[chatId]) {
+        clearTimeout(typingTimeoutsRef.current[chatId]);
+        delete typingTimeoutsRef.current[chatId];
+      }
+
+      if (data.isTyping && data.user) {
+        // Set typing status
+        const userName = data.user.name || data.user.Name || data.user.email || data.user.Email || 'Someone';
+        if (__DEV__) {
+          console.log('✅ [ChatsScreen] Setting typing status:', {
+            chatId,
+            userName,
+            isTyping: true,
+          });
+        }
+        setTypingStatus(prev => ({
+          ...prev,
+          [chatId]: {
+            isTyping: true,
+            userName,
+          },
+        }));
+
+        // Auto-clear after 3 seconds
+        typingTimeoutsRef.current[chatId] = setTimeout(() => {
+          if (__DEV__) {
+            console.log('⏰ [ChatsScreen] Auto-clearing typing status after 3 seconds:', chatId);
+          }
+          setTypingStatus(prev => {
+            const updated = { ...prev };
+            if (updated[chatId]) {
+              delete updated[chatId];
+            }
+            return updated;
+          });
+          delete typingTimeoutsRef.current[chatId];
+        }, 3000);
+      } else {
+        // Clear typing status immediately
+        if (__DEV__) {
+          console.log('🔤 [ChatsScreen] Clearing typing status:', chatId);
+        }
+        setTypingStatus(prev => {
+          const updated = { ...prev };
+          if (updated[chatId]) {
+            delete updated[chatId];
+          }
+          return updated;
+        });
+      }
+    };
+
+    // Ensure WebSocket is connected before subscribing
+    if (!socketService.isConnected()) {
+      if (__DEV__) {
+        console.warn('⚠️ [ChatsScreen] WebSocket NOT connected for typing listener, attempting to connect...');
+      }
+      if (user?.id) {
+        socketService.connect(user.id).then(() => {
+          if (__DEV__) {
+            console.log('✅ [ChatsScreen] WebSocket connected successfully for typing listener');
+          }
+        }).catch(err => {
+          if (__DEV__) {
+            console.error('❌ [ChatsScreen] Failed to connect WebSocket for typing listener:', err);
+          }
+        });
+      }
+    } else {
+      if (__DEV__) {
+        console.log('✅ [ChatsScreen] WebSocket already connected for typing listener');
+      }
+    }
+
+    // Register socket listener immediately
+    // Even if socket isn't connected yet, the listener will be active once it connects
+    const unsubscribeTyping = socketService.on('userTyping', handleUserTyping);
+
+    if (__DEV__) {
+      console.log('✅ [ChatsScreen] Subscribed to userTyping WebSocket event', {
+        timestamp: new Date().toISOString(),
+        isConnected: socketService.isConnected(),
+        userId: user?.id,
+      });
+    }
+
+    return () => {
+      // Cleanup
+      if (unsubscribeTyping) {
+        unsubscribeTyping();
+        if (__DEV__) {
+          console.log('🔌 [ChatsScreen] Unsubscribed from userTyping event');
+        }
+      }
+      // Clear all timeouts
+      Object.values(typingTimeoutsRef.current).forEach(timeout => clearTimeout(timeout));
+      typingTimeoutsRef.current = {};
+    };
+  }, [user]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1226,16 +1459,7 @@ const ChatsScreen = ({ navigation }) => {
           // Log first few chats with 0 unread to see what's available
           const chatIndex = filteredChats.findIndex(c => c?.id === chat.id);
           if (chatIndex < 3) {
-            console.log('[ChatsScreen] ⚠️ Unread count is 0:', {
-              chatId: chat.id,
-              enquiryTitle: chat.enquiryTitle,
-              source,
-              'chat.unreadCount': chat.unreadCount,
-              'chat.UnreadCount': chat.UnreadCount,
-              '_originalData.UnreadCount': chat._originalData?.UnreadCount,
-              '_originalData.unreadCount': chat._originalData?.unreadCount,
-              '_originalData keys': chat._originalData ? Object.keys(chat._originalData).slice(0, 10) : 'no _originalData',
-            });
+         
           }
         }
       }
@@ -1250,6 +1474,7 @@ const ChatsScreen = ({ navigation }) => {
       // Priority: Use normalized fields first (most reliable), then fall back to _originalData
       const lastSenderId = chat.lastMessageSenderId ||  // ✅ From API normalization (LastMessage.SenderId)
                           chat.lastSenderId || 
+                          chat.LastMessageSender?.name ||
                           chat.LastSenderId || 
                           chat._originalData?.LastMessage?.SenderId ||  // ✅ Direct from backend response
                           chat._originalData?.LastMessage?.senderId ||
@@ -1261,184 +1486,34 @@ const ChatsScreen = ({ navigation }) => {
                           (chat._originalData?.LastSender && typeof chat._originalData.LastSender === 'object' 
                             ? (chat._originalData.LastSender.Id || chat._originalData.LastSender._id || chat._originalData.LastSender.id || chat._originalData.LastSender.SenderId || chat._originalData.LastSender.senderId)
                             : null);
-
-              const chatType = chat.type || chat.Type || chat._originalData?.Type || chat._originalData?.type || '';
-
-      console.log('chatloggggggggg', chat);
       
-      // Debug: Log LastMessage data to see what backend sent
-      if (__DEV__ && chat._originalData?.LastMessage) {
-        console.log('[ChatList] 📋 LastMessage data:', {
-          chatId: chat.id,
-          Sender: chat._originalData.LastMessage.Sender,
-          SenderId: chat._originalData.LastMessage.SenderId,
-          senderId: chat._originalData.LastMessage.senderId,
-          lastMessageSenderName: chat.lastMessageSenderName,
-          lastMessageSenderId: chat.lastMessageSenderId,
-          lastSenderId: lastSenderId,
-          userId: user?.id,
-        });
-      }
-      
-      // Check if last sender is the current user
+      // Check if last sender is the current user - if yes, show "You"
       if (lastSenderId && user?.id && String(lastSenderId).trim() === String(user.id).trim()) {
         return 'You';
       }
       
-      // Try to get sender name from multiple sources
-      // Priority 1: Use normalized fields from API (already extracted from LastMessage.Sender)
-      // Check for truthy values (not empty strings)
-      let senderName = (chat.lastMessageSenderName && chat.lastMessageSenderName.trim()) || 
-                      (chat.lastSender && chat.lastSender.trim()) || 
-                      (chat.lastSenderName && chat.lastSenderName.trim()) ||
-                      '';
-      
-      // Debug: Log what we have at the start
-      if (__DEV__ && lastSenderId && String(lastSenderId) !== String(user?.id)) {
-        console.log('[ChatList] 🔍 Sender name lookup START:', {
-          chatId: chat.id,
-          enquiryTitle: chat.enquiryTitle,
-          lastSenderId,
-          userId: user?.id,
-          'chat.lastMessageSenderName': chat.lastMessageSenderName,
-          'chat.lastSender': chat.lastSender,
-          'chat.lastSenderName': chat.lastSenderName,
-          'currentSenderName (after priority 1)': senderName,
-        });
+      // Check _originalData.LastMessage.SenderId directly
+      const originalSenderId = chat._originalData?.LastMessage?.SenderId;
+      if (originalSenderId && user?.id && String(originalSenderId).trim() === String(user.id).trim()) {
+        return 'You';
       }
       
-      // CRITICAL: If we have SenderId but no name, try to look it up immediately
-      // This handles the case where backend sends SenderId but Sender is null
-      if (!senderName && lastSenderId && String(lastSenderId) !== String(user?.id)) {
-        const lookedUpName = getUserName(lastSenderId);
-        if (lookedUpName && lookedUpName !== '-' && lookedUpName !== lastSenderId && !lookedUpName.startsWith('User ')) {
-          senderName = lookedUpName;
-          if (__DEV__) {
-            console.log('[ChatList] ✅ Found name via getUserName (early lookup):', { senderId: lastSenderId, name: senderName });
-          }
+      // Try to get sender name from _originalData.LastMessage.Sender first
+      const senderName = chat._originalData?.LastMessage?.Sender;
+      if (senderName && typeof senderName === 'string' && senderName !== 'Unknown' && senderName !== 'Someone') {
+        return senderName;
+      }
+      
+      // If we have SenderId but no Sender name, look it up from cached users
+      if (lastSenderId || originalSenderId) {
+        const senderIdToLookup = lastSenderId || originalSenderId;
+        const lookedUpName = getSenderNameFromId(senderIdToLookup);
+        if (lookedUpName) {
+          return lookedUpName;
         }
       }
       
-      // Priority 2: Try to get directly from LastMessage.Sender (backend sends this as string or object)
-      if (!senderName && chat._originalData?.LastMessage) {
-        if (typeof chat._originalData.LastMessage === 'object') {
-          // Backend sends LastMessage.Sender as string (the name) or as object { _id: ..., name: ... }
-          if (chat._originalData.LastMessage.Sender) {
-            if (typeof chat._originalData.LastMessage.Sender === 'string' && chat._originalData.LastMessage.Sender.trim()) {
-              // Sender is a string (the name)
-              senderName = chat._originalData.LastMessage.Sender.trim();
-            } else if (typeof chat._originalData.LastMessage.Sender === 'object') {
-              // Sender is an object
-              senderName = (chat._originalData.LastMessage.Sender.name || 
-                           chat._originalData.LastMessage.Sender.Name || '').trim();
-            }
-          }
-          // Also check SenderName field (backend might send this separately)
-          if (!senderName) {
-            senderName = (chat._originalData.LastMessage.SenderName || 
-                         chat._originalData.LastMessage.senderName || '').trim();
-          }
-        }
-      }
-      
-      // Priority 3: Try LastSender object
-      if (!senderName && chat._originalData?.LastSender) {
-        if (typeof chat._originalData.LastSender === 'object') {
-          senderName = chat._originalData.LastSender.Name ||
-                      chat._originalData.LastSender.name ||
-                      chat._originalData.LastSender.SenderName ||
-                      chat._originalData.LastSender.senderName;
-        } else if (typeof chat._originalData.LastSender === 'string') {
-          senderName = chat._originalData.LastSender;
-        }
-      }
-      
-      // If still no name and we have lastSenderId, try to find in participants
-      if (!senderName && lastSenderId && Array.isArray(chat.participants || chat.Participants)) {
-        const participants = chat.participants || chat.Participants || [];
-        const found = participants.find(p => {
-          const pid = p._id || p.id || p.Id;
-          return pid && String(pid).trim() === String(lastSenderId).trim();
-        });
-        if (found) {
-          senderName = found.Name || found.name || '';
-        }
-      }
-      
-      // Try to look up user name from Redux store by ID (CRITICAL FALLBACK)
-      // This is needed when backend doesn't send Sender name for messages from others
-      if (!senderName && lastSenderId && String(lastSenderId) !== String(user?.id)) {
-        // First try getUserName utility (uses Redux usersMap)
-        const lookedUpName = getUserName(lastSenderId);
-        if (lookedUpName && lookedUpName !== '-' && lookedUpName !== lastSenderId && !lookedUpName.startsWith('User ')) {
-          senderName = lookedUpName;
-          if (__DEV__) {
-            console.log('[ChatList] ✅ Found name via getUserName:', { senderId: lastSenderId, name: senderName });
-          }
-        } else if (Array.isArray(usersList) && usersList.length > 0) {
-          // Fallback: search users array directly
-          const idStr = String(lastSenderId).trim();
-          const foundUser = usersList.find(u => {
-            const uid = String(u.id || u._id || u.Id || '').trim();
-            const cleanId = idStr.replace(/\s/g, '');
-            const cleanUid = uid.replace(/\s/g, '');
-            return uid === idStr || cleanUid === cleanId || 
-                   uid.toLowerCase() === idStr.toLowerCase() ||
-                   cleanUid.toLowerCase() === cleanId.toLowerCase();
-          });
-          if (foundUser) {
-            senderName = (foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || '').trim();
-            if (__DEV__ && senderName) {
-              console.log('[ChatList] ✅ Found name from users array:', {
-                senderId: lastSenderId,
-                foundName: senderName,
-                foundUserId: foundUser.id || foundUser._id,
-              });
-            }
-          }
-        }
-        
-        // If still no name, log warning
-        if (__DEV__ && !senderName) {
-          console.warn('[ChatList] ⚠️ Cannot find name for sender:', {
-            senderId: lastSenderId,
-            usersListLength: usersList?.length || 0,
-            usersMapSize: Object.keys(usersMap).length,
-          });
-        }
-      }
-      
-      // Last resort: use clientName if available (for client chats)
-      if (!senderName && chat.clientName) {
-        senderName = chat.clientName;
-      }
-      
-      // Debug logging - show final result
-      if (__DEV__ && lastSenderId && String(lastSenderId) !== String(user?.id)) {
-        if (!senderName) {
-          const lookedUpName = getUserName(lastSenderId);
-          console.log('[ChatList] ❌ FINAL: No sender name found:', {
-            chatId: chat.id,
-            enquiryTitle: chat.enquiryTitle,
-            lastSenderId,
-            'chat.lastMessageSenderName': chat.lastMessageSenderName,
-            'chat.lastSender': chat.lastSender,
-            'chat.lastSenderName': chat.lastSenderName,
-            'finalSenderName': senderName,
-            lookedUpName,
-            usersListLength: usersList?.length || 0,
-            usersMapSize: Object.keys(usersMap).length,
-          });
-        } else {
-          console.log('[ChatList] ✅ FINAL: Sender name found:', {
-            chatId: chat.id,
-            senderId: lastSenderId,
-            senderName,
-            source: 'will display',
-          });
-        }
-      }
-      
+      // Final fallback
       return senderName || 'Someone';
     })();
 
@@ -1474,11 +1549,28 @@ const ChatsScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.chatFooter}>
-              <Text style={styles.chatMessage}>
-                {chat.lastMessage && typeof chat.lastMessage === 'string'
-                  ? `${senderLabel}: ${truncateText(chat.lastMessage, 50)}`
-                  : 'No messages yet'}
-              </Text>
+              {(() => {
+                const chatId = String(chat._id || chat.id || '').trim();
+                const typing = typingStatus[chatId];
+                
+                // Show typing indicator if someone is typing
+                if (typing?.isTyping && typing.userName) {
+                  return (
+                    <Text style={[styles.chatMessage, { fontStyle: 'italic', color: colors.primary }]}>
+                      {typing.userName} is typing...
+                    </Text>
+                  );
+                }
+                
+                // Otherwise show last message
+                return (
+                  <Text style={styles.chatMessage}>
+                    {chat.lastMessage && typeof chat.lastMessage === 'string'
+                      ? `${senderLabel}: ${truncateText(chat.lastMessage, 50)}`
+                      : 'No messages yet'}
+                  </Text>
+                );
+              })()}
               {/* Unread count badge on the right */}
               {unreadCount > 0 && (
                 <View style={styles.unreadBadge}>

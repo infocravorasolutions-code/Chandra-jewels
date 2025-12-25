@@ -136,20 +136,9 @@ const EnquiryListScreen = ({ navigation }) => {
     // For Client users (role 4), use ClientId from token
     if ((!normalizedFilters.clientId || normalizedFilters.clientId === 'all') && isClient && clientUserId) {
       normalizedFilters.clientId = clientUserId;
-      if (__DEV__) {
-        console.log('🔐 [ENQUIRY LIST] Client user - using ClientId from token:', clientUserId);
-        console.log('🔐 [ENQUIRY LIST] User object:', {
-          id: user?.id,
-          role: user?.role,
-          roleNumber: user?.roleNumber,
-          clientId: user?.clientId,
-        });
-      }
+     
     } else if (isClient && !clientUserId) {
-      if (__DEV__) {
-        console.error('❌ [ENQUIRY LIST] ERROR: Client user but clientUserId is missing!');
-        console.error('❌ [ENQUIRY LIST] User object:', user);
-      }
+     
     }
     
     if ((!normalizedFilters.assignedTo || normalizedFilters.assignedTo === 'all') && !isAdmin && !isClient && currentUserId) {
@@ -222,12 +211,7 @@ const EnquiryListScreen = ({ navigation }) => {
       const params = buildQueryString(pageToLoad);
       const token = await AsyncStorage.getItem('token');
       const apiUrl = `${API_BASE_URL}/api/enquiries/search?${params.toString()}`;
-      
-      if (__DEV__ && isClient) {
-        console.log('🔐 [ENQUIRY FETCH] Client user - API URL:', apiUrl);
-        console.log('🔐 [ENQUIRY FETCH] Query params:', params.toString());
-      }
-      
+
       const response = await fetch(apiUrl, {
         headers: {
           'Content-Type': 'application/json',

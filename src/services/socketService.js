@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { SOCKET_BASE_URL } from '../config/apiConfig';
 
 const SOCKET_URL = SOCKET_BASE_URL;
@@ -47,14 +47,35 @@ class SocketService {
       this.socket = null;
     }
 
+    // Get auth token from secure storage (same as API uses) - outside try block for error handler access
+    let token;
+    try {
+      token = await secureStorage.getItem('token');
+    } catch (tokenError) {
+      if (__DEV__) {
+        console.error('❌ [SocketService] Failed to get token from secure storage:', tokenError);
+      }
+      this.isConnecting = false;
+      return;
+    }
+    
+    if (!token) {
+      if (__DEV__) {
+        console.error('❌ [SocketService] No token found in secure storage');
+      }
+      this.isConnecting = false;
+      return;
+    }
+
+    if (__DEV__) {
+      console.log('🔐 [SocketService] Connecting with token:', token.substring(0, 20) + '...');
+    }
+
     try {
       this.isConnecting = true;
-      
-      // Get auth token
-      const token = await AsyncStorage.getItem('token');
-      
-      
 
+      // Socket.io servers typically expect just the raw token (without "Bearer " prefix)
+      // The backend will add "Bearer " prefix when validating if needed
       this.socket = io(SOCKET_URL, {
         transports: ['websocket'], // Use only websocket to avoid polling overhead
         reconnection: true,
@@ -63,7 +84,11 @@ class SocketService {
         reconnectionAttempts: 5, // Limit to 5 attempts to prevent resource exhaustion
         timeout: 20000,
         auth: {
-          token: token ? `Bearer ${token}` : null,
+          token: token, // Send raw token (backend will handle Bearer prefix if needed)
+        },
+        // Also include in headers as some servers expect it there
+        extraHeaders: {
+          Authorization: `Bearer ${token}`,
         },
       });
 
@@ -151,8 +176,27 @@ class SocketService {
       });
 
       this.socket.on('connect_error', (error) => {
+        const errorMessage = error?.message || error?.toString() || '';
+        const isAuthError = errorMessage.includes('Authentication error') || 
+                           errorMessage.includes('Invalid or expired token') ||
+                           errorMessage.includes('Unauthorized') ||
+                           errorMessage.toLowerCase().includes('authentication');
+        
         if (__DEV__) {
-          console.warn('⚠️ Socket connection error (this is OK if WebSocket server is not running):', error.message);
+          if (isAuthError) {
+            console.error('❌ [SocketService] Authentication error:', errorMessage);
+            if (token) {
+              console.error('   Token preview:', token.substring(0, 30) + '...');
+              console.error('   Token length:', token.length);
+            }
+            console.error('   Possible causes:');
+            console.error('   1. Token is expired - try logging out and back in');
+            console.error('   2. Token format mismatch - backend might expect different format');
+            console.error('   3. Backend authentication middleware issue');
+            console.error('   Current auth format: raw token (without Bearer prefix)');
+          } else {
+            console.warn('⚠️ Socket connection error (this is OK if WebSocket server is not running):', errorMessage);
+          }
         }
         
         // Don't throw error, just log it - chat can work without WebSocket
@@ -294,11 +338,32 @@ class SocketService {
    */
   sendMessage(data) {
     if (!this.socket?.connected) {
-      
+      if (__DEV__) {
+        console.error('❌ [SocketService] Cannot send message: Socket not connected', {
+          hasSocket: !!this.socket,
+          isConnected: this.socket?.connected,
+          connected: this.connected,
+          isConnecting: this.isConnecting,
+          socketId: this.socket?.id,
+          data: {
+            chatId: data?.chatId,
+            userId: data?.userId,
+            messageLength: data?.message?.length,
+          },
+        });
+      }
       return false;
     }
 
-    
+    if (__DEV__) {
+      console.log('📤 [SocketService] Sending message via WebSocket', {
+        chatId: data?.chatId,
+        userId: data?.userId,
+        messageLength: data?.message?.length,
+        messageType: data?.messageType,
+        hasParentMessage: !!data?.parentMessageId,
+      });
+    }
 
     this.socket.emit('sendMessage', data);
     return true;

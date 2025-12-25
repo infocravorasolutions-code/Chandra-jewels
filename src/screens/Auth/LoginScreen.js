@@ -99,18 +99,14 @@ const LoginScreen = ({ navigation }) => {
                 const dbClientId = userDetails.clientId || userDetails.ClientId;
                 if (dbClientId) {
                   result.user.clientId = dbClientId;
-                  if (__DEV__) {
-                    console.log('🔐 [LOGIN] ClientId fetched from database:', dbClientId);
-                  }
+               
                 }
               }
             } else {
             }
           } catch (error) {
             // Continue with login even if user details fetch fails
-            if (__DEV__) {
-              console.warn('⚠️ [LOGIN] Failed to fetch user details:', error);
-            }
+         
           }
         }
         
@@ -147,13 +143,7 @@ const LoginScreen = ({ navigation }) => {
         };
         
         if (__DEV__ && userData.roleNumber === 4) {
-          console.log('🔐 [LOGIN] Final userData for Client user:', {
-            id: userData.id,
-            role: userData.role,
-            roleNumber: userData.roleNumber,
-            clientId: userData.clientId,
-            name: userData.name,
-          });
+         
           if (!userData.clientId) {
             console.error('❌ [LOGIN] ERROR: ClientId is missing for Role 4 user!');
           }

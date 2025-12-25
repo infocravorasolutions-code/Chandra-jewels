@@ -50,9 +50,7 @@ export const checkAuthState = createAsyncThunk(
           if (clientId && userData.clientId !== clientId) {
             userData.clientId = clientId;
             userDataUpdated = true;
-            if (__DEV__) {
-              console.log('🔐 Client user - ClientId extracted from token:', clientId);
-            }
+         
           }
         }
         

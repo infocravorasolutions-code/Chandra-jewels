@@ -174,13 +174,10 @@ export const api = createApi({
             throw new Error('Failed to decode authentication token');
           }
           
-          if (__DEV__) {
-            console.log('All token fields:', Object.keys(decodedToken));
-          }
-          
+       
           // Try different case variations for role
           const roleNumber = decodedToken.Role || decodedToken.role || decodedToken.RoleNumber || decodedToken.roleNumber;
-          console.log('🔐 Token fields:', Object.keys(decodedToken));
+       
           
           if (roleNumber === undefined || roleNumber === null) {
             throw new Error(`Role not found in token. Available fields: ${Object.keys(decodedToken).join(', ')}`);
@@ -203,18 +200,7 @@ export const api = createApi({
           // Extract ClientId from token (for role 4 - Client users)
           const clientId = decodedToken.ClientId || decodedToken.clientId || decodedToken.ClientID || decodedToken.clientID;
           
-          if (__DEV__) {
-            console.log('🔐 [LOGIN] All token fields:', Object.keys(decodedToken));
-            console.log('🔐 [LOGIN] Decoded token:', JSON.stringify(decodedToken, null, 2));
-            if (roleNumber === 4) {
-              console.log('🔐 [LOGIN] Client user (Role 4) detected');
-              console.log('🔐 [LOGIN] ClientId from token:', clientId);
-              if (!clientId) {
-                console.warn('⚠️ [LOGIN] WARNING: ClientId not found in token for Role 4 user!');
-                console.warn('⚠️ [LOGIN] Token fields available:', Object.keys(decodedToken));
-              }
-            }
-          }
+       
           
           return {
             success: true,
@@ -1046,9 +1032,7 @@ export const api = createApi({
           
           const response = await baseQuery(aggregateUrl);
           
-          if (__DEV__) {
-            console.log('📊 [STATUS STATS API] Response:', JSON.stringify(response, null, 2));
-          }
+    
           
           if (response.error) {
             
@@ -1104,21 +1088,7 @@ export const api = createApi({
           // For Client users (role 4), use ClientId from token, not userId
           const clientFilterId = isClientRole && clientId ? clientId : (isClientRole ? userId : undefined);
           
-          if (__DEV__ && isClientRole) {
-            console.log('🔐 [DASHBOARD] Client user detected:', {
-              role,
-              roleNumber,
-              userId,
-              clientId,
-              clientFilterId,
-            });
-            if (!clientFilterId) {
-              console.error('❌ [DASHBOARD] ERROR: clientFilterId is missing!');
-              console.error('❌ [DASHBOARD] clientId from arg:', clientId);
-              console.error('❌ [DASHBOARD] userId from arg:', userId);
-            }
-          }
-          
+    
           // Build aggregate URLs
           // For status counts: use aggregate endpoint with appropriate filters
           let statusAggregateUrl;
@@ -1128,10 +1098,7 @@ export const api = createApi({
           } else if (isClientRole && clientFilterId) {
             // Client: Filter by ClientId from token
             statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&clientId=${encodeURIComponent(clientFilterId)}`;
-            if (__DEV__) {
-              console.log('🔐 [DASHBOARD] Using ClientId filter:', clientFilterId);
-              console.log('🔐 [DASHBOARD] Full API URL:', statusAggregateUrl);
-            }
+       
           } else {
             // Coral/CAD: Filter by assignedTo
             statusAggregateUrl = `/api/enquiries/aggregate?groupBy=status&assignedTo=${encodeURIComponent(userId)}`;
@@ -1190,7 +1157,7 @@ export const api = createApi({
           if (statusAggregateResult.data && !statusAggregateResult.error) {
             const aggregateData = statusAggregateResult.data;
             
-            console.log('🔍 [DASHBOARD DEBUG] Status Aggregate API Response:', JSON.stringify(aggregateData, null, 2));
+          
             
             // Handle different response formats
             if (Array.isArray(aggregateData)) {
@@ -1203,13 +1170,7 @@ export const api = createApi({
                 // Store specific status counts for designers
                 specificStatusCounts[statusNameLower] = count;
                 
-                console.log(`🔍 [DASHBOARD DEBUG] Item ${index + 1}:`, {
-                  rawItem: item,
-                  statusName,
-                  count,
-                  itemKeys: Object.keys(item)
-                });
-                
+  
                 // Categorize status into Pending, Approval Pending, or Completed
                 let category = 'Pending';
                 if (statusName.includes('APPROVAL') && !statusName.includes('APPROVED')) {
@@ -1218,7 +1179,6 @@ export const api = createApi({
                   category = 'Completed';
                 }
                 
-                console.log(`🔍 [DASHBOARD DEBUG] Categorized "${statusName}" (count: ${count}) → "${category}"`);
                 
                 categorizedCounts[category] += count;
                 categorizedCounts['All'] += count;
@@ -1274,8 +1234,7 @@ export const api = createApi({
               });
             }
             
-            console.log('🔍 [DASHBOARD DEBUG] Final Status Counts (legacy):', statusCounts);
-          } else if (statusAggregateResult.error) {
+         } else if (statusAggregateResult.error) {
           }
           
           // Process client aggregate data for admin users
@@ -1283,7 +1242,7 @@ export const api = createApi({
           let clientAggregateData = null;
           if (isAdmin && clientAggregateResult.data && !clientAggregateResult.error) {
             clientAggregateData = clientAggregateResult.data;
-            console.log('🔍 [DASHBOARD DEBUG] Client Aggregate API Response:', JSON.stringify(clientAggregateData, null, 2));
+            
             
             if (Array.isArray(clientAggregateData)) {
               // Count unique clients from aggregate
@@ -1299,14 +1258,7 @@ export const api = createApi({
           // For admin, also check pagination total if available (more accurate than array length)
           const paginationTotal = enquiriesResult.data?.pagination?.total || enquiriesResult.data?.total || null;
           
-          console.log('🔍 [DASHBOARD DEBUG] Enquiries result structure:', {
-            isArray: Array.isArray(enquiriesResult.data),
-            hasData: !!enquiriesResult.data?.data,
-            hasEnquiries: !!enquiriesResult.data?.enquiries,
-            totalFromPagination: paginationTotal,
-            enquiriesArrayLength: enquiries.length,
-            fullResult: enquiriesResult.data,
-          });
+    
 
           const clients = role === 'admin' && clientsResult.data
             ? (Array.isArray(clientsResult.data) 
@@ -1378,16 +1330,7 @@ export const api = createApi({
               })
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
             
-            console.log('🔍 [DASHBOARD DEBUG] ADMIN DASHBOARD CALCULATIONS (from aggregate endpoints):');
-            console.log('🔍 [DASHBOARD DEBUG] - Total Enquiries:', totalEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending Enquiries:', pendingEnquiries, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Enquiries:', approvalPendingEnquiries, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Completed Enquiries:', completedEnquiries, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Total Clients:', totalClients, '(from aggregate:', totalClientsFromAggregate, '| from clients API:', clients.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Revenue:', revenue, '(calculated from', normalizedEnquiries.length, 'completed enquiries)');
             const sumOfStatuses = pendingEnquiries + approvalPendingEnquiries + completedEnquiries;
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', sumOfStatuses);
-            console.log('🔍 [DASHBOARD DEBUG] - Does sum match Total?', sumOfStatuses === totalEnquiries, '(Total:', totalEnquiries, '| Sum:', sumOfStatuses, ')');
             
             return {
               data: {
@@ -1432,13 +1375,7 @@ export const api = createApi({
               })
               .reduce((sum, e) => sum + (parseFloat(e.budget || e.estimatedPrice || 0)), 0);
             
-            console.log('🔍 [DASHBOARD DEBUG] - My Enquiries:', myEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending:', pendingApprovals, '(from categorizedCounts.Pending:', categorizedCounts['Pending'], '| statusCounts.pending:', statusCounts.pending, '| counted:', pendingCount, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending:', approvalPending, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], '| counted:', approvalPendingCount, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Completed Orders:', completedOrders, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, '| counted:', completedCount, ')');
-            const clientSum = pendingApprovals + approvalPending + completedOrders;
-            console.log('🔍 [DASHBOARD DEBUG] - Sum Check (Pending + Approval Pending + Completed):', clientSum);
-            console.log('🔍 [DASHBOARD DEBUG] - Does sum match My Enquiries?', clientSum === myEnquiries, '(My Enquiries:', myEnquiries, '| Sum:', clientSum, ')');
+           const clientSum = pendingApprovals + approvalPending + completedOrders;
             
             return {
               data: {
@@ -1462,18 +1399,7 @@ export const api = createApi({
             const approvalPendingDesigns = categorizedCounts['Approval Pending'] || 0;
             const averageRating = 4.8; // TODO: Fetch from API when available
             
-            console.log('🔍 [DASHBOARD DEBUG] DESIGNER DASHBOARD CALCULATIONS (from aggregate API):');
-            console.log('🔍 [DASHBOARD DEBUG] - Role:', role, '(should use aggregate endpoint)');
-            console.log('🔍 [DASHBOARD DEBUG] - Assigned Enquiries:', assignedEnquiries, '(from categorizedCounts.All:', categorizedCounts['All'], '| statusCounts.total:', statusCounts.total, '| normalizedEnquiries.length:', normalizedEnquiries.length, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Pending Designs (role-specific):', pendingDesigns, 
-              role === 'coral' 
-                ? '(from specificStatusCounts["coral"]:' + specificStatusCounts['coral'] + ')'
-                : '(from specificStatusCounts["cad"]:' + specificStatusCounts['cad'] + ')'
-            );
-            console.log('🔍 [DASHBOARD DEBUG] - Approval Pending Designs:', approvalPendingDesigns, '(from categorizedCounts["Approval Pending"]:', categorizedCounts['Approval Pending'], ')');
-            console.log('🔍 [DASHBOARD DEBUG] - Completed Designs:', completedDesigns, '(from categorizedCounts.Completed:', categorizedCounts['Completed'], '| statusCounts.completed:', statusCounts.completed, ')');
-            console.log('🔍 [DASHBOARD DEBUG] - All status counts:', JSON.stringify(specificStatusCounts, null, 2));
-            
+         
             return {
               data: {
                 assignedEnquiries,
@@ -3165,13 +3091,7 @@ export const api = createApi({
               
               if (__DEV__) {
                 if (lastMessageSenderName) {
-                  console.log('[API] ✅ Extracted sender name from LastMessage:', {
-                    senderName: lastMessageSenderName,
-                    senderId: lastMessageSenderId,
-                    source: typeof lastMessageObj.Sender === 'string' ? 'Sender (string)' : 
-                            typeof lastMessageObj.Sender === 'object' ? 'Sender (object)' :
-                            lastMessageObj.SenderName ? 'SenderName' : 'other',
-                  });
+                
                 } else if (lastMessageSenderId) {
                   console.log('[API] ❌ Have SenderId but no name from LastMessage:', {
                     senderId: lastMessageSenderId,
@@ -3302,34 +3222,7 @@ export const api = createApi({
           }
           
           // Debug logging for unread count - log always to help diagnose missing counts
-          if (__DEV__) {
-            if (unreadCount > 0) {
-              console.log('[API] ✅ Unread count found:', {
-                chatId: chatId,
-                enquiryTitle: chat.EnquiryName || chat.enquiryName || 'Unknown',
-                unreadCount: unreadCount,
-                source: unreadCountSource,
-              });
-            } else {
-              // Log when unread count is 0 to see what backend sent
-              console.log('[API] ⚠️ Unread count is 0:', {
-                chatId: chatId,
-                enquiryTitle: chat.EnquiryName || chat.enquiryName || 'Unknown',
-                source: unreadCountSource,
-                availableFields: {
-                  UnreadCount: chat.UnreadCount,
-                  unreadCount: chat.unreadCount,
-                  Unread: chat.Unread,
-                  unread: chat.unread,
-                  UnreadMessages: chat.UnreadMessages,
-                  unreadMessages: chat.unreadMessages,
-                  LastMessage: chat.LastMessage ? 'exists' : 'missing',
-                  LastMessageIsRead: chat.LastMessage?.IsRead,
-                  LastMessageReadBy: chat.LastMessage?.ReadBy,
-                },
-              });
-            }
-          }
+
           
           // If unread count is still 0, try to calculate from LastMessage ReadBy
           // This is a fallback if backend doesn't send unread count directly
