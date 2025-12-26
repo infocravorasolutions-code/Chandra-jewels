@@ -1097,12 +1097,12 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         }
         setIsTyping(data.isTyping);
         
-        // Store typing user info if available
-        if (data.isTyping && data.user) {
+        // Store typing user info - always include userId for lookup from users list
+        if (data.isTyping && data.userId) {
           setTypingUser({
             userId: data.userId,
-            name: data.user.name || data.user.Name || data.user.email || data.user.Email || 'Someone',
-            email: data.user.email || data.user.Email,
+            name: data.user?.name || data.user?.Name || data.user?.email || data.user?.Email || null,
+            email: data.user?.email || data.user?.Email || null,
           });
         } else if (!data.isTyping) {
           // Clear typing user when typing stops

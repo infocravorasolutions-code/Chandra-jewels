@@ -215,6 +215,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const hasLoadedMoreRef = useRef(false); // Track if we've already triggered load more in this scroll session
   const scrollOffsetBeforeLoadRef = useRef(0); // Store scroll position before loading more
   const messagesCountBeforeLoadRef = useRef(0); // Store message count before loading more
+  const usersListRef = useRef([]); // Store all users list for typing user lookup
 
   const loading = isLoadingChat || messagesLoading;
   const messagesError = chatError;
@@ -229,6 +230,36 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Fetch all users to enable name lookup by ID
   const { users: usersList } = useUsers();
+
+  // Store users list in ref for typing user lookup
+  useEffect(() => {
+    if (usersList && usersList.length > 0) {
+      usersListRef.current = usersList;
+    }
+  }, [usersList]);
+
+  // Helper function to get typing user name from userId using ref
+  const getTypingUserName = useCallback((userId) => {
+    if (!userId || !usersListRef.current || usersListRef.current.length === 0) {
+      return null;
+    }
+    
+    const idStr = String(userId).trim();
+    
+    // Try to find user in usersListRef
+    const foundUser = usersListRef.current.find(u => {
+      const userIdFromList = String(u.id || u._id || '').trim();
+      const noSpacesId = idStr.replace(/\s/g, '');
+      const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
+      return userIdFromList === idStr || userIdFromList === noSpacesId || userIdFromList === cleanId;
+    });
+    
+    if (foundUser) {
+      return foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || null;
+    }
+    
+    return null;
+  }, []);
 
   // Always fetch enquiry data if we have enquiryId to ensure we have complete client information
   const { data: fetchedEnquiryData, isLoading: isLoadingEnquiry } = useGetEnquiryByIdQuery(enquiryId, {
@@ -1515,7 +1546,21 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 isTyping ? (
                   <View style={styles.typingIndicator}>
                     <Text style={styles.typingText}>
-                      {typingUser?.name ? `${typingUser.name} is typing...` : 'Someone is typing...'}
+                      {(() => {
+                        // First try to get name from typingUser object
+                        if (typingUser?.name) {
+                          return `${typingUser.name} is typing...`;
+                        }
+                        // If not available, look up from users list using userId
+                        if (typingUser?.userId) {
+                          const userName = getTypingUserName(typingUser.userId);
+                          if (userName) {
+                            return `${userName} is typing...`;
+                          }
+                        }
+                        // Fallback
+                        return 'Someone is typing...';
+                      })()}
                     </Text>
                   </View>
                 ) : null
