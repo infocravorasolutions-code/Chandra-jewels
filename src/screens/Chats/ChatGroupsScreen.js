@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -16,6 +16,7 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
 import { formatChatDate, formatDateTime, truncateText } from '../../utils/helpers';
+import { useUsers } from '../../features/users/usersHooks';
 
 const ChatGroupsScreen = ({ route, navigation }) => {
   const { user } = useAuth();
@@ -23,6 +24,43 @@ const ChatGroupsScreen = ({ route, navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [focusedChat, setFocusedChat] = useState(null);
   const [renderError, setRenderError] = useState(null);
+  
+  // Fetch all users for sender name lookup
+  const { users: usersList } = useUsers();
+  const usersListRef = useRef([]); // Store all users list for sender name lookup
+  const hasRefetchedOnMountRef = useRef(false); // Track if we've already refetched on mount
+  
+  // Store users list in ref
+  useEffect(() => {
+    if (usersList && usersList.length > 0) {
+      usersListRef.current = usersList;
+    }
+  }, [usersList]);
+  
+  // Helper function to get sender name from userId using ref
+  const getSenderNameFromUserId = useCallback((userId) => {
+
+    console.log('getSenderNameFromUserId', userId, usersListRef.current);
+    if (!userId || !usersListRef.current || usersListRef.current.length === 0) {
+      return null;
+    }
+    
+    const idStr = String(userId).trim();
+    
+    // Try to find user in usersListRef
+    const foundUser = usersListRef.current.find(u => {
+      const userIdFromList = String(u.id || u._id || '').trim();
+      const noSpacesId = idStr.replace(/\s/g, '');
+      const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
+      return userIdFromList === idStr || userIdFromList === noSpacesId || userIdFromList === cleanId;
+    });
+    
+    if (foundUser) {
+      return foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || null;
+    }
+    
+    return null;
+  }, []);
   
   // Memoize enquiry ID to prevent infinite loops
   const currentEnquiryId = useMemo(() => {
@@ -55,6 +93,29 @@ const ChatGroupsScreen = ({ route, navigation }) => {
   
   // Ensure chats is always an array
   const chats = Array.isArray(chatsData) ? chatsData : [];
+  
+  // Refetch chats data on first mount to update unread count
+  useEffect(() => {
+    if (currentEnquiryId && refetch && !hasRefetchedOnMountRef.current) {
+      // Small delay to ensure component is fully mounted
+      const timer = setTimeout(() => {
+        if (__DEV__) {
+          console.log('🔄 [ChatGroupsScreen] Refetching chats on mount to update unread count', {
+            enquiryId: currentEnquiryId,
+          });
+        }
+        refetch();
+        hasRefetchedOnMountRef.current = true; // Mark as refetched
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [currentEnquiryId, refetch]); // Only run when enquiryId changes (first mount or when enquiry changes)
+  
+  // Reset refetch flag when enquiryId changes (new enquiry)
+  useEffect(() => {
+    hasRefetchedOnMountRef.current = false;
+  }, [currentEnquiryId]);
   
   if (__DEV__) {
     console.log('ChatGroupsScreen - Chats data:', {
@@ -205,6 +266,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
     if (chat?.LastMessage) {
       const senderId =
         chat.LastMessage?.SenderId?._id ||
+        chat.LastMessage?.Sender?._id ||
         chat.LastMessage?.SenderId ||
         chat.LastMessage?.senderId;
   
@@ -213,12 +275,20 @@ const ChatGroupsScreen = ({ route, navigation }) => {
         chat.LastMessage?.message ||
         chat.LastMessage?.text ||
         chat.LastMessage?.Text ||
-        '';
+        'No message yet';
   
-      const senderName =
+      // First try to get sender name from LastMessage object
+      let senderName =
         chat.LastMessage?.SenderId?.name ||
         chat.LastMessage?.senderName ||
         '';
+
+      console.log('senderName123456+=========', senderName, senderId , chat.LastMessage);
+      
+      // If sender name not available, look up from users list using senderId
+      if (!senderName && senderId) {
+        senderName = getSenderNameFromUserId(senderId);
+      }
   
       lastMessage =
         String(senderId).trim() === String(user?.id).trim()
