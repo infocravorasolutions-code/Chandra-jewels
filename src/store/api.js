@@ -568,6 +568,8 @@ export const api = createApi({
             CurrentStatus: enquiry.CurrentStatus,
             CreatedDate: enquiry.CreatedDate,
             ReferenceImages: enquiry.ReferenceImages || [],
+            ReferenceVideos: enquiry.ReferenceVideos || [],
+            Videos: enquiry.Videos || [],
             CoralCode: enquiry.CoralCode,
             CadCode: enquiry.CadCode,
             _originalData: enquiry,
@@ -1453,16 +1455,36 @@ export const api = createApi({
     // ==================== FILE UPLOAD ====================
     uploadDesign: builder.mutation({
       queryFn: async ({ enquiryId, designType, version, images, excel, designCode }, { dispatch }, extraOptions, baseQuery) => {
+        const startTime = Date.now();
+        
+        if (__DEV__) {
+          console.log('🚀 [uploadDesign] ===== START DESIGN UPLOAD =====');
+          console.log('🚀 [uploadDesign] Timestamp:', new Date().toISOString());
+          console.log('🚀 [uploadDesign] Enquiry ID:', enquiryId);
+          console.log('🚀 [uploadDesign] Design Type:', designType);
+          console.log('🚀 [uploadDesign] Version:', version);
+          console.log('🚀 [uploadDesign] Total files received:', images?.length || 0);
+          console.log('🚀 [uploadDesign] Has Excel:', !!excel);
+          console.log('🚀 [uploadDesign] Design Code:', designCode);
+        }
+        
         // Note: invalidatesTags is set in the mutation definition below
         try {
           const token = await secureStorage.getItem('token');
           if (!token) {
+            if (__DEV__) {
+              console.error('❌ [uploadDesign] Authentication token not found');
+            }
             return {
               error: {
                 status: 'CUSTOM_ERROR',
                 data: 'Authentication token not found',
               },
             };
+          }
+          
+          if (__DEV__) {
+            console.log('✅ [uploadDesign] Authentication token found');
           }
 
           // Create FormData
@@ -1595,28 +1617,22 @@ export const api = createApi({
               }
               
               // Create a clean file object with ONLY required fields
-              // Use Object.create(null) to ensure no prototype properties leak through
-              // This prevents any extra metadata from being included
+              // Use plain object literal (not Object.create(null)) for React Native FormData compatibility
+              // React Native FormData requires objects with Object prototype for proper serialization
               // CRITICAL: Only include uri, type, and name - nothing else!
-              const fileObject = Object.create(null);
-              fileObject.uri = String(image.uri || ''); // Ensure it's a string
-              fileObject.type = String(image.type || defaultType); // Ensure it's a string
-              fileObject.name = String(image.name || defaultName); // Ensure it's a string
-              
-              // Explicitly delete any potential extra properties (defensive)
-              // This shouldn't be necessary but ensures nothing leaks through
-              const allowedKeys = ['uri', 'type', 'name'];
-              Object.keys(fileObject).forEach(key => {
-                if (!allowedKeys.includes(key)) {
-                  delete fileObject[key];
-                }
-              });
+              const fileObject = {
+                uri: String(image.uri || ''), // Ensure it's a string
+                type: String(image.type || defaultType), // Ensure it's a string
+                name: String(image.name || defaultName), // Ensure it's a string
+              };
               
               // Log each file object being created
               if (__DEV__) {
                 console.log(`🔍 [uploadDesign] File ${index} (${isVideo ? 'VIDEO' : 'IMAGE'}):`, {
                   originalImage: {
                     uri: image.uri?.substring(0, 50) + '...',
+                    fullUri: image.uri, // Log full URI for debugging
+                    uriType: image.uri?.startsWith('content://') ? 'content://' : image.uri?.startsWith('file://') ? 'file://' : 'other',
                     type: image.type,
                     name: image.name,
                     allKeys: Object.keys(image || {}),
@@ -1628,11 +1644,11 @@ export const api = createApi({
                     duration: image.duration,
                     width: image.width,
                     height: image.height,
-                    // Log ALL properties to see what React Native image picker returns
-                    fullOriginalImage: image,
                   },
                   fileObject: {
                     uri: fileObject.uri?.substring(0, 50) + '...',
+                    fullUri: fileObject.uri, // Log full URI for debugging
+                    uriType: fileObject.uri?.startsWith('content://') ? 'content://' : fileObject.uri?.startsWith('file://') ? 'file://' : 'other',
                     type: fileObject.type,
                     name: fileObject.name,
                     allKeys: Object.keys(fileObject),
@@ -1642,7 +1658,9 @@ export const api = createApi({
                 });
               }
               
-              // Send videos in 'videos' field, images in 'images' field
+              // For coral/CAD design uploads, backend may expect videos in 'images' field
+              // This is different from reference uploads which use separate 'videos' field
+              // Try sending videos in 'images' field first (backend may not support separate 'videos' field for design uploads)
               if (isVideo) {
                 // For videos, ensure we're using the correct MIME type
                 // Backend expects: video/mp4, video/mpeg, video/quicktime, video/x-msvideo, video/webm
@@ -1653,8 +1671,13 @@ export const api = createApi({
                     console.warn(`⚠️ [uploadDesign] Video type adjusted to video/mp4 for file: ${fileObject.name}`);
                   }
                 }
-                formData.append('videos', fileObject);
+                // Send videos in 'images' field for design uploads (coral/CAD)
+                // Backend may not support separate 'videos' field for this endpoint
+                formData.append('images', fileObject);
                 videoFiles.push(fileObject);
+                if (__DEV__) {
+                  console.log(`📹 [uploadDesign] Video sent in 'images' field (backend may not support 'videos' field for ${designType} uploads)`);
+                }
               } else {
                 formData.append('images', fileObject);
                 imageFiles.push(fileObject);
@@ -1691,28 +1714,58 @@ export const api = createApi({
           }
 
           const endpoint = `/api/enquiries/${enquiryId}/upload/${designType}`;
+          const fullUrl = `${API_BASE_URL}${endpoint}`;
           
-          // Debug logging to see what we're sending
           if (__DEV__) {
-            console.log('📤 [uploadDesign] Final FormData summary:', {
-              endpoint: `${API_BASE_URL}${endpoint}`,
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('✅ [uploadDesign] ENDPOINT VERIFICATION');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('📍 Endpoint Path:', endpoint);
+            console.log('🌐 Full URL:', fullUrl);
+            console.log('🎨 Design Type:', designType);
+            console.log('📝 Note: Design uploads use /upload/{designType} endpoint');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
+            
+            console.log('📤 [uploadDesign] Final FormData Summary:', {
+              endpoint: fullUrl,
               designType,
               version: versionValue.toString(),
               imagesCount: imageFiles.length,
               videosCount: videoFiles.length,
+              totalInImagesField: imageFiles.length + videoFiles.length, // Videos are sent in 'images' field
               hasExcel: !!excel,
               designCode,
               formDataFields: {
                 version: versionValue.toString(),
                 ...(designCode ? { code: designCode.trim() } : {}),
-                images: `${imageFiles.length} files`,
-                videos: `${videoFiles.length} files`,
+                images: `${imageFiles.length + videoFiles.length} file(s) (${imageFiles.length} images + ${videoFiles.length} videos)`,
                 ...(excel ? { excel: '1 file' } : {}),
+                note: videoFiles.length > 0 ? `Videos sent in 'images' field for ${designType} uploads` : null,
               },
+            });
+            
+            console.log('📋 [uploadDesign] FormData Details:', {
+              images: imageFiles.map((f, i) => `${i + 1}. ${f.name} (${f.type})`),
+              videos: videoFiles.map((f, i) => `${i + 1}. ${f.name} (${f.type}) - sent in 'images' field`),
+              note: videoFiles.length > 0 ? `Videos are sent in 'images' field for ${designType} uploads` : null,
+              ...(excel ? { excel: `${excel.name || 'excel'} (${excel.type || 'application/vnd.ms-excel'})` } : {}),
             });
           }
 
-          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          if (__DEV__) {
+            console.log('🌐 [uploadDesign] Sending HTTP Request...');
+            console.log('🌐 [uploadDesign] Request URL:', fullUrl);
+            console.log('🌐 [uploadDesign] Request Method: POST');
+            console.log('🌐 [uploadDesign] Request Headers:', {
+              'Authorization': `Bearer ${token.substring(0, 20)}...`,
+              'Content-Type': 'multipart/form-data (auto-set by fetch)',
+            });
+          }
+          
+          const requestStartTime = Date.now();
+          const response = await fetch(fullUrl, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -1720,15 +1773,41 @@ export const api = createApi({
             },
             body: formData,
           });
+          
+          const requestDuration = Date.now() - requestStartTime;
+          
+          if (__DEV__) {
+            console.log('📡 [uploadDesign] Response received:', {
+              status: response.status,
+              statusText: response.statusText,
+              ok: response.ok,
+              requestDuration: `${requestDuration}ms`,
+            });
+          }
 
           if (response.ok) {
             const data = await response.json();
+            const totalDuration = Date.now() - startTime;
             
             if (__DEV__) {
-              console.log('✅ [uploadDesign] Success:', {
-                status: response.status,
-                data,
+              console.log('');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('✅ [uploadDesign] UPLOAD SUCCESS');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('📊 Response Status:', response.status, response.statusText);
+              console.log('📦 Response Data:', JSON.stringify(data, null, 2));
+              console.log('📈 Upload Summary:', {
+                designType,
+                version: versionValue.toString(),
+                imagesUploaded: imageFiles.length,
+                videosUploaded: videoFiles.length,
+                excelUploaded: excel ? 1 : 0,
+                totalFilesUploaded: imageFiles.length + videoFiles.length + (excel ? 1 : 0),
               });
+              console.log('⏱️  Total Duration:', `${totalDuration}ms`);
+              console.log('🌐 Endpoint Used:', endpoint);
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('');
             }
             
             return { data };
@@ -1772,45 +1851,29 @@ export const api = createApi({
               errorData = { message: `Upload failed with status ${response.status}` };
             }
             
+            const totalDuration = Date.now() - startTime;
+            
             if (__DEV__) {
-              // Extract Java exceptions and stack traces from HTML error
-              const javaExceptions = errorText.match(/(?:java\.|Exception|Error|NumberFormatException|NullPointerException|IllegalArgumentException|at\s+[\w\.]+\([^\)]+\))/gi) || [];
-              const stackTrace = errorText.match(/at\s+[\w\.]+\([^\)]+\)/gi) || [];
-              
-              console.error(`❌ [uploadDesign] Error details:`, {
-                status: response.status,
-                statusText: response.statusText,
-                enquiryId,
-                designType,
-                version: versionValue.toString(),
-                versionOriginal: version,
+              console.log('');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('❌ [uploadDesign] UPLOAD FAILED');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('📊 Response Status:', response.status, response.statusText);
+              console.log('🌐 Endpoint Used:', endpoint);
+              console.log('🎨 Design Type:', designType);
+              console.log('📝 Version:', versionValue.toString());
+              console.log('📦 Files Attempted:', {
                 imagesCount: imageFiles.length,
                 videosCount: videoFiles.length,
-                hasExcel: !!excel,
-                excelFileName: excel?.name || 'N/A',
-                errorTextPreview: errorText.substring(0, 500), // First 500 chars
-                errorMessage: errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error',
-                isHtmlError: errorData?.isHtmlError || errorText.includes('<!DOCTYPE html>'),
-                javaExceptions: javaExceptions.slice(0, 10), // First 10 exceptions
-                stackTrace: stackTrace.slice(0, 5), // First 5 stack trace lines
-                fullErrorData: errorData,
+                excelCount: excel ? 1 : 0,
+                totalFiles: imageFiles.length + videoFiles.length + (excel ? 1 : 0),
               });
-              
-              // Also log the full error text separately for detailed debugging
-              console.error(`❌ [uploadDesign] Full error text (first 2000 chars):`, errorText.substring(0, 2000));
-              
-              // Log what we're sending
-              console.error(`❌ [uploadDesign] What we sent:`, {
-                endpoint: `${API_BASE_URL}${endpoint}`,
-                method: 'POST',
-                formDataFields: {
-                  version: versionValue.toString(),
-                  ...(designCode ? { code: designCode.trim() } : {}),
-                  videos: videoFiles.map(f => ({ uri: f.uri?.substring(0, 50) + '...', type: f.type, name: f.name })),
-                  images: imageFiles.map(f => ({ uri: f.uri?.substring(0, 50) + '...', type: f.type, name: f.name })),
-                  ...(excel ? { excel: { uri: excel.uri?.substring(0, 50) + '...', type: excel.type, name: excel.name } } : {}),
-                },
-              });
+              console.log('❌ Error Message:', errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error');
+              console.log('📄 Error Data:', errorData);
+              console.log('📝 Error Text (first 500 chars):', errorText.substring(0, 500));
+              console.log('⏱️  Total Duration:', `${totalDuration}ms`);
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('');
             }
             
             // Provide more helpful error message for common backend errors
@@ -1822,9 +1885,9 @@ export const api = createApi({
               const htmlErrorMatch = errorText.match(/(?:Exception|Error|at\s+[\w\.]+\([^\)]+\)|NumberFormatException|For input string[^<\n]+|NullPointerException|IllegalArgumentException)/i);
               if (htmlErrorMatch) {
                 const extractedError = htmlErrorMatch[0];
-                userFriendlyMessage = `Server error: ${extractedError}\n\nThe backend encountered an error processing your video file. This usually means:\n\n1. Video codec or format not fully supported\n2. File metadata cannot be read\n3. Video file is corrupted\n\nPlease try:\n- Converting video to MP4 (H.264 codec)\n- Using a different video file\n- Recording a new video on your device`;
+                userFriendlyMessage = `Server error: ${extractedError}\n\nThe backend encountered an error processing your video file. This usually means:\n\n1. Video codec or format not fully supported\n2. File metadata cannot be read\n3. Video file is corrupted\n4. Backend endpoint may not support video uploads for ${designType} designs\n\nPlease try:\n- Converting video to MP4 (H.264 codec)\n- Using a different video file\n- Recording a new video on your device\n- Contact support to verify video support for ${designType} uploads`;
               } else {
-                userFriendlyMessage = 'Server error (500): The backend encountered an error processing your video.\n\nPossible causes:\n1. Video codec not supported (try MP4 with H.264)\n2. File metadata issues\n3. Video file corruption\n\nSolutions:\n- Convert video to MP4 format\n- Try a different video file\n- Record a new video on your device\n- Contact support if issue persists';
+                userFriendlyMessage = `Server error (500): The backend encountered an error processing your video for ${designType} design upload.\n\nPossible causes:\n1. Video codec not supported (try MP4 with H.264)\n2. File metadata issues\n3. Video file corruption\n4. Backend endpoint may not support video uploads for ${designType} designs\n\nSolutions:\n- Convert video to MP4 format\n- Try a different video file\n- Record a new video on your device\n- Contact support to verify if ${designType} endpoint supports videos\n- If videos aren't supported, try uploading images instead`;
               }
             } else if (errorData?.error && typeof errorData.error === 'string') {
               if (errorData.error.includes('Pricing')) {
@@ -1850,6 +1913,20 @@ export const api = createApi({
             };
           }
         } catch (error) {
+          const totalDuration = Date.now() - startTime;
+          
+          if (__DEV__) {
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('💥 [uploadDesign] EXCEPTION OCCURRED');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.error('❌ Error:', error);
+            console.error('❌ Error Message:', error.message);
+            console.error('❌ Error Stack:', error.stack);
+            console.log('⏱️  Total Duration:', `${totalDuration}ms`);
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
+          }
           
           return {
             error: {
@@ -1933,21 +2010,49 @@ export const api = createApi({
     // Save pricing for coral/CAD design
     savePricing: builder.mutation({
       query: ({ enquiryId, designType, version, pricingData }) => {
-        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
-        
-        // Wrap pricing array in Pricing key as per API specification
-        const requestBody = {
-          Pricing: Array.isArray(pricingData) ? pricingData : [pricingData]
-        };
+        const startTime = Date.now();
         
         if (__DEV__) {
-          console.log('Body (wrapped in Pricing key):', JSON.stringify(requestBody, null, 2));
+          console.log('💾 [savePricing API] ===== START API CALL =====');
+          console.log('💾 [savePricing API] Timestamp:', new Date().toISOString());
+          console.log('💾 [savePricing API] Parameters:', {
+            enquiryId,
+            designType,
+            version,
+            pricingDataCount: Array.isArray(pricingData) ? pricingData.length : 1,
+            pricingDataIsArray: Array.isArray(pricingData),
+          });
+        }
+        
+        const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
+        
+        // Send pricing array directly (not wrapped in Pricing key)
+        const requestBody = Array.isArray(pricingData) ? pricingData : [pricingData];
+        
+        const endpoint = `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`;
+        
+        if (__DEV__) {
+          console.log('💾 [savePricing API] Request details:', {
+            url: endpoint,
+            method: 'PUT',
+            versionParam,
+            requestBodyIsArray: Array.isArray(requestBody),
+            pricingArrayLength: requestBody?.length || 0,
+            firstPricingEntry: requestBody?.[0] ? {
+              MetalPrice: requestBody[0].MetalPrice,
+              DiamondsPrice: requestBody[0].DiamondsPrice,
+              TotalPrice: requestBody[0].TotalPrice,
+              Metal: requestBody[0].Metal,
+              StonesCount: requestBody[0].Stones?.length || 0,
+            } : null,
+            fullRequestBody: JSON.stringify(requestBody, null, 2).substring(0, 2000),
+          });
         }
         
         return {
-          url: `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`,
+          url: endpoint,
           method: 'PUT',
-          body: requestBody, // { Pricing: [...] }
+          body: requestBody, // Direct array: [...]
         };
       },
       invalidatesTags: (result, error, { enquiryId }) => [
@@ -1955,11 +2060,43 @@ export const api = createApi({
         'Enquiry',
         'Dashboard',
       ],
-      transformResponse: (response) => {
+      transformResponse: (response, meta, arg) => {
+        if (__DEV__) {
+          console.log('✅ [savePricing API] Response received:', {
+            response,
+            responseType: typeof response,
+            responseKeys: response ? Object.keys(response) : null,
+            fullResponse: JSON.stringify(response, null, 2).substring(0, 1000),
+          });
+        }
         
         return response;
       },
-      transformErrorResponse: (response) => {
+      transformErrorResponse: (response, meta, arg) => {
+        if (__DEV__) {
+          console.error('❌ [savePricing API] ===== ERROR RESPONSE =====');
+          console.error('❌ [savePricing API] Error Status:', response.status);
+          console.error('❌ [savePricing API] Error Data:', response.data);
+          console.error('❌ [savePricing API] Error Data Type:', typeof response.data);
+          console.error('❌ [savePricing API] Full Error Response:', JSON.stringify(response, null, 2));
+          console.error('❌ [savePricing API] Request Args:', {
+            enquiryId: arg?.enquiryId,
+            designType: arg?.designType,
+            version: arg?.version,
+          });
+          
+          // Try to extract more error details
+          if (response.data) {
+            if (typeof response.data === 'string') {
+              console.error('❌ [savePricing API] Error message (string):', response.data);
+            } else {
+              console.error('❌ [savePricing API] Error message:', response.data?.message);
+              console.error('❌ [savePricing API] Error error:', response.data?.error);
+              console.error('❌ [savePricing API] Error details:', response.data?.details);
+            }
+          }
+          console.error('❌ [savePricing API] ===== END ERROR LOG =====');
+        }
         
         return {
           status: response.status,
@@ -2066,15 +2203,31 @@ export const api = createApi({
     // Upload reference images to an enquiry
     uploadReferenceImages: builder.mutation({
       queryFn: async ({ enquiryId, images }, { dispatch }, extraOptions, baseQuery) => {
+        const startTime = Date.now();
+        
+        if (__DEV__) {
+          console.log('🚀 [uploadReferenceImages] ===== START UPLOAD =====');
+          console.log('🚀 [uploadReferenceImages] Timestamp:', new Date().toISOString());
+          console.log('🚀 [uploadReferenceImages] Enquiry ID:', enquiryId);
+          console.log('🚀 [uploadReferenceImages] Total files received:', images?.length || 0);
+        }
+        
         try {
           const token = await secureStorage.getItem('token');
           if (!token) {
+            if (__DEV__) {
+              console.error('❌ [uploadReferenceImages] Authentication token not found');
+            }
             return {
               error: {
                 status: 'CUSTOM_ERROR',
                 data: 'Authentication token not found',
               },
             };
+          }
+          
+          if (__DEV__) {
+            console.log('✅ [uploadReferenceImages] Authentication token found');
           }
 
           // Helper function to detect if a file is a video
@@ -2171,28 +2324,99 @@ export const api = createApi({
               });
           }
           
-          // Upload images if any
-          if (imageFiles.length > 0) {
-            const formData = new FormData();
-            imageFiles.forEach((file) => {
-              formData.append('images', file);
+          // Check if we have any files to upload
+          if (imageFiles.length === 0 && videoFiles.length === 0) {
+            return {
+              error: {
+                status: 'CUSTOM_ERROR',
+                data: 'No files to upload',
+              },
+            };
+          }
+          
+          // Upload images and videos together in a single request to /reference endpoint
+          if (__DEV__) {
+            console.log('📦 [uploadReferenceImages] Creating FormData...');
+            console.log('📦 [uploadReferenceImages] Will add to FormData:', {
+              imagesCount: imageFiles.length,
+              videosCount: videoFiles.length,
             });
+          }
+          
+          const formData = new FormData();
+          
+          // Add images if any
+          if (imageFiles.length > 0) {
+            if (__DEV__) {
+              console.log(`📎 [uploadReferenceImages] Adding ${imageFiles.length} image(s) to FormData...`);
+            }
+            imageFiles.forEach((file, index) => {
+              formData.append('images', file);
+              if (__DEV__) {
+                console.log(`  ✓ Image ${index + 1}: ${file.name} (${file.type})`);
+              }
+            });
+          }
+          
+          // Add videos if any
+          if (videoFiles.length > 0) {
+            if (__DEV__) {
+              console.log(`🎬 [uploadReferenceImages] Adding ${videoFiles.length} video(s) to FormData...`);
+            }
+            videoFiles.forEach((file, index) => {
+              formData.append('videos', file);
+              if (__DEV__) {
+                console.log(`  ✓ Video ${index + 1}: ${file.name} (${file.type})`);
+              }
+            });
+          }
 
           const endpoint = `/api/enquiries/${enquiryId}/upload/reference`;
-            
-            if (__DEV__) {
-              console.log('📤 [uploadReferenceImages] Uploading images:', {
-                endpoint: `${API_BASE_URL}${endpoint}`,
-                imagesCount: imageFiles.length,
-                imageFiles: imageFiles.map(f => ({
-                  uri: f.uri?.substring(0, 50) + '...',
-                  type: f.type,
-                  name: f.name,
-                })),
-              });
-            }
+          const fullUrl = `${API_BASE_URL}${endpoint}`;
           
-          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          // VERIFICATION: Log endpoint to confirm we're using /reference (not /videos)
+          if (__DEV__) {
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('✅ [VERIFICATION] ENDPOINT VERIFICATION');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('📍 Endpoint Path:', endpoint);
+            console.log('🌐 Full URL:', fullUrl);
+            console.log('✅ Using /reference endpoint:', endpoint.includes('/reference') ? 'YES ✓' : 'NO ✗');
+            console.log('❌ Using old /videos endpoint:', endpoint.includes('/videos') ? 'YES ✗ (WRONG!)' : 'NO ✓');
+            console.log('📝 Note: Videos are now uploaded via /reference endpoint');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
+            
+            console.log('📤 [uploadReferenceImages] Preparing HTTP Request:', {
+              method: 'POST',
+              url: fullUrl,
+              endpoint: endpoint,
+              formDataFields: {
+                images: imageFiles.length > 0 ? `${imageFiles.length} file(s)` : 'none',
+                videos: videoFiles.length > 0 ? `${videoFiles.length} file(s)` : 'none',
+              },
+              totalFiles: imageFiles.length + videoFiles.length,
+            });
+            
+            console.log('📋 [uploadReferenceImages] FormData Summary:', {
+              images: imageFiles.map((f, i) => `${i + 1}. ${f.name} (${f.type})`),
+              videos: videoFiles.map((f, i) => `${i + 1}. ${f.name} (${f.type})`),
+            });
+          }
+          
+          if (__DEV__) {
+            console.log('🌐 [uploadReferenceImages] Sending HTTP Request...');
+            console.log('🌐 [uploadReferenceImages] Request URL:', fullUrl);
+            console.log('🌐 [uploadReferenceImages] Request Method: POST');
+            console.log('🌐 [uploadReferenceImages] Request Headers:', {
+              'Authorization': `Bearer ${token.substring(0, 20)}...`,
+              'Content-Type': 'multipart/form-data (auto-set by fetch)',
+            });
+          }
+          
+          const requestStartTime = Date.now();
+          const response = await fetch(fullUrl, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -2200,18 +2424,51 @@ export const api = createApi({
             },
             body: formData,
           });
+          
+          const requestDuration = Date.now() - requestStartTime;
+          
+          if (__DEV__) {
+            console.log('📡 [uploadReferenceImages] Response received:', {
+              status: response.status,
+              statusText: response.statusText,
+              ok: response.ok,
+              requestDuration: `${requestDuration}ms`,
+            });
+          }
 
           if (response.ok) {
             const data = await response.json();
-              if (__DEV__) {
-                console.log('✅ [uploadReferenceImages] Images uploaded successfully:', {
-                  status: response.status,
-                  data,
-                });
-              }
+            const totalDuration = Date.now() - startTime;
+            
+            if (__DEV__) {
+              console.log('');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('✅ [uploadReferenceImages] UPLOAD SUCCESS');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('📊 Response Status:', response.status, response.statusText);
+              console.log('📦 Response Data:', JSON.stringify(data, null, 2));
+              console.log('📈 Upload Summary:', {
+                imagesUploaded: imageFiles.length,
+                videosUploaded: videoFiles.length,
+                totalFilesUploaded: imageFiles.length + videoFiles.length,
+              });
+              console.log('⏱️  Total Duration:', `${totalDuration}ms`);
+              console.log('🌐 Endpoint Used:', endpoint);
+              console.log('✅ Verified: Using /reference endpoint (not /videos)');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('');
+            }
+              
+            return { data: { success: true, imagesUploaded: imageFiles.length, videosUploaded: videoFiles.length } };
           } else {
+            const totalDuration = Date.now() - startTime;
             let errorData;
-              let errorText = '';
+            let errorText = '';
+            
+            if (__DEV__) {
+              console.log('⚠️  [uploadReferenceImages] Response indicates error (status:', response.status, ')');
+            }
+            
             try {
                 errorText = await response.text();
                 try {
@@ -2226,17 +2483,26 @@ export const api = createApi({
               errorData = { message: `Upload failed with status ${response.status}` };
             }
               
-              if (__DEV__) {
-                console.error('❌ [uploadReferenceImages] Images upload error:', {
-                  status: response.status,
-                  statusText: response.statusText,
-                  imagesCount: imageFiles.length,
-                  errorText: errorText.substring(0, 500), // First 500 chars
-                  errorMessage: errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error',
-                  fullErrorData: errorData,
-                  errorTextFull: errorText, // Full error text
-                });
-              }
+            if (__DEV__) {
+              console.log('');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('❌ [uploadReferenceImages] UPLOAD FAILED');
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('📊 Response Status:', response.status, response.statusText);
+              console.log('🌐 Endpoint Used:', endpoint);
+              console.log('✅ Verified: Using /reference endpoint (not /videos)');
+              console.log('📦 Files Attempted:', {
+                imagesCount: imageFiles.length,
+                videosCount: videoFiles.length,
+                totalFiles: imageFiles.length + videoFiles.length,
+              });
+              console.log('❌ Error Message:', errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error');
+              console.log('📄 Error Data:', errorData);
+              console.log('📝 Error Text (first 500 chars):', errorText.substring(0, 500));
+              console.log('⏱️  Total Duration:', `${totalDuration}ms`);
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('');
+            }
             
             return {
               error: {
@@ -2245,106 +2511,22 @@ export const api = createApi({
               },
             };
           }
-          }
-          
-          // Upload videos separately if any
-          if (videoFiles.length > 0) {
-            const videoFormData = new FormData();
-            videoFiles.forEach((file) => {
-              videoFormData.append('videos', file);
-            });
-            
-            const videoEndpoint = `/api/enquiries/${enquiryId}/upload/videos`;
-            
-            if (__DEV__) {
-              console.log('📤 [uploadReferenceImages] Uploading videos:', {
-                endpoint: `${API_BASE_URL}${videoEndpoint}`,
-                videosCount: videoFiles.length,
-                videoFiles: videoFiles.map(f => ({
-                  uri: f.uri?.substring(0, 50) + '...',
-                  type: f.type,
-                  name: f.name,
-                })),
-              });
-            }
-            
-            const videoResponse = await fetch(`${API_BASE_URL}${videoEndpoint}`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                // Don't set Content-Type - let fetch set it with boundary for FormData
-              },
-              body: videoFormData,
-            });
-            
-            if (videoResponse.ok) {
-              const data = await videoResponse.json();
-              if (__DEV__) {
-                console.log('✅ [uploadReferenceImages] Videos uploaded successfully:', {
-                  status: videoResponse.status,
-                  data,
-                });
-              }
-            } else {
-              let errorData;
-              let errorText = '';
-              try {
-                errorText = await videoResponse.text();
-                try {
-                  errorData = errorText ? JSON.parse(errorText) : { message: 'Video upload failed' };
-                } catch (jsonError) {
-                  errorData = { 
-                    message: errorText || `Video upload failed with status ${videoResponse.status}`,
-                    rawError: errorText 
-                  };
-                }
-                
-                // Handle "For input string" errors specifically
-                if (errorText && (errorText.includes('For input string') || errorData?.error?.includes('For input string'))) {
-                  errorData.userFriendlyMessage = `Video upload error: ${errorText}. This may be caused by file metadata. Please try selecting the video again.`;
-                  errorData.message = errorData.userFriendlyMessage;
-                }
-              } catch (parseError) {
-                errorData = { message: `Video upload failed with status ${videoResponse.status}` };
-              }
-              
-              if (__DEV__) {
-                console.error('❌ [uploadReferenceImages] Videos upload error:', {
-                  status: videoResponse.status,
-                  statusText: videoResponse.statusText,
-                  videosCount: videoFiles.length,
-                  errorText: errorText.substring(0, 500), // First 500 chars
-                  errorMessage: errorData?.message || errorData?.error || errorData?.rawError || 'Unknown error',
-                  fullErrorData: errorData,
-                  errorTextFull: errorText, // Full error text
-                  videoFiles: videoFiles.map(f => ({
-                    uri: f.uri?.substring(0, 50) + '...',
-                    type: f.type,
-                    name: f.name,
-                    allKeys: Object.keys(f),
-                  })),
-                });
-              }
-              
-              return {
-                error: {
-                  status: videoResponse.status,
-                  data: errorData,
-                },
-              };
-            }
-          }
-          
-          // Return success if we got here (both uploads succeeded or were skipped)
-          if (__DEV__) {
-            console.log('✅ [uploadReferenceImages] All uploads completed:', {
-              imagesUploaded: imageFiles.length,
-              videosUploaded: videoFiles.length,
-            });
-          }
-          
-          return { data: { success: true, imagesUploaded: imageFiles.length, videosUploaded: videoFiles.length } };
         } catch (error) {
+          const totalDuration = Date.now() - startTime;
+          
+          if (__DEV__) {
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('💥 [uploadReferenceImages] EXCEPTION OCCURRED');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.error('❌ Error:', error);
+            console.error('❌ Error Message:', error.message);
+            console.error('❌ Error Stack:', error.stack);
+            console.log('⏱️  Total Duration:', `${totalDuration}ms`);
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
+          }
+          
           return {
             error: {
               status: 'CUSTOM_ERROR',

@@ -932,7 +932,7 @@ const DashboardScreen = ({ navigation }) => {
   };
 
   const renderRecentActivity = () => {
-    const notifications = Array.isArray(notificationsData) ? notificationsData : [];
+    const notifications = Array.isArray(notificationsData) ? notificationsData.slice(0, 5) : [];
     
     return (
       <Card style={styles.recentActivityCard}>

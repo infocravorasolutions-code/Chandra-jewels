@@ -27,20 +27,20 @@ if (__DEV__) {
   };
 }
 
-// Initialize Sentry with error handling
-try {
-  Sentry.init({
-    dsn: 'https://3fd29e70ba7c23d9c9b6b246a292bf67@o4510333890920448.ingest.us.sentry.io/4510359398449152',
-    enableInExpoDevelopment: false,
-    debug: __DEV__,
-    environment: __DEV__ ? 'development' : 'production',
-    // Set tracesSampleRate to 1.0 to capture 100% of the transactions for performance monitoring.
-    // We recommend adjusting this value in production.
-    tracesSampleRate: 1.0,
-  });
-} catch (error) {
-  // If Sentry fails to initialize, log but don't crash the app
-  console.warn('Sentry initialization failed (app will continue without error tracking):', error?.message || error);
+// Initialize Sentry with error handling (DISABLED for iOS due to C++ compilation errors)
+// Sentry native SDK is disabled in iOS build, so we skip JS initialization too
+if (false) { // Disabled - Sentry causes C++ compilation errors on iOS
+  try {
+    Sentry.init({
+      dsn: 'https://3fd29e70ba7c23d9c9b6b246a292bf67@o4510333890920448.ingest.us.sentry.io/4510359398449152',
+      enableInExpoDevelopment: false,
+      debug: __DEV__,
+      environment: __DEV__ ? 'development' : 'production',
+      tracesSampleRate: 1.0,
+    });
+  } catch (error) {
+    console.warn('Sentry initialization failed:', error?.message || error);
+  }
 }
 
 // Background message handler - MUST be registered before AppRegistry

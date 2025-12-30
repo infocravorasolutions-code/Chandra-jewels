@@ -485,8 +485,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
       }
       
       setComment(imageName);
-      // Reset image data URI when image changes
-      setImageDataUri(null);
+      // Don't reset imageDataUri immediately - let the cache check useEffect handle it
+      // This prevents blinking by keeping the previous image visible while loading the new one
       setImageLoadingError(false);
     }
   }, [currentImageIndex, images]);
@@ -573,23 +573,54 @@ const DesignViewerScreen = ({ route, navigation }) => {
     const [videoError, setVideoError] = useState(false);
     const videoRef = useRef(null);
     const mountedRef = useRef(true);
+    const fetchingRef = useRef(false);
+    const lastFetchedKeyRef = useRef(null);
+    const blobUrlRef = useRef(null); // Track blob URLs for cleanup
     
     useEffect(() => {
       mountedRef.current = true;
       return () => {
         mountedRef.current = false;
+        // Cleanup blob URL to prevent memory leaks
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+        }
       };
     }, []);
     
     // Fetch video URL with authentication
     const fetchVideoUrl = useCallback(async () => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || fetchingRef.current) return;
+      
+      // Create a unique key for this video to prevent re-fetching the same video
+      const uniqueKey = `${imageKey || ''}_${imageId || ''}_${imageUri || ''}`;
+      
+      // If we already have the URL for this key, don't re-fetch
+      if (videoUrl && lastFetchedKeyRef.current === uniqueKey) {
+        return;
+      }
+      
+      // If we're already fetching this key, don't start another fetch
+      if (lastFetchedKeyRef.current === uniqueKey && fetchingRef.current) {
+        return;
+      }
+      
+      fetchingRef.current = true;
+      lastFetchedKeyRef.current = uniqueKey;
       
       let videoUrlToUse = null;
       
       // If we have a direct URI, use it
       if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
         videoUrlToUse = imageUri;
+        if (mountedRef.current) {
+          setVideoUrl(videoUrlToUse);
+          setVideoLoading(false);
+          setVideoError(false);
+          fetchingRef.current = false;
+        }
+        return;
       } else if (imageKey) {
         // Fetch presigned URL from API
         try {
@@ -600,6 +631,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           if (!token) {
             setVideoError(true);
             setVideoLoading(false);
+            fetchingRef.current = false;
             return;
           }
           
@@ -626,11 +658,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
           } else {
             setVideoError(true);
             setVideoLoading(false);
+            fetchingRef.current = false;
             return;
           }
         } catch (error) {
           setVideoError(true);
           setVideoLoading(false);
+          fetchingRef.current = false;
           return;
         }
       } else if (imageId) {
@@ -642,6 +676,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
           if (!token) {
             setVideoError(true);
             setVideoLoading(false);
+            fetchingRef.current = false;
             return;
           }
           
@@ -661,11 +696,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
           } else {
             setVideoError(true);
             setVideoLoading(false);
+            fetchingRef.current = false;
             return;
           }
         } catch (error) {
           setVideoError(true);
           setVideoLoading(false);
+          fetchingRef.current = false;
           return;
         }
       }
@@ -678,11 +715,32 @@ const DesignViewerScreen = ({ route, navigation }) => {
         setVideoError(true);
         setVideoLoading(false);
       }
-    }, [imageKey, imageId, imageUri]);
+      fetchingRef.current = false;
+    }, [imageKey, imageId, imageUri]); // Removed videoUrl to prevent infinite loops
     
     useEffect(() => {
+      // Reset state when props change
+      const uniqueKey = `${imageKey || ''}_${imageId || ''}_${imageUri || ''}`;
+      if (lastFetchedKeyRef.current !== uniqueKey) {
+        // Cleanup previous blob URL if exists
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+        }
+        setVideoUrl(null);
+        setVideoError(false);
+        fetchingRef.current = false;
+      }
       fetchVideoUrl();
-    }, [fetchVideoUrl]);
+      
+      // Cleanup function
+      return () => {
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+        }
+      };
+    }, [imageKey, imageId, imageUri, fetchVideoUrl]);
     
     if (videoError) {
       return (
@@ -765,11 +823,17 @@ const DesignViewerScreen = ({ route, navigation }) => {
     const [videoError, setVideoError] = useState(false);
     const videoRef = useRef(null);
     const mountedRef = useRef(true);
+    const blobUrlRef = useRef(null); // Track blob URLs for cleanup
     
     useEffect(() => {
       mountedRef.current = true;
       return () => {
         mountedRef.current = false;
+        // Cleanup blob URL to prevent memory leaks
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+        }
       };
     }, []);
     
@@ -812,8 +876,13 @@ const DesignViewerScreen = ({ route, navigation }) => {
               videoUrlToUse = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location;
             } else {
               // Direct video response - create blob URL
+              // Cleanup previous blob URL if exists
+              if (blobUrlRef.current) {
+                URL.revokeObjectURL(blobUrlRef.current);
+              }
               const blob = await response.blob();
               videoUrlToUse = URL.createObjectURL(blob);
+              blobUrlRef.current = videoUrlToUse; // Track for cleanup
             }
           } else {
             setVideoError(true);
@@ -1947,11 +2016,12 @@ const DesignViewerScreen = ({ route, navigation }) => {
   useEffect(() => {
     
     // On Android, skip Image component and use fetch directly to avoid 401 errors
+    // Only fetch if we don't already have the image data and URL hasn't changed
     if (currentImageUrl && useFetchDirectly && !imageDataUri) {
       fetchImageWithAuth();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentImageUrl, currentImageIndex, images.length, useFetchDirectly, imageDataUri]);
+  }, [currentImageUrl, useFetchDirectly]);
 
   return (
     <View style={styles.container}>
@@ -1964,6 +2034,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
                 {/* Render video if current media is a video */}
                 {isCurrentVideo ? (
                   <VideoWithFallback
+                    key={`video-${currentImageKey || currentImageIndex}`}
                     image={currentMedia}
                     imageKey={currentImageKey}
                     imageId={typeof currentMedia === 'object' && currentMedia !== null

@@ -1591,28 +1591,107 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
 
     // Get Coral and CAD codes for Assignment & Codes section
-    // Priority: Latest version's Code > Enquiry-level code
+    // Priority: Enquiry-level code > Latest version's Code > Any version's Code
+    // Check both originalData and enquiry for versions (data might be in either location)
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
     
-    // Get code from latest version if available, otherwise from enquiry level
+    // Debug: Log version structure
+    if (__DEV__ && (coralVersions.length > 0 || cadVersions.length > 0)) {
+      console.log('[SingleEnquiry] Version structure check:', {
+        coralVersionsCount: coralVersions.length,
+        cadVersionsCount: cadVersions.length,
+        latestCoralVersion: coralVersions.length > 0 ? coralVersions[coralVersions.length - 1] : null,
+        latestCadVersion: cadVersions.length > 0 ? cadVersions[cadVersions.length - 1] : null,
+        enquiryCoralCode: enquiry?.CoralCode,
+        originalDataCoralCode: originalData?.CoralCode,
+        enquiryCadCode: enquiry?.CadCode,
+        originalDataCadCode: originalData?.CadCode,
+      });
+    }
+    
+    // Helper function to extract code from a version object
+    const getCodeFromVersion = (version) => {
+      if (!version) return null;
+      
+      // Check all possible field names for code
+      const code = version.Code || 
+                   version.code || 
+                   version.DesignCode || 
+                   version.designCode ||
+                   version.CoralCode ||
+                   version.coralCode ||
+                   version.CadCode ||
+                   version.cadCode ||
+                   null;
+      
+      // Debug logging in development
+      if (__DEV__ && version && !code) {
+        console.log('[SingleEnquiry] Version object keys:', Object.keys(version));
+        console.log('[SingleEnquiry] Version object:', JSON.stringify(version, null, 2).substring(0, 500));
+      }
+      
+      return code;
+    };
+    
+    // Get code from latest version (most recent)
     const latestCoralVersion = coralVersions.length > 0 ? coralVersions[coralVersions.length - 1] : null;
     const latestCadVersion = cadVersions.length > 0 ? cadVersions[cadVersions.length - 1] : null;
     
-    const coralCode = latestCoralVersion?.Code || 
-                     latestCoralVersion?.code || 
-                     enquiry?.CoralCode || 
-                     enquiry?.coralVersion || 
+    // Also check all versions to find any code (fallback if latest doesn't have one)
+    let anyCoralCode = null;
+    let anyCadCode = null;
+    
+    // Check all versions in reverse order (latest first) to find first available code
+    for (let i = coralVersions.length - 1; i >= 0; i--) {
+      const code = getCodeFromVersion(coralVersions[i]);
+      if (code) {
+        anyCoralCode = code;
+        break; // Use the latest version that has a code
+      }
+    }
+    
+    for (let i = cadVersions.length - 1; i >= 0; i--) {
+      const code = getCodeFromVersion(cadVersions[i]);
+      if (code) {
+        anyCadCode = code;
+        break; // Use the latest version that has a code
+      }
+    }
+    
+    // Debug logging
+    if (__DEV__) {
+      console.log('[SingleEnquiry] Code extraction:', {
+        coralVersionsCount: coralVersions.length,
+        cadVersionsCount: cadVersions.length,
+        latestCoralCode: getCodeFromVersion(latestCoralVersion),
+        anyCoralCode,
+        latestCadCode: getCodeFromVersion(latestCadVersion),
+        anyCadCode,
+        enquiryCoralCode: enquiry?.CoralCode,
+        originalDataCoralCode: originalData?.CoralCode,
+      });
+    }
+    
+    // Priority: Enquiry-level > Latest version > Any version
+    const coralCode = enquiry?.CoralCode || 
                      originalData?.CoralCode || 
+                     enquiry?.coralCode || 
+                     originalData?.coralCode || 
+                     enquiry?.coralVersion || 
                      originalData?.coralVersion || 
+                     getCodeFromVersion(latestCoralVersion) ||
+                     anyCoralCode ||
                      'N/A';
     
-    const cadCode = latestCadVersion?.Code || 
-                   latestCadVersion?.code || 
-                   enquiry?.CadCode || 
-                   enquiry?.cadVersion || 
+    const cadCode = enquiry?.CadCode || 
                    originalData?.CadCode || 
+                   enquiry?.cadCode || 
+                   originalData?.cadCode || 
+                   enquiry?.cadVersion || 
                    originalData?.cadVersion || 
+                   getCodeFromVersion(latestCadVersion) ||
+                   anyCadCode ||
                    'N/A';
 
     return (

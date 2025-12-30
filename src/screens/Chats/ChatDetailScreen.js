@@ -19,6 +19,7 @@ import {
   PermissionsAndroid,
 } from 'react-native';
 import Video from 'react-native-video';
+import ImageZoom from 'react-native-image-pan-zoom';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -201,6 +202,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [newMessage, setNewMessage] = useState('');
   const [showMediaModal, setShowMediaModal] = useState(false);
   const [showReadReceiptModal, setShowReadReceiptModal] = useState(false);
+  const [showMediaViewerModal, setShowMediaViewerModal] = useState(false);
+  const [viewerMediaUrl, setViewerMediaUrl] = useState(null);
+  const [viewerMediaType, setViewerMediaType] = useState(null); // 'image' or 'video'
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
@@ -1065,20 +1069,44 @@ const ChatDetailScreen = ({ route, navigation }) => {
     return `${FILE_BASE_URL}/api/files/${encodeURIComponent(mediaKey)}`;
   }, []);
 
-  const handleFilePress = async (mediaKey, mediaName) => {
+  const handleFilePress = async (mediaKey, mediaName, mediaType = null) => {
     const url = getMediaUrl(mediaKey);
     if (url) {
-      try {
-        const supported = await Linking.canOpenURL(url);
-        if (supported) {
-          await Linking.openURL(url);
+      // Determine media type if not provided
+      let type = mediaType;
+      if (!type) {
+        const name = mediaName || mediaKey || '';
+        if (name.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+          type = 'image';
+        } else if (name.match(/\.(mp4|mov|avi|mkv|webm)$/i)) {
+          type = 'video';
         } else {
-          alert.error('Error', 'Cannot open this file');
+          // For other file types, try to open in browser (PDFs, etc.)
+          try {
+            const supported = await Linking.canOpenURL(url);
+            if (supported) {
+              await Linking.openURL(url);
+            } else {
+              alert.error('Error', 'Cannot open this file');
+            }
+          } catch (error) {
+            alert.error('Error', 'Failed to open file');
+          }
+          return;
         }
-      } catch (error) {
-        alert.error('Error', 'Failed to open file');
       }
+      
+      // Open image/video in modal viewer
+      setViewerMediaUrl(url);
+      setViewerMediaType(type);
+      setShowMediaViewerModal(true);
     }
+  };
+
+  const handleCloseMediaViewer = () => {
+    setShowMediaViewerModal(false);
+    setViewerMediaUrl(null);
+    setViewerMediaType(null);
   };
 
 
@@ -1307,7 +1335,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
             
             {isImage && mediaKey ? (
               <TouchableOpacity 
-                onPress={() => handleFilePress(mediaKey, mediaName)}
+                onPress={() => handleFilePress(mediaKey, mediaName, 'image')}
                 activeOpacity={0.8}>
                 <Image
                   source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
@@ -1325,14 +1353,20 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 )}
               </TouchableOpacity>
             ) : isVideo && mediaKey ? (
-              <View style={styles.videoContainer}>
+              <TouchableOpacity 
+                onPress={() => handleFilePress(mediaKey, mediaName, 'video')}
+                activeOpacity={0.8}
+                style={styles.videoContainer}>
                 <Video
                   source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
                   style={styles.messageVideo}
-                  controls={true}
-                  resizeMode="contain"
-                  paused={false}
+                  controls={false}
+                  resizeMode="cover"
+                  paused={true}
                 />
+                <View style={styles.videoPlayOverlay}>
+                  <Icon name="play-circle-filled" size={40} color={colors.textWhite} />
+                </View>
                 {message.text && (
                   <Text style={[
                     styles.messageText,
@@ -1342,7 +1376,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     {message.text}
                   </Text>
                 )}
-              </View>
+              </TouchableOpacity>
             ) : isFile && mediaKey ? (
               <TouchableOpacity 
                 onPress={() => handleFilePress(mediaKey, mediaName)}
@@ -1981,6 +2015,56 @@ const ChatDetailScreen = ({ route, navigation }) => {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Media Viewer Modal - For viewing images and videos */}
+      <Modal
+        visible={showMediaViewerModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseMediaViewer}
+        statusBarTranslucent={true}
+      >
+        <View style={styles.mediaViewerContainer}>
+          <TouchableOpacity
+            style={styles.mediaViewerCloseButton}
+            onPress={handleCloseMediaViewer}
+            activeOpacity={0.8}
+          >
+            <Icon name="close" size={28} color={colors.textWhite} />
+          </TouchableOpacity>
+          
+          {viewerMediaType === 'image' && viewerMediaUrl ? (
+            <ImageZoom
+              cropWidth={Dimensions.get('window').width}
+              cropHeight={Dimensions.get('window').height}
+              imageWidth={Dimensions.get('window').width}
+              imageHeight={Dimensions.get('window').height}
+              enableCenterFocus
+              useNativeDriver
+              enableSwipeDown={true}
+              onSwipeDown={handleCloseMediaViewer}
+              pinchToZoom
+              panToMove
+            >
+              <Image
+                source={{ uri: viewerMediaUrl }}
+                style={styles.mediaViewerImage}
+                resizeMode="contain"
+              />
+            </ImageZoom>
+          ) : viewerMediaType === 'video' && viewerMediaUrl ? (
+            <View style={styles.mediaViewerVideoContainer}>
+              <Video
+                source={{ uri: viewerMediaUrl }}
+                style={styles.mediaViewerVideo}
+                controls={true}
+                resizeMode="contain"
+                paused={false}
+              />
+            </View>
+          ) : null}
+        </View>
       </Modal>
     </ImageBackground>
     </SafeAreaView>
@@ -2737,6 +2821,49 @@ const styles = StyleSheet.create({
   replyPreviewBarClose: {
     padding: 4,
     marginLeft: 8,
+  },
+  // Media Viewer Modal Styles
+  mediaViewerContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaViewerCloseButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 40,
+    right: 20,
+    zIndex: 1000,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaViewerImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  mediaViewerVideoContainer: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaViewerVideo: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
 });
 

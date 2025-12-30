@@ -157,6 +157,8 @@ web-build/
 
 # CocoaPods
 ios/Pods/
+.cocoapods/
+Library/Caches/CocoaPods/
 
 # Android
 android/app/build/

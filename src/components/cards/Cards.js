@@ -387,70 +387,178 @@ export const CompactEnquiryCard = ({
     return false;
   };
 
-  // Get latest reference image/video URL (last media in array)
+  // Get latest reference image/video URL (prioritizing videos over images)
   const getLatestMediaUrl = () => {
     let referenceImages = [];
     let referenceVideos = [];
+    let allMediaItems = [];
     
-    // Check ReferenceImages array
+    // Check ReferenceImages array (may contain videos with _isVideo flag)
     if (enquiry?._originalData?.ReferenceImages && Array.isArray(enquiry._originalData.ReferenceImages)) {
-      referenceImages = enquiry._originalData.ReferenceImages;
+      allMediaItems = [...allMediaItems, ...enquiry._originalData.ReferenceImages];
     } else if (enquiry?.ReferenceImages && Array.isArray(enquiry.ReferenceImages)) {
-      referenceImages = enquiry.ReferenceImages;
+      allMediaItems = [...allMediaItems, ...enquiry.ReferenceImages];
     } else if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
-      referenceImages = enquiry.images;
+      allMediaItems = [...allMediaItems, ...enquiry.images];
     } else if (enquiry?.Images && Array.isArray(enquiry.Images)) {
-      referenceImages = enquiry.Images;
+      allMediaItems = [...allMediaItems, ...enquiry.Images];
     }
     
     // Check ReferenceVideos array
     if (enquiry?._originalData?.ReferenceVideos && Array.isArray(enquiry._originalData.ReferenceVideos)) {
-      referenceVideos = enquiry._originalData.ReferenceVideos;
+      referenceVideos = [...referenceVideos, ...enquiry._originalData.ReferenceVideos];
     } else if (enquiry?.ReferenceVideos && Array.isArray(enquiry.ReferenceVideos)) {
-      referenceVideos = enquiry.ReferenceVideos;
+      referenceVideos = [...referenceVideos, ...enquiry.ReferenceVideos];
     } else if (enquiry?.Videos && Array.isArray(enquiry.Videos)) {
-      referenceVideos = enquiry.Videos;
+      referenceVideos = [...referenceVideos, ...enquiry.Videos];
     }
     
     // Also check CAD/Coral versions for videos
+    // Videos may be in separate Videos array OR in Images array (since we send videos in 'images' field)
     const coralVersions = enquiry?._originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = enquiry?._originalData?.Cad || enquiry?.Cad || [];
     
     coralVersions.forEach((version) => {
+      // Check separate Videos array
       if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
         referenceVideos = [...referenceVideos, ...version.Videos];
       } else if (version?.videos && Array.isArray(version.videos) && version.videos.length > 0) {
         referenceVideos = [...referenceVideos, ...version.videos];
+      }
+      
+      // Check Images array for videos (videos sent in 'images' field are stored here)
+      const versionImages = version?.Images || version?.images || [];
+      if (Array.isArray(versionImages) && versionImages.length > 0) {
+        versionImages.forEach((item) => {
+          if (isVideoFile(
+            item?.Key || item?.key || item?.KeyName || '',
+            item?.Url || item?.url || item?.URI || item?.uri || '',
+            item
+          )) {
+            referenceVideos.push(item);
+          }
+        });
       }
     });
     
     cadVersions.forEach((version) => {
+      // Check separate Videos array
       if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
         referenceVideos = [...referenceVideos, ...version.Videos];
       } else if (version?.videos && Array.isArray(version.videos) && version.videos.length > 0) {
         referenceVideos = [...referenceVideos, ...version.videos];
       }
+      
+      // Check Images array for videos (videos sent in 'images' field are stored here)
+      const versionImages = version?.Images || version?.images || [];
+      if (Array.isArray(versionImages) && versionImages.length > 0) {
+        versionImages.forEach((item) => {
+          if (isVideoFile(
+            item?.Key || item?.key || item?.KeyName || '',
+            item?.Url || item?.url || item?.URI || item?.uri || '',
+            item
+          )) {
+            referenceVideos.push(item);
+          }
+        });
+      }
     });
     
-    // Merge images and videos, prioritizing videos
-    const allMedia = [...referenceImages, ...referenceVideos];
+    // Separate videos from images in allMediaItems (check for video flags)
+    const videosFromImages = [];
+    const imagesOnly = [];
     
-    if (allMedia.length === 0) {
+    allMediaItems.forEach((item) => {
+      if (isVideoFile(
+        item?.Key || item?.key || item?.KeyName || '',
+        item?.Url || item?.url || item?.URI || item?.uri || '',
+        item
+      )) {
+        videosFromImages.push(item);
+      } else {
+        imagesOnly.push(item);
+      }
+    });
+    
+    // Combine all videos (from ReferenceVideos array and from ReferenceImages array)
+    const allVideos = [...referenceVideos, ...videosFromImages];
+    
+    // Debug logging in development mode
+    if (__DEV__ && enquiry?.title === 'Test video') {
+      console.log('🎥 [CARD DEBUG] Video detection for "Test video":', {
+        enquiryId: enquiry?.id,
+        hasReferenceVideos: !!enquiry?.ReferenceVideos,
+        referenceVideosCount: enquiry?.ReferenceVideos?.length || 0,
+        hasOriginalDataVideos: !!enquiry?._originalData?.ReferenceVideos,
+        originalDataVideosCount: enquiry?._originalData?.ReferenceVideos?.length || 0,
+        hasVideos: !!enquiry?.Videos,
+        videosCount: enquiry?.Videos?.length || 0,
+        referenceVideosFound: referenceVideos.length,
+        videosFromImagesFound: videosFromImages.length,
+        allVideosCount: allVideos.length,
+        allMediaItemsCount: allMediaItems.length,
+      });
+    }
+    
+    // Prioritize videos: if any video exists, use the latest video
+    if (allVideos.length > 0) {
+      const latestVideo = allVideos[allVideos.length - 1];
+      
+      // Extract URL from video
+      let mediaUrl = null;
+      let mediaKey = null;
+      let mediaId = null;
+      
+      if (typeof latestVideo === 'object' && latestVideo !== null) {
+        mediaKey = latestVideo.Key || latestVideo.key || latestVideo.KeyName || latestVideo.keyName || '';
+        mediaId = latestVideo.Id || latestVideo.id || latestVideo._id || latestVideo.FileId || latestVideo.fileId || '';
+        const mediaUri = latestVideo.Url || latestVideo.url || latestVideo.URI || latestVideo.uri || '';
+        
+        if (mediaKey) {
+          mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(mediaKey)}`;
+        } else if (mediaId) {
+          mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${mediaId}`;
+        } else if (mediaUri) {
+          if (mediaUri.startsWith('http://') || mediaUri.startsWith('https://')) {
+            mediaUrl = mediaUri;
+          } else {
+            mediaUrl = mediaUri.startsWith('/') ? `${FILE_BASE_URL}${mediaUri}` : `${FILE_BASE_URL}/${mediaUri}`;
+          }
+        }
+        
+        return { url: mediaUrl, isVideo: true, media: latestVideo };
+      }
+      
+      if (typeof latestVideo === 'string') {
+        if (latestVideo.startsWith('http://') || latestVideo.startsWith('https://')) {
+          mediaUrl = latestVideo;
+        } else if (latestVideo.startsWith('/')) {
+          mediaUrl = `${FILE_BASE_URL}${latestVideo}`;
+        } else {
+          mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(latestVideo)}`;
+        }
+        
+        return { url: mediaUrl, isVideo: true, media: latestVideo };
+      }
+    }
+    
+    // Fall back to images only if no videos exist
+    if (imagesOnly.length === 0) {
       return { url: null, isVideo: false, media: null };
     }
     
-    // Get the last media (latest)
-    const latestMedia = allMedia[allMedia.length - 1];
+    // Get the last image (latest)
+    const latestImage = imagesOnly[imagesOnly.length - 1];
     
-    // Extract URL and detect if it's a video
+    // Extract URL from image
     let mediaUrl = null;
     let mediaKey = null;
     let mediaId = null;
     
-    if (typeof latestMedia === 'object' && latestMedia !== null) {
-      mediaKey = latestMedia.Key || latestMedia.key || latestMedia.KeyName || latestMedia.keyName || '';
-      mediaId = latestMedia.Id || latestMedia.id || latestMedia._id || latestMedia.FileId || latestMedia.fileId || '';
-      const mediaUri = latestMedia.Url || latestMedia.url || latestMedia.URI || latestMedia.uri || '';
+    if (typeof latestImage === 'object' && latestImage !== null) {
+      mediaKey = latestImage.Key || latestImage.key || latestImage.KeyName || latestImage.keyName || '';
+      mediaId = latestImage.Id || latestImage.id || latestImage._id || latestImage.FileId || latestImage.fileId || '';
+      const mediaUri = latestImage.Url || latestImage.url || latestImage.URI || latestImage.uri || '';
       
       if (mediaKey) {
         mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(mediaKey)}`;
@@ -464,21 +572,19 @@ export const CompactEnquiryCard = ({
       }
       }
       
-      const videoCheck = isVideoFile(mediaKey, mediaUri, latestMedia);
-      return { url: mediaUrl, isVideo: videoCheck, media: latestMedia };
+      return { url: mediaUrl, isVideo: false, media: latestImage };
     }
     
-    if (typeof latestMedia === 'string') {
-      if (latestMedia.startsWith('http://') || latestMedia.startsWith('https://')) {
-        mediaUrl = latestMedia;
-      } else if (latestMedia.startsWith('/')) {
-        mediaUrl = `${FILE_BASE_URL}${latestMedia}`;
+    if (typeof latestImage === 'string') {
+      if (latestImage.startsWith('http://') || latestImage.startsWith('https://')) {
+        mediaUrl = latestImage;
+      } else if (latestImage.startsWith('/')) {
+        mediaUrl = `${FILE_BASE_URL}${latestImage}`;
       } else {
-        mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(latestMedia)}`;
-    }
-    
-      const videoCheck = isVideoFile(latestMedia, latestMedia, null);
-      return { url: mediaUrl, isVideo: videoCheck, media: latestMedia };
+        mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(latestImage)}`;
+      }
+      
+      return { url: mediaUrl, isVideo: false, media: latestImage };
     }
     
     return { url: null, isVideo: false, media: null };

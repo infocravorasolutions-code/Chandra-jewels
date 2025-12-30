@@ -249,9 +249,14 @@ const PricingScreen = ({ route, navigation }) => {
       const updatedEntries = allPricingEntries.map(entry => initializePricingEntryState(entry));
       setPricingEntriesState(prev => {
         // Only update if the data has actually changed
-        const hasChanges = JSON.stringify(updatedEntries) !== JSON.stringify(prev);
+        // But preserve any new entries that were added in UI but not yet saved
+        // (entries beyond the length of allPricingEntries)
+        const hasChanges = JSON.stringify(updatedEntries) !== JSON.stringify(prev.slice(0, updatedEntries.length));
+        
         if (hasChanges) {
-          return updatedEntries;
+          // Keep any additional entries that were added in UI but not yet in API data
+          const additionalEntries = prev.slice(updatedEntries.length);
+          return [...updatedEntries, ...additionalEntries];
         }
         return prev;
       });
@@ -425,34 +430,6 @@ const PricingScreen = ({ route, navigation }) => {
         return transformed;
       }).filter(stone => stone !== null && stone.Type); // Remove null entries and ensure Type exists
 
-      // Get clientId from multiple possible sources
-      const clientId = enquiry?.clientId || 
-                       enquiry?.ClientId || 
-                       originalData?.clientId || 
-                       originalData?.ClientId ||
-                       null;
-
-
-      // Validate required fields before sending
-      if (!clientId) {
-        Alert.alert(
-          'Missing Client ID',
-          'Client ID is required for pricing calculation. Please ensure the enquiry has a valid client assigned.\n\n' +
-          'The enquiry object may not have the clientId field. Please check the enquiry data structure.'
-        );
-        return;
-      }
-
-      // Validate clientId format (should be a valid MongoDB ObjectId format)
-      if (!/^[0-9a-fA-F]{24}$/.test(clientId)) {
-        Alert.alert(
-          'Invalid Client ID',
-          `Client ID format is invalid: ${clientId}\n\nPlease ensure the enquiry has a valid client assigned.`
-        );
-        return;
-      }
-
-
       if (metalWeight <= 0 && transformedStones.length === 0) {
         Alert.alert(
           'Missing Weight Data',
@@ -499,7 +476,7 @@ const PricingScreen = ({ route, navigation }) => {
       // Prepare payload with validated data
       // Ensure all numeric values are properly formatted (no NaN, Infinity, etc.)
       payload = {
-        clientId: clientId.trim(), // Ensure no whitespace
+        clientId: null, // Calculate button does not send client ID
         details: {
           Metal: {
             Weight: Math.max(0, metalWeight), // Ensure non-negative
@@ -514,6 +491,10 @@ const PricingScreen = ({ route, navigation }) => {
           Quantity: Math.max(1, Math.floor(quantity)), // Ensure integer and at least 1
         },
       };
+      
+      console.log('🔵 CALCULATE BUTTON - Client ID Status:');
+      console.log('❌ Client ID is NOT being sent (clientId: null)');
+      console.log('📦 Payload clientId:', payload.clientId);
       
       // Final payload validation - check for any invalid values
       if (!isFinite(payload.details.Metal.Weight) || 
@@ -949,22 +930,76 @@ const PricingScreen = ({ route, navigation }) => {
   }, [openDropdowns, stoneTypeOptions, updatePricingEntryStone, handleUpdateStone, pricingEntriesState, toggleDropdown]);
 
   const handleSave = async (shouldNavigateBack = true) => {
+    // Prevent multiple simultaneous saves
+    if (isSaving) {
+      if (__DEV__) {
+        console.warn('⚠️ [handleSave] Save already in progress, ignoring duplicate call');
+      }
+      return;
+    }
+    
+    const startTime = Date.now();
+    
+    if (__DEV__) {
+      console.log('💾 [handleSave] ===== START SAVE PRICING =====');
+      console.log('💾 [handleSave] Timestamp:', new Date().toISOString());
+      console.log('💾 [handleSave] shouldNavigateBack:', shouldNavigateBack);
+    }
+    
     try {
       // Get enquiry ID
       const enquiryId = enquiry?.id || enquiry?._id;
+      
+      if (__DEV__) {
+        console.log('💾 [handleSave] Enquiry ID check:', {
+          enquiryId,
+          enquiryIdFromEnquiry: enquiry?.id,
+          enquiryIdFromEnquiryUnderscore: enquiry?._id,
+          enquiryExists: !!enquiry,
+        });
+      }
+      
       if (!enquiryId) {
+        if (__DEV__) {
+          console.error('❌ [handleSave] Enquiry ID is missing');
+        }
         Alert.alert('Error', 'Enquiry ID is missing');
         return;
       }
 
-      // Get version from latest design - ensure it's in "Version X" format
-      let version = latestDesign?.Version || latestDesign?.version || 'Version 1';
-      // If version is just a number, convert it to "Version X" format
-      if (typeof version === 'number' || (typeof version === 'string' && /^\d+$/.test(version.trim()))) {
-        version = `Version ${version}`;
-      } else if (typeof version === 'string' && !version.toLowerCase().startsWith('version')) {
-        // If it's a string but doesn't start with "Version", add it
-        version = `Version ${version}`;
+      // Get version from latest design
+      let version = latestDesign?.Version || latestDesign?.version || '1';
+      
+      // Log all available versions in the design data for debugging
+      if (__DEV__) {
+        console.log('💾 [handleSave] Available versions in designData:', {
+          designDataLength: designData?.length || 0,
+          allVersions: designData?.map((d, idx) => ({
+            index: idx,
+            Version: d?.Version,
+            version: d?.version,
+            hasPricing: !!(d?.Pricing || d?.pricing),
+          })) || [],
+          latestDesignIndex: designData?.indexOf(latestDesign),
+          latestDesignVersion: latestDesign?.Version || latestDesign?.version,
+        });
+        console.log('💾 [handleSave] Version extraction:', {
+          originalVersion: latestDesign?.Version || latestDesign?.version,
+          versionBeforeFormat: version,
+          latestDesignExists: !!latestDesign,
+          latestDesignKeys: latestDesign ? Object.keys(latestDesign) : [],
+        });
+      }
+      
+      // Send the full version string as-is (e.g., "Version 1")
+      // The API expects the complete version string, not just the number
+      const versionToSend = version;
+      
+      if (__DEV__) {
+        console.log('💾 [handleSave] Version processing:', {
+          originalVersion: version,
+          versionToSend,
+        });
       }
       
       // Get metal details from enquiry (fallback only)
@@ -979,6 +1014,14 @@ const PricingScreen = ({ route, navigation }) => {
       }
       if (!defaultMetalRate || defaultMetalRate === 0) {
         defaultMetalRate = defaultMetalWeight > 0 ? defaultMetalPrice / defaultMetalWeight : 0;
+      }
+      
+      if (__DEV__) {
+        console.log('💾 [handleSave] Pricing entries state:', {
+          entriesCount: pricingEntriesState.length,
+          allPricingEntriesCount: allPricingEntries.length,
+          designType,
+        });
       }
       
       // Convert all pricing entries from state to API format
@@ -1053,12 +1096,28 @@ const PricingScreen = ({ route, navigation }) => {
 
 
       // Call API to save pricing
-      await savePricing({
+      if (__DEV__) {
+        console.log('💾 [handleSave] Calling savePricing API with:', {
+          enquiryId,
+          designType,
+          version: versionToSend,
+          pricingDataEntriesCount: pricingArray.length,
+        });
+      }
+      
+      const saveResult = await savePricing({
         enquiryId,
         designType,
-        version,
+        version: versionToSend, // Send full version string (e.g., "Version 1")
         pricingData: pricingArray,
       }).unwrap();
+      
+      if (__DEV__) {
+        console.log('✅ [handleSave] Save pricing API success:', {
+          result: saveResult,
+          timeTaken: `${Date.now() - startTime}ms`,
+        });
+      }
 
       // Refetch enquiry data to get updated pricing before navigating back
       if (finalEnquiryId) {
@@ -1081,14 +1140,61 @@ const PricingScreen = ({ route, navigation }) => {
         ]
       );
     } catch (error) {
+      const errorTime = Date.now() - startTime;
+      
+      if (__DEV__) {
+        console.error('❌ [handleSave] ===== SAVE PRICING FAILED =====');
+        console.error('❌ [handleSave] Error Type:', typeof error);
+        console.error('❌ [handleSave] Error Object:', error);
+        console.error('❌ [handleSave] Error Status:', error?.status);
+        console.error('❌ [handleSave] Error Message:', error?.message);
+        console.error('❌ [handleSave] Error Data:', error?.data);
+        console.error('❌ [handleSave] Error Stack:', error?.stack);
+        console.error('❌ [handleSave] Time taken before error:', `${errorTime}ms`);
+        
+        // Log full error details
+        try {
+          console.error('❌ [handleSave] Full error JSON:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        } catch (jsonError) {
+          console.error('❌ [handleSave] Could not stringify error:', jsonError);
+        }
+        
+        // Log request details that were sent
+        console.error('❌ [handleSave] Request details:', {
+          enquiryId: enquiry?.id || enquiry?._id,
+          designType,
+          version,
+          pricingEntriesCount: pricingEntriesState.length,
+        });
+      }
       
       let errorMessage = 'Failed to save pricing. Please try again.';
+      
       if (error?.data?.message) {
         errorMessage = error.data.message;
+        if (__DEV__) {
+          console.error('❌ [handleSave] Error message from data.message:', error.data.message);
+        }
       } else if (error?.data?.error) {
         errorMessage = error.data.error;
+        if (__DEV__) {
+          console.error('❌ [handleSave] Error message from data.error:', error.data.error);
+        }
       } else if (error?.message) {
         errorMessage = error.message;
+        if (__DEV__) {
+          console.error('❌ [handleSave] Error message from error.message:', error.message);
+        }
+      } else if (error?.status) {
+        errorMessage = `Server error (${error.status}). Please try again.`;
+        if (__DEV__) {
+          console.error('❌ [handleSave] Error status code:', error.status);
+        }
+      }
+      
+      if (__DEV__) {
+        console.error('❌ [handleSave] Final error message to show user:', errorMessage);
+        console.error('❌ [handleSave] ===== END ERROR LOG =====');
       }
       
       Alert.alert('Save Failed', errorMessage);
@@ -1450,12 +1556,6 @@ const PricingScreen = ({ route, navigation }) => {
         };
       }).filter(stone => stone !== null && stone.Type);
 
-      // Get clientId - can be null according to API
-      const clientId = enquiry?.clientId || enquiry?.ClientId || originalData?.clientId || originalData?.ClientId || null;
-
-      // Note: clientId can be null based on API specification
-      console.log('Client ID:', clientId);
-
       // Build payload
       const metalPayload = {
         Weight: metalWeight,
@@ -1469,7 +1569,7 @@ const PricingScreen = ({ route, navigation }) => {
       }
 
       const payload = {
-        clientId: clientId,
+        clientId: null, // Calculate button does not send client ID
         details: {
           Metal: metalPayload,
           Stones: transformedStones,
@@ -1481,6 +1581,9 @@ const PricingScreen = ({ route, navigation }) => {
         },
       };
 
+      console.log('🔵 CALCULATE BUTTON (Entry-Specific) - Client ID Status:');
+      console.log('❌ Client ID is NOT being sent (clientId: null)');
+      console.log('📦 Payload clientId:', payload.clientId);
       console.log('=== PAYLOAD BEING SENT ===');
       console.log('Payload:', JSON.stringify(payload, null, 2));
       console.log('Metal Payload:', JSON.stringify(metalPayload, null, 2));
@@ -1757,28 +1860,58 @@ const PricingScreen = ({ route, navigation }) => {
         },
       };
 
+      console.log('🟢 SYNC CLIENT PRICING - Client ID Status:');
+      console.log('✅ Client ID IS being sent');
+      console.log('📦 Payload clientId:', payload.clientId);
+      console.log('📋 Full payload:', JSON.stringify(payload, null, 2));
 
       // Call API to sync client pricing
       const response = await calculatePricing(payload).unwrap();
 
+      console.log('🟢 SYNC PRICING - API Response:');
+      console.log('📥 Full Response:', JSON.stringify(response, null, 2));
+      console.log('💰 MetalPrice:', response?.MetalPrice);
+      console.log('💎 DiamondsPrice:', response?.DiamondsPrice);
+      console.log('💎 DiamondPrice (alternative):', response?.DiamondPrice);
+      console.log('📊 TotalPrice:', response?.TotalPrice);
+      console.log('💎 DiamondWeight:', response?.DiamondWeight);
+
       // Update the specific entry's form data with response
       if (response) {
-        // Update metal price
-        if (response.MetalPrice !== undefined) {
-          updatePricingEntryFormData(entryIndex, 'metalPrice', response.MetalPrice.toString());
+        // Update metal price - handle 0 as valid value
+        if (response.MetalPrice !== undefined && response.MetalPrice !== null) {
+          console.log('✅ Updating MetalPrice:', response.MetalPrice);
+          updatePricingEntryFormData(entryIndex, 'metalPrice', parseFloat(response.MetalPrice).toFixed(2));
+        } else {
+          console.log('⚠️ MetalPrice is undefined or null in response');
         }
 
-        // Update diamonds price
-        if (response.DiamondsPrice !== undefined) {
-          updatePricingEntryFormData(entryIndex, 'diamondPrice', response.DiamondsPrice.toString());
+        // Update diamonds price - handle 0 as valid value
+        if (response.DiamondsPrice !== undefined && response.DiamondsPrice !== null) {
+          console.log('✅ Updating DiamondsPrice:', response.DiamondsPrice);
+          updatePricingEntryFormData(entryIndex, 'diamondPrice', parseFloat(response.DiamondsPrice).toFixed(2));
+        } else {
+          console.log('⚠️ DiamondsPrice is undefined or null in response');
+          // Check for alternative field names
+          if (response.DiamondPrice !== undefined && response.DiamondPrice !== null) {
+            console.log('✅ Found DiamondPrice (alternative), updating:', response.DiamondPrice);
+            updatePricingEntryFormData(entryIndex, 'diamondPrice', parseFloat(response.DiamondPrice).toFixed(2));
+          } else {
+            console.log('❌ No diamond price found in response. Setting to 0.');
+            updatePricingEntryFormData(entryIndex, 'diamondPrice', '0.00');
+          }
         }
 
-        // Update total price
-        if (response.TotalPrice !== undefined) {
-          updatePricingEntryFormData(entryIndex, 'totalPrice', response.TotalPrice.toString());
+        // Update total price - handle 0 as valid value
+        if (response.TotalPrice !== undefined && response.TotalPrice !== null) {
+          console.log('✅ Updating TotalPrice:', response.TotalPrice);
+          updatePricingEntryFormData(entryIndex, 'totalPrice', parseFloat(response.TotalPrice).toFixed(2));
         } else {
           // Calculate total if not provided
-          const totalPrice = (parseFloat(response.MetalPrice || 0) + parseFloat(response.DiamondsPrice || 0)).toString();
+          const metalPrice = parseFloat(response.MetalPrice || 0);
+          const diamondsPrice = parseFloat(response.DiamondsPrice || response.DiamondPrice || 0);
+          const totalPrice = (metalPrice + diamondsPrice).toFixed(2);
+          console.log('⚠️ TotalPrice not in response, calculating:', totalPrice, 'from MetalPrice:', metalPrice, 'and DiamondsPrice:', diamondsPrice);
           updatePricingEntryFormData(entryIndex, 'totalPrice', totalPrice);
         }
 
@@ -2674,44 +2807,77 @@ const PricingScreen = ({ route, navigation }) => {
               <Text style={styles.addPricingButtonText}>+ Add Pricing</Text>
             </TouchableOpacity>
           </View>
-          {allPricingEntries.length > 0 ? (
-            allPricingEntries.map((pricingEntry, index) => (
-              <Card key={index} style={styles.pricingEntryCard}>
-                <View style={styles.pricingEntryHeader}>
-                  <Heading level={4} style={styles.pricingEntryTitle}>
-                    {getPricingEntryLabel(pricingEntry, index)}
-                  </Heading>
-                  <TouchableOpacity
-                    style={styles.editButton}
-                    onPress={() => {
-                      setEditingEntryIndex(index);
-                      setShowEditModal(true);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Icon name="edit" size={18} color={colors.primary} />
-                    <Text style={styles.editButtonText}>Edit</Text>
-                  </TouchableOpacity>
-                </View>
-                {renderPricingEntry(pricingEntry, index)}
-                
-                {/* Download Button for View Mode */}
-                <View style={styles.pricingEntryActions}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      // Download pricing for this specific entry
-                      const entryStones = normalizeStones(pricingEntry?.Stones || pricingEntry?.stones || []);
-                      handleDownloadPricingForEntry(pricingEntry, entryStones);
-                    }}
-                    style={[styles.pricingEntryActionButton, styles.downloadButton]}
-                    activeOpacity={0.8}
-                  >
-                    <Icon name="file-download" size={18} color={colors.textWhite} />
-                    <Text style={styles.pricingEntryActionButtonText}>Download Pricing</Text>
-                  </TouchableOpacity>
-                </View>
-              </Card>
-            ))
+          {pricingEntriesState.length > 0 ? (
+            pricingEntriesState.map((entryState, index) => {
+              // Convert state format to raw format for renderPricingEntry
+              const entryFormData = entryState.formData;
+              const entryStones = entryState.stones;
+              const pricingEntry = {
+                MetalPrice: parseFloat(entryFormData.metalPrice) || 0,
+                DiamondsPrice: parseFloat(entryFormData.diamondPrice) || 0,
+                TotalPrice: parseFloat(entryFormData.totalPrice) || 0,
+                DiamondWeight: parseFloat(entryFormData.diamondWeight) || 0,
+                TotalPieces: parseInt(entryFormData.totalPieces) || 0,
+                Metal: {
+                  Weight: parseFloat(entryFormData.metalWeight) || 0,
+                  Quality: entryFormData.metalQuality || '10K',
+                  Rate: parseFloat(entryFormData.metalRateOverride) || 0,
+                },
+                Loss: parseFloat(entryFormData.lossPercent) || 0,
+                Labour: parseFloat(entryFormData.labour) || 0,
+                Duties: parseFloat(entryFormData.duties) || 0,
+                ExtraCharges: parseFloat(entryFormData.extraCharges) || 0,
+                ClientPricingMessage: entryFormData.clientPricingMessage || '',
+                Stones: entryStones.map(stone => ({
+                  Type: stone.Type || '',
+                  Color: stone.Color || '',
+                  Shape: stone.Shape || '',
+                  MmSize: stone.MM || '',
+                  SieveSize: stone.Sieve || '',
+                  CtWeight: parseFloat(stone.CaratWeight) || 0,
+                  Weight: parseFloat(stone.Weight) || 0,
+                  Pcs: parseInt(stone.Pieces) || 0,
+                  Price: parseFloat(stone.Price) || 0,
+                })),
+              };
+              
+              return (
+                <Card key={index} style={styles.pricingEntryCard}>
+                  <View style={styles.pricingEntryHeader}>
+                    <Heading level={4} style={styles.pricingEntryTitle}>
+                      {getPricingEntryLabel(pricingEntry, index)}
+                    </Heading>
+                    <TouchableOpacity
+                      style={styles.editButton}
+                      onPress={() => {
+                        setEditingEntryIndex(index);
+                        setShowEditModal(true);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="edit" size={18} color={colors.primary} />
+                      <Text style={styles.editButtonText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {renderPricingEntry(pricingEntry, index)}
+                  
+                  {/* Download Button for View Mode */}
+                  <View style={styles.pricingEntryActions}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        // Download pricing for this specific entry
+                        handleDownloadPricingForEntry(pricingEntry, entryStones);
+                      }}
+                      style={[styles.pricingEntryActionButton, styles.downloadButton]}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="file-download" size={18} color={colors.textWhite} />
+                      <Text style={styles.pricingEntryActionButtonText}>Download Pricing</Text>
+                    </TouchableOpacity>
+                  </View>
+                </Card>
+              );
+            })
           ) : (
             <Card style={styles.pricingEntryCard}>
               <CustomText variant="body" style={styles.noPricingText}>
@@ -2764,12 +2930,15 @@ const PricingScreen = ({ route, navigation }) => {
                     setShowEditModal(false);
                     setEditingEntryIndex(null);
                   }}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.modalButtonText}>Close</Text>
+                  <Text style={[styles.modalButtonText, styles.cancelModalButtonText]}>Close</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveModalButton]}
+                  style={[
+                    styles.modalButton, 
+                    styles.saveModalButton
+                  ]}
                   onPress={async () => {
                     try {
                       // Save without navigating back (stay on pricing screen)
@@ -2782,9 +2951,15 @@ const PricingScreen = ({ route, navigation }) => {
                       // Modal stays open so user can fix and retry
                     }
                   }}
-                  activeOpacity={0.8}
+                  disabled={isSaving}
+                  activeOpacity={0.7}
                 >
-                  <Text style={[styles.modalButtonText, styles.saveModalButtonText]}>Save Changes</Text>
+                  <Text style={[
+                    styles.modalButtonText, 
+                    styles.saveModalButtonText
+                  ]}>
+                    {isSaving ? 'Saving...' : 'Save Changes'}
+                  </Text>
                 </TouchableOpacity>
               </View>
               
@@ -2805,9 +2980,9 @@ const PricingScreen = ({ route, navigation }) => {
                   }}
                   disabled={isCalculating}
                   style={[styles.modalActionButton, styles.calculateBtn, isCalculating && styles.btnDisabled]}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                 >
-                  <Icon name="calculate" size={18} color={colors.textWhite} />
+                  <Icon name="calculate" size={16} color={colors.textWhite} />
                   <Text style={styles.modalActionButtonText}>
                     {isCalculating ? "Calculating..." : "Calculate"}
                   </Text>
@@ -2821,9 +2996,9 @@ const PricingScreen = ({ route, navigation }) => {
                   }}
                   disabled={isSyncing}
                   style={[styles.modalActionButton, styles.syncBtn, isSyncing && styles.btnDisabled]}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                 >
-                  <Icon name="sync" size={18} color={colors.textWhite} />
+                  <Icon name="sync" size={16} color={colors.textWhite} />
                   <Text style={styles.modalActionButtonText}>
                     {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
                   </Text>
@@ -2888,12 +3063,15 @@ const PricingScreen = ({ route, navigation }) => {
                     }
                     setEditingEntryIndex(null);
                   }}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.modalButtonText}>Cancel</Text>
+                  <Text style={[styles.modalButtonText, styles.cancelModalButtonText]}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveModalButton]}
+                  style={[
+                    styles.modalButton, 
+                    styles.saveModalButton
+                  ]}
                   onPress={async () => {
                     try {
                       // Save the new pricing entry
@@ -2906,9 +3084,15 @@ const PricingScreen = ({ route, navigation }) => {
                       // Modal stays open so user can fix and retry
                     }
                   }}
-                  activeOpacity={0.8}
+                  disabled={isSaving}
+                  activeOpacity={0.7}
                 >
-                  <Text style={[styles.modalButtonText, styles.saveModalButtonText]}>Save New Pricing</Text>
+                  <Text style={[
+                    styles.modalButtonText, 
+                    styles.saveModalButtonText
+                  ]}>
+                    {isSaving ? 'Saving...' : 'Save New Pricing'}
+                  </Text>
                 </TouchableOpacity>
               </View>
               
@@ -2929,9 +3113,9 @@ const PricingScreen = ({ route, navigation }) => {
                   }}
                   disabled={isCalculating}
                   style={[styles.modalActionButton, styles.calculateBtn, isCalculating && styles.btnDisabled]}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                 >
-                  <Icon name="calculate" size={18} color={colors.textWhite} />
+                  <Icon name="calculate" size={16} color={colors.textWhite} />
                   <Text style={styles.modalActionButtonText}>
                     {isCalculating ? "Calculating..." : "Calculate"}
                   </Text>
@@ -2945,9 +3129,9 @@ const PricingScreen = ({ route, navigation }) => {
                   }}
                   disabled={isSyncing}
                   style={[styles.modalActionButton, styles.syncBtn, isSyncing && styles.btnDisabled]}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                 >
-                  <Icon name="sync" size={18} color={colors.textWhite} />
+                  <Icon name="sync" size={16} color={colors.textWhite} />
                   <Text style={styles.modalActionButtonText}>
                     {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
                   </Text>
@@ -3439,14 +3623,22 @@ const styles = StyleSheet.create({
   },
   calculateBtn: {
     backgroundColor: colors.primary,
-    width: '100%',
+    shadowColor: colors.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   syncBtn: {
     backgroundColor: colors.primary,
-    width: '100%',
+    shadowColor: colors.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   btnDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
+    shadowOpacity: 0.1,
+    elevation: 1,
   },
   filterCard: {
     marginBottom: 20,
@@ -3607,40 +3799,71 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: colors.textPrimary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    minHeight: 44,
   },
   cancelModalButton: {
-    backgroundColor: colors.textSecondary,
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: 1.5,
+    borderColor: colors.border,
   },
   saveModalButton: {
     backgroundColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   modalButtonText: {
     fontFamily: fonts.bold,
-    fontSize: fonts.base,
-    color: colors.textWhite,
+    fontSize: 15,
+    letterSpacing: 0.3,
+  },
+  cancelModalButtonText: {
+    color: colors.textPrimary,
   },
   saveModalButtonText: {
     color: colors.textWhite,
+  },
+  disabledButtonText: {
+    opacity: 0.5,
   },
   modalActionButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 10,
     gap: 8,
+    shadowColor: colors.textPrimary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+    minHeight: 42,
   },
   modalActionButtonText: {
     color: colors.textWhite,
-    fontFamily: fonts.medium,
-    fontSize: fonts.base,
+    fontFamily: fonts.semibold || fonts.bold,
+    fontSize: 14,
+    letterSpacing: 0.2,
   },
   pricingEntryInfo: {
     marginBottom: 16,
