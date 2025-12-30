@@ -443,7 +443,9 @@ const PricingScreen = ({ route, navigation }) => {
       const labour = parseFloat(formData.labour);
       const extraCharges = parseFloat(formData.extraCharges);
       const duties = parseFloat(formData.duties);
-      const quantity = parseInt(formData.totalPieces);
+      // Quantity comes from "Total Pieces" input field (formData.totalPieces)
+      // const quantity = parseInt(formData.totalPieces);
+      const quantity = 1;
 
       // Validate numeric values
       if (isNaN(loss) || loss < 0) {
@@ -488,6 +490,7 @@ const PricingScreen = ({ route, navigation }) => {
           Labour: Math.max(0, labour),
           ExtraCharges: Math.max(0, extraCharges),
           Duties: Math.max(0, duties),
+          // Quantity is added to payload from "Total Pieces" input field (formData.totalPieces)
           Quantity: Math.max(1, Math.floor(quantity)), // Ensure integer and at least 1
         },
       };
@@ -536,7 +539,28 @@ const PricingScreen = ({ route, navigation }) => {
       // Call API
       const response = await calculatePricing(payload).unwrap();
 
-      
+      // Detailed TotalPrice logging
+      console.log('=== API RESPONSE RECEIVED (handleCalculate) ===');
+      console.log('Full Response:', JSON.stringify(response, null, 2));
+      console.log('=== TOTAL PRICE CHECK ===');
+      console.log('TotalPrice exists?', response ? ('TotalPrice' in response) : 'N/A (response is null)');
+      if (response) {
+        console.log('TotalPrice value:', response.TotalPrice);
+        console.log('TotalPrice type:', typeof response.TotalPrice);
+        console.log('TotalPrice is null?', response.TotalPrice === null);
+        console.log('TotalPrice is undefined?', response.TotalPrice === undefined);
+        console.log('TotalPrice is NaN?', isNaN(response.TotalPrice));
+        console.log('TotalPrice is finite?', isFinite(response.TotalPrice));
+        if (response.TotalPrice !== undefined && response.TotalPrice !== null) {
+          console.log('TotalPrice parsed:', parseFloat(response.TotalPrice));
+          console.log('TotalPrice formatted:', response.TotalPrice.toString());
+        } else {
+          console.log('⚠️ WARNING: TotalPrice is missing or null in response!');
+        }
+      } else {
+        console.log('⚠️ WARNING: Response is null or undefined!');
+      }
+      console.log('=== END TOTAL PRICE CHECK ===');
 
       // Update form data with calculated values from response
       // Backend returns: { MetalPrice, DiamondsPrice, TotalPrice, Metal, DiamondWeight, Client, Stones }
@@ -555,7 +579,12 @@ const PricingScreen = ({ route, navigation }) => {
         
         // Update total price if in response
         if (response.TotalPrice !== undefined) {
+          console.log('✅ TotalPrice found in response, updating formData');
+          console.log('TotalPrice before update:', response.TotalPrice);
+          console.log('TotalPrice after toString:', response.TotalPrice.toString());
           updates.totalPrice = response.TotalPrice.toString();
+        } else {
+          console.log('❌ TotalPrice NOT found in response!');
         }
         
         // Update metal weight from response if provided
@@ -1577,7 +1606,8 @@ const PricingScreen = ({ route, navigation }) => {
           Labour: parseFloat(entryFormData.labour) || 0,
           ExtraCharges: parseFloat(entryFormData.extraCharges) || 0,
           Duties: parseFloat(entryFormData.duties) || 0,
-          Quantity: parseInt(entryFormData.totalPieces) || 1,
+          // Quantity is added to payload from "Total Pieces" input field (entryFormData.totalPieces)
+          Quantity: 1,
         },
       };
 
@@ -1590,8 +1620,9 @@ const PricingScreen = ({ route, navigation }) => {
       console.log('Transformed Stones:', JSON.stringify(transformedStones, null, 2));
 
       // Call API to calculate pricing
-      console.log('📡 Calling API calculatePricing...');
+      console.log('📡 Calling API calculatePricing...',"data",payload);
       console.log('Payload being sent:', JSON.stringify(payload, null, 2));
+      
       let response;
       try {
         console.log('⏳ Waiting for API response...');
@@ -1617,7 +1648,24 @@ const PricingScreen = ({ route, navigation }) => {
       if (response) {
         console.log('MetalPrice:', response.MetalPrice);
         console.log('DiamondsPrice:', response.DiamondsPrice);
-        console.log('TotalPrice:', response.TotalPrice);
+        
+        // Detailed TotalPrice logging
+        console.log('=== TOTAL PRICE CHECK ===');
+        console.log('TotalPrice exists?', 'TotalPrice' in response);
+        console.log('TotalPrice value:', response.TotalPrice);
+        console.log('TotalPrice type:', typeof response.TotalPrice);
+        console.log('TotalPrice is null?', response.TotalPrice === null);
+        console.log('TotalPrice is undefined?', response.TotalPrice === undefined);
+        console.log('TotalPrice is NaN?', isNaN(response.TotalPrice));
+        console.log('TotalPrice is finite?', isFinite(response.TotalPrice));
+        if (response.TotalPrice !== undefined && response.TotalPrice !== null) {
+          console.log('TotalPrice parsed:', parseFloat(response.TotalPrice));
+          console.log('TotalPrice formatted:', parseFloat(response.TotalPrice).toFixed(2));
+        } else {
+          console.log('⚠️ WARNING: TotalPrice is missing or null in response!');
+        }
+        console.log('=== END TOTAL PRICE CHECK ===');
+        
         console.log('Metal:', response.Metal);
         console.log('DiamondWeight:', response.DiamondWeight);
         console.log('Client:', response.Client);
@@ -1656,8 +1704,18 @@ const PricingScreen = ({ route, navigation }) => {
           
           // Total Price - use directly from response (includes all calculations)
           if (response.TotalPrice !== undefined && response.TotalPrice !== null) {
-            updatedFormData.totalPrice = parseFloat(response.TotalPrice).toFixed(2);
-            console.log('✅ Updated totalPrice:', updatedFormData.totalPrice, 'from', response.TotalPrice);
+            const totalPriceValue = parseFloat(response.TotalPrice);
+            const totalPriceFormatted = totalPriceValue.toFixed(2);
+            updatedFormData.totalPrice = totalPriceFormatted;
+            console.log('✅ Updated totalPrice123123:', response);
+            console.log('   - Original value:', response.TotalPrice);
+            console.log('   - Parsed value:', totalPriceValue);
+            console.log('   - Formatted value:', totalPriceFormatted);
+          } else {
+            console.log('❌ TotalPrice is undefined or null - NOT updating formData');
+            console.log('   - TotalPrice value:', response.TotalPrice);
+            console.log('   - TotalPrice undefined?', response.TotalPrice === undefined);
+            console.log('   - TotalPrice null?', response.TotalPrice === null);
           }
           
           // Update Metal fields from response.Metal
