@@ -148,7 +148,6 @@ const EnquiryFiltersModal = ({
 
   const metalColorOptions = [
     { label: 'All Colors', value: 'all' },
-    { label: 'Gold', value: 'Gold' },
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
     { label: 'Yellow Gold', value: 'Yellow Gold' },

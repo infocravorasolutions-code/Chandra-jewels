@@ -209,12 +209,12 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         Priority: priorityForAPI,
         Quantity: formData.quantity && formData.quantity.trim() ? parseInt(formData.quantity) : null,
         Metal: {
-          Color: formData.metalColor || 'Gold',
+          Color: formData.metalColor || null,
           Quality: formData.metalQuality || '10K',
         },
         StyleNumber: formData.styleNumber && formData.styleNumber.trim() ? formData.styleNumber : null,
         GatiOrderNumber: formData.gatiOrderNumber && formData.gatiOrderNumber.trim() ? formData.gatiOrderNumber : null,
-        StoneType: formData.stoneType || 'NaturalRegular',
+        StoneType: formData.stoneType && formData.stoneType.trim() ? formData.stoneType.trim() : null,
         MetalWeight: {
           From: formData.metalWeightFrom && formData.metalWeightFrom.trim() ? formData.metalWeightFrom.toString() : null,
           To: formData.metalWeightTo && formData.metalWeightTo.trim() ? formData.metalWeightTo.toString() : null,
@@ -253,7 +253,7 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         deadline: formData.deadline || null,
         category: formData.category,
         stoneType: formData.stoneType,
-        metalType: `${formData.metalColor || 'Gold'} (${formData.metalQuality || '10K'})`,
+        metalType: formData.metalColor ? `${formData.metalColor} (${formData.metalQuality || '10K'})` : null,
         updatedAt: new Date().toISOString(),
         Name: formData.title,
         Remarks: formData.description,
@@ -263,7 +263,7 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         StoneType: formData.stoneType,
         Quantity: formData.quantity ? parseInt(formData.quantity) : null,
         Metal: {
-          Color: formData.metalColor || 'Gold',
+          Color: formData.metalColor || null,
           Quality: formData.metalQuality || '10K',
         },
         MetalWeight: {

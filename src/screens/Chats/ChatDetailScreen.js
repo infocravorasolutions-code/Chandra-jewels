@@ -11,7 +11,6 @@ import {
   Text,
   Dimensions,
   StatusBar,
-  ImageBackground,
   Keyboard,
   Image,
   Linking,
@@ -20,6 +19,8 @@ import {
 } from 'react-native';
 import Video from 'react-native-video';
 import ImageZoom from 'react-native-image-pan-zoom';
+import { WebView } from 'react-native-webview';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -34,12 +35,18 @@ import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
 import { formatDateTime, spacing, responsivePadding } from '../../utils';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
-import { FILE_BASE_URL } from '../../config/apiConfig';
+import DocumentPicker from 'react-native-document-picker';
+import RNFS from 'react-native-fs';
+import Share from 'react-native-share';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { FILE_BASE_URL, API_BASE_URL } from '../../config/apiConfig';
+import secureStorage from '../../utils/secureStorage';
 import { getUserName } from '../../utils/userUtils';
 import { useUsers } from '../../features/users/usersHooks';
 import { SwipeableMessage, EmptyState, ChatHeader } from '../../components/chat';
 import { useMessageScroll } from '../../hooks/useMessageScroll';
 import { formatMessageTime, getMessageStatusIcon, getMessageStatusColor, getSenderColor, isMyMessage as checkIsMyMessage, formatReadTimestamp } from '../../utils/messageUtils';
+import { clearChatNotification } from '../../utils/chatNotificationGrouping';
 
 // Safely get window dimensions
 let width = 375; // Default width
@@ -93,6 +100,53 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
   }, []);
 
+  const requestStoragePermission = useCallback(async () => {
+    if (Platform.OS !== 'android') return true;
+    try {
+      // For Android 13+ (API 33+), we need READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, or READ_EXTERNAL_STORAGE
+      // For Android 10+ (API 29+), we can use scoped storage without permission for most cases
+      // DocumentPicker handles permissions internally, but we'll request for older Android versions
+      if (Platform.Version >= 33) {
+        // Android 13+ - request media permissions
+        const permissions = [
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+        ];
+        const granted = await PermissionsAndroid.requestMultiple(permissions);
+        return Object.values(granted).every(status => status === PermissionsAndroid.RESULTS.GRANTED);
+      } else if (Platform.Version >= 29) {
+        // Android 10-12 - scoped storage, permission may not be needed but request anyway
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+          {
+            title: 'Storage Permission',
+            message: 'Allow access to your files to share documents.',
+            buttonPositive: 'OK',
+            buttonNegative: 'Cancel',
+          }
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } else {
+        // Android 9 and below
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+          {
+            title: 'Storage Permission',
+            message: 'Allow access to your files to share documents.',
+            buttonPositive: 'OK',
+            buttonNegative: 'Cancel',
+          }
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      }
+    } catch (err) {
+      if (__DEV__) {
+        console.log('Storage permission request error', err);
+      }
+      return false;
+    }
+  }, []);
+
   // Get enquiryId from route params (fallback to chat or enquiry object)
   const enquiryId = routeEnquiryId || routeChat?.EnquiryId || routeChat?.enquiryId || enquiry?.id || enquiry?._id;
   
@@ -135,6 +189,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
   useFocusEffect(
     React.useCallback(() => {
       if (chat?._id && !messagesLoading) {
+        // Clear notification for this chat when screen is focused
+        const chatIdToClear = chat?._id || chat?.id || chatId;
+        if (chatIdToClear) {
+          clearChatNotification(chatIdToClear);
+        }
         
         // Small delay to ensure screen is fully mounted
         const timer = setTimeout(() => {
@@ -142,7 +201,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         }, 300);
         return () => clearTimeout(timer);
       }
-    }, [chat?._id, refetchMessages, messagesLoading])
+    }, [chat?._id, chatId, refetchMessages, messagesLoading])
   );
 
   // Mark messages as read when user views the chat
@@ -200,15 +259,22 @@ const ChatDetailScreen = ({ route, navigation }) => {
   );
 
   const [newMessage, setNewMessage] = useState('');
+  const [textInputHeight, setTextInputHeight] = useState(36); // Initial height for single line
   const [showMediaModal, setShowMediaModal] = useState(false);
   const [showReadReceiptModal, setShowReadReceiptModal] = useState(false);
   const [showMediaViewerModal, setShowMediaViewerModal] = useState(false);
   const [viewerMediaUrl, setViewerMediaUrl] = useState(null);
-  const [viewerMediaType, setViewerMediaType] = useState(null); // 'image' or 'video'
+  const [viewerMediaType, setViewerMediaType] = useState(null); // 'image', 'video', or 'document'
+  const [viewerDocumentName, setViewerDocumentName] = useState(null); // For document download
+  const [viewerOriginalUrl, setViewerOriginalUrl] = useState(null); // Original PDF URL for fallback
+  const [viewerMediaKey, setViewerMediaKey] = useState(null); // Store mediaKey for refreshing expired URLs
+  const [webViewError, setWebViewError] = useState(false); // Track if WebView failed to load
+  const [isRefreshingUrl, setIsRefreshingUrl] = useState(false); // Track if we're refreshing URL
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
   const scrollViewRef = useRef(null);
+  const textInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const swipeAnimations = useRef({});
   const isUserScrollingRef = useRef(false);
@@ -241,6 +307,16 @@ const ChatDetailScreen = ({ route, navigation }) => {
       usersListRef.current = usersList;
     }
   }, [usersList]);
+
+  // Debug: Track modal state changes
+  useEffect(() => {
+    console.log('📄 [Modal State] Changed:', {
+      showMediaViewerModal,
+      viewerMediaUrl,
+      viewerMediaType,
+      viewerDocumentName,
+    });
+  }, [showMediaViewerModal, viewerMediaUrl, viewerMediaType, viewerDocumentName]);
 
   // Helper function to get typing user name from userId using ref
   const getTypingUserName = useCallback((userId) => {
@@ -819,6 +895,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
     
     setNewMessage('');
+    setTextInputHeight(36); // Reset height to initial size after sending
     setReplyingTo(null); // Clear reply after sending
     
     // When user sends a message, always scroll to bottom
@@ -915,6 +992,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const handleTyping = (text) => {
     setNewMessage(text);
     
+    // Reset height if message is cleared
+    if (!text.trim()) {
+      setTextInputHeight(36);
+    }
+    
     // Send typing indicator
     if (text.trim() && chat) {
       sendTyping(true);
@@ -987,6 +1069,82 @@ const ChatDetailScreen = ({ route, navigation }) => {
     picker(options, async (response) => {
       handlePickerResponse(response, mediaType);
     });
+  };
+
+  const handleDocumentPicker = async () => {
+    setShowMediaModal(false);
+    
+    // Request storage permission for Android
+    if (Platform.OS === 'android') {
+      const hasPermission = await requestStoragePermission();
+      if (!hasPermission) {
+        alert.error('Permission Denied', 'Storage permission is required to select files');
+        return;
+      }
+    }
+
+    try {
+      const result = await DocumentPicker.pick({
+        type: [DocumentPicker.types.allFiles],
+        allowMultiSelection: false,
+      });
+
+      if (result && result.length > 0) {
+        const file = result[0];
+        
+        // Validate file size (50 MB max)
+        const maxSize = 50 * 1024 * 1024; // 50 MB
+        if (file.size && file.size > maxSize) {
+          alert.warning(
+            'File Too Large',
+            'File size exceeds 50 MB limit. Please choose a smaller file.'
+          );
+          return;
+        }
+
+        if (__DEV__) {
+          console.log('📤 Sending file:', {
+            uri: file.uri,
+            type: file.type,
+            name: file.name,
+            size: file.size,
+          });
+        }
+
+        // Determine message type based on file type
+        let messageType = 'file';
+        const fileName = file.name || '';
+        const fileType = file.type || '';
+        
+        if (fileType.startsWith('image/') || fileName.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
+          messageType = 'image';
+        } else if (fileType.startsWith('video/') || fileName.match(/\.(mp4|mov|avi|mkv|webm|3gp)$/i)) {
+          messageType = 'video';
+        }
+
+        // Send file via the hook
+        const sent = await sendMedia({
+          uri: file.uri,
+          type: file.type || 'application/octet-stream',
+          name: file.name || `file_${Date.now()}`,
+          size: file.size || 0,
+          messageType: messageType,
+        });
+
+        if (!sent) {
+          alert.error('Error', 'Failed to send file. Please try again.');
+        }
+      }
+    } catch (error) {
+      if (DocumentPicker.isCancel(error)) {
+        // User cancelled, do nothing
+        return;
+      }
+      alert.error(
+        'Error',
+        error.message || 'Failed to select file. Please try again.'
+      );
+    }
   };
 
   const handlePickerResponse = async (response, mediaType) => {
@@ -1070,27 +1228,247 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }, []);
 
   const handleFilePress = async (mediaKey, mediaName, mediaType = null) => {
+    console.log('📄 [handleFilePress] Called with:', {
+      mediaKey,
+      mediaName,
+      mediaType,
+    });
+    
     const url = getMediaUrl(mediaKey);
+    console.log('📄 [handleFilePress] Generated URL:', url);
+    
     if (url) {
       // Determine media type if not provided
       let type = mediaType;
       if (!type) {
         const name = mediaName || mediaKey || '';
-        if (name.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+        console.log('📄 [handleFilePress] Detecting type for:', name);
+        
+        if (name.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
           type = 'image';
-        } else if (name.match(/\.(mp4|mov|avi|mkv|webm)$/i)) {
+        } else if (name.match(/\.(mp4|mov|avi|mkv|webm|3gp)$/i)) {
           type = 'video';
         } else {
-          // For other file types, try to open in browser (PDFs, etc.)
-          try {
-            const supported = await Linking.canOpenURL(url);
-            if (supported) {
-              await Linking.openURL(url);
+          // For PDFs and other documents, download and open with appropriate app
+          const isPDF = name.match(/\.(pdf)$/i);
+          const isDocument = name.match(/\.(doc|docx|xls|xlsx|ppt|pptx|txt|rtf)$/i);
+          
+          console.log('📄 [handleFilePress] File type check:', {
+            isPDF,
+            isDocument,
+            name,
+          });
+          
+          if (isPDF || isDocument) {
+            // Open document in modal viewer instead of downloading
+            // Get the actual file URL (presigned or direct)
+            const isFullUrl = typeof mediaKey === 'string' && 
+              (mediaKey.startsWith('http://') || mediaKey.startsWith('https://'));
+            
+            let documentUrl = isFullUrl ? mediaKey : url;
+            let mediaKeyForRefresh = null; // Store key for refreshing expired URLs
+            
+            // If it's a full URL (presigned S3 URL), extract the key if possible
+            // Otherwise, if not a full URL, try to get presigned URL
+            if (isFullUrl) {
+              // Try to extract the S3 key from the presigned URL
+              // Format: https://bucket.s3.region.amazonaws.com/key?params
+              try {
+                const urlObj = new URL(mediaKey);
+                const pathname = urlObj.pathname;
+                // Remove leading slash and get the key
+                const s3Key = pathname.startsWith('/') ? pathname.substring(1) : pathname;
+                if (s3Key) {
+                  mediaKeyForRefresh = s3Key;
+                  console.log('📄 [handleFilePress] Extracted S3 key from URL:', s3Key);
+                } else {
+                  // Fallback: use the original mediaKey if we can't extract
+                  mediaKeyForRefresh = mediaKey;
+                }
+              } catch (e) {
+                // If URL parsing fails, try to extract manually
+                const match = mediaKey.match(/s3\.amazonaws\.com\/([^?]+)/) || 
+                             mediaKey.match(/s3\.[^/]+\/([^?]+)/);
+                if (match && match[1]) {
+                  mediaKeyForRefresh = decodeURIComponent(match[1]);
+                  console.log('📄 [handleFilePress] Extracted S3 key via regex:', mediaKeyForRefresh);
+                } else {
+                  // Last resort: use original mediaKey
+                  mediaKeyForRefresh = mediaKey;
+                }
+              }
             } else {
-              alert.error('Error', 'Cannot open this file');
+              // Not a full URL - fetch presigned URL and store the key
+              mediaKeyForRefresh = mediaKey;
+              try {
+                const token = await secureStorage.getItem('token');
+                if (token) {
+                  const encodedKey = encodeURIComponent(mediaKey);
+                  const presignUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
+                  
+                  try {
+                    const presignResponse = await fetch(presignUrl, {
+                      method: 'GET',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                      },
+                    });
+                    
+                    if (presignResponse.ok) {
+                      const contentType = presignResponse.headers.get('content-type') || '';
+                      if (contentType.includes('application/json')) {
+                        const jsonData = await presignResponse.json();
+                        documentUrl = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location || jsonData.Location || url;
+                      }
+                    }
+                  } catch (e) {
+                    // Use original URL if presign fails
+                    if (__DEV__) {
+                      console.log('[handleFilePress] Presign failed, using original URL:', e);
+                    }
+                  }
+                }
+              } catch (e) {
+                // Use original URL if token fetch fails
+                if (__DEV__) {
+                  console.log('[handleFilePress] Token fetch failed, using original URL:', e);
+                }
+              }
             }
-          } catch (error) {
-            alert.error('Error', 'Failed to open file');
+            
+            // Open document in modal viewer
+            if (__DEV__) {
+              console.log('[handleFilePress] Opening document in viewer:', {
+                documentUrl,
+                fileName: mediaName,
+                isFullUrl,
+              });
+            }
+            
+            const isPDF = mediaName && mediaName.toLowerCase().endsWith('.pdf');
+            
+            // Always fetch a fresh presigned URL before opening in modal
+            // This ensures we don't try to display expired URLs
+            let urlToDisplay = documentUrl;
+            if (mediaKeyForRefresh) {
+              console.log('📄 [handleFilePress] Fetching fresh URL before opening modal...');
+              console.log('📄 [handleFilePress] Media key for refresh:', mediaKeyForRefresh);
+              try {
+                const token = await secureStorage.getItem('token');
+                if (token) {
+                  const encodedKey = encodeURIComponent(mediaKeyForRefresh);
+                  const presignUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
+                  console.log('📄 [handleFilePress] Fetching from:', presignUrl);
+                  
+                  const presignResponse = await fetch(presignUrl, {
+                    method: 'GET',
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                    },
+                  });
+                  
+                  console.log('📄 [handleFilePress] Presign response status:', presignResponse.status);
+                  
+                  if (presignResponse.ok) {
+                    const contentType = presignResponse.headers.get('content-type') || '';
+                    console.log('📄 [handleFilePress] Content-Type:', contentType);
+                    
+                    if (contentType.includes('application/json')) {
+                      const jsonData = await presignResponse.json();
+                      console.log('📄 [handleFilePress] Response data:', jsonData);
+                      const freshUrl = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location || jsonData.Location;
+                      if (freshUrl) {
+                        urlToDisplay = freshUrl;
+                        console.log('📄 [handleFilePress] ✅ Got fresh URL for modal:', freshUrl.substring(0, 100) + '...');
+                      } else {
+                        console.error('📄 [handleFilePress] ❌ No URL in response');
+                        alert.error('Error', 'Failed to get document URL. Please try again.');
+                        return;
+                      }
+                    } else {
+                      console.log('📄 [handleFilePress] Non-JSON response, using original URL');
+                    }
+                  } else {
+                    const errorText = await presignResponse.text().catch(() => 'Unable to read error');
+                    console.error('📄 [handleFilePress] ❌ Failed to get presigned URL:', presignResponse.status, errorText);
+                    alert.error('Error', `Failed to get fresh document URL (${presignResponse.status}). The document link may have expired.`);
+                    return;
+                  }
+                } else {
+                  console.error('📄 [handleFilePress] No token available');
+                  alert.error('Error', 'Authentication required to view document');
+                  return;
+                }
+              } catch (e) {
+                console.error('📄 [handleFilePress] Exception fetching fresh URL:', e);
+                alert.error('Error', 'Failed to refresh document URL. Please try again.');
+                return;
+              }
+            } else {
+              console.log('📄 [handleFilePress] No mediaKeyForRefresh, using original URL');
+              // Check if URL looks expired
+              const urlDateMatch = urlToDisplay.match(/X-Amz-Date=(\d{8}T\d{6}Z)/);
+              if (urlDateMatch) {
+                const urlDate = new Date(urlDateMatch[1].replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/, '$1-$2-$3T$4:$5:$6Z'));
+                const now = new Date();
+                const hoursDiff = (now - urlDate) / (1000 * 60 * 60);
+                if (hoursDiff > 1) {
+                  console.warn('📄 [handleFilePress] ⚠️ URL appears to be expired (older than 1 hour)');
+                  alert.error('Error', 'This document link has expired. Please try again.');
+                  return;
+                }
+              }
+            }
+            
+            // Use Google Docs Viewer for PDFs (works better in WebView than direct PDF)
+            // Use Google Docs Viewer for all documents (works better in WebView than direct PDF)
+            // Google Docs Viewer can display PDFs, Word, Excel, etc. in WebView
+            let finalUrl = urlToDisplay;
+            const encodedUrl = encodeURIComponent(urlToDisplay);
+            finalUrl = `https://docs.google.com/viewer?url=${encodedUrl}&embedded=true`;
+            console.log('📄 [handleFilePress] Using Google Docs Viewer for document');
+            
+            // Always log (not just in __DEV__) for debugging
+            console.log('📄 [handleFilePress] Opening document:', {
+              original: documentUrl,
+              finalUrl,
+              fileName: mediaName,
+              isFullUrl,
+              isPDF,
+            });
+            
+            // Set state synchronously
+            setViewerMediaUrl(finalUrl);
+            setViewerOriginalUrl(urlToDisplay); // Store fresh URL for fallback
+            setViewerMediaKey(mediaKeyForRefresh); // Store key for refreshing expired URLs
+            setViewerMediaType('document');
+            setViewerDocumentName(mediaName || 'Document');
+            setWebViewError(false); // Reset error state
+            setIsRefreshingUrl(false); // Reset refreshing state
+            
+            // Log before opening modal
+            console.log('📄 [handleFilePress] About to open modal with URL:', finalUrl);
+            
+            setShowMediaViewerModal(true);
+            
+            // Log after state update (will execute after render)
+            setTimeout(() => {
+              console.log('📄 [handleFilePress] Modal should be open now');
+            }, 100);
+            
+            return;
+          } else {
+            // For other file types, try to open in browser as fallback
+            try {
+              const supported = await Linking.canOpenURL(url);
+              if (supported) {
+                await Linking.openURL(url);
+              } else {
+                alert.error('Error', 'Cannot open this file type');
+              }
+            } catch (error) {
+              alert.error('Error', 'Failed to open file');
+            }
           }
           return;
         }
@@ -1103,11 +1481,235 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
   };
 
+  // Download document from modal
+  const handleDownloadDocument = useCallback(async () => {
+    if (!viewerMediaUrl || !viewerDocumentName) return;
+    
+    try {
+      if (__DEV__) {
+        console.log('[handleDownloadDocument] Starting download:', {
+          url: viewerMediaUrl,
+          name: viewerDocumentName,
+        });
+      }
+      
+      // Fetch the file
+      const response = await fetch(viewerMediaUrl, {
+        method: 'GET',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status}`);
+      }
+      
+      // Get file as array buffer
+      const arrayBuffer = await response.arrayBuffer();
+      
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
+      // Convert to base64
+      const bytes = new Uint8Array(arrayBuffer);
+      const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      let base64 = '';
+      let i = 0;
+      
+      while (i < bytes.length) {
+        const a = bytes[i++];
+        const b = i < bytes.length ? bytes[i++] : 0;
+        const c = i < bytes.length ? bytes[i++] : 0;
+        
+        const bitmap = (a << 16) | (b << 8) | c;
+        
+        base64 += base64Chars.charAt((bitmap >> 18) & 63);
+        base64 += base64Chars.charAt((bitmap >> 12) & 63);
+        base64 += i - 2 < bytes.length ? base64Chars.charAt((bitmap >> 6) & 63) : '=';
+        base64 += i - 1 < bytes.length ? base64Chars.charAt(bitmap & 63) : '=';
+      }
+      
+      // Save to Downloads folder
+      const sanitizedName = viewerDocumentName.replace(/[^a-z0-9._-]/gi, '_');
+      const downloadPath = `${RNFS.DownloadDirectoryPath}/${sanitizedName}`;
+      
+      await RNFS.writeFile(downloadPath, base64, 'base64');
+      
+      // Verify file was saved
+      const fileExists = await RNFS.exists(downloadPath);
+      if (!fileExists) {
+        throw new Error('Failed to save downloaded file');
+      }
+      
+      alert.success(
+        'Download Complete',
+        `File downloaded successfully!\n\nSaved to: Downloads/${sanitizedName}`
+      );
+    } catch (error) {
+      if (__DEV__) {
+        console.error('[handleDownloadDocument] Error:', error);
+      }
+      alert.error('Error', error.message || 'Failed to download file. Please try again.');
+    }
+  }, [viewerMediaUrl, viewerDocumentName, alert]);
+
   const handleCloseMediaViewer = () => {
     setShowMediaViewerModal(false);
     setViewerMediaUrl(null);
     setViewerMediaType(null);
+    setViewerDocumentName(null);
+    setViewerOriginalUrl(null);
+    setViewerMediaKey(null);
+    setWebViewError(false);
+    setIsRefreshingUrl(false);
   };
+  
+  // Fetch fresh presigned URL for expired URLs
+  const fetchFreshPresignedUrl = useCallback(async (mediaKey) => {
+    if (!mediaKey) {
+      console.log('📄 [fetchFreshPresignedUrl] No mediaKey provided');
+      return null;
+    }
+    
+    try {
+      setIsRefreshingUrl(true);
+      console.log('📄 [fetchFreshPresignedUrl] Starting fetch for key:', mediaKey);
+      
+      const token = await secureStorage.getItem('token');
+      if (!token) {
+        console.error('📄 [fetchFreshPresignedUrl] No token available');
+        setIsRefreshingUrl(false);
+        return null;
+      }
+      
+      const encodedKey = encodeURIComponent(mediaKey);
+      const presignUrl = `${API_BASE_URL}/api/enquiries/files/${encodedKey}`;
+      
+      console.log('📄 [fetchFreshPresignedUrl] Fetching from:', presignUrl);
+      console.log('📄 [fetchFreshPresignedUrl] Encoded key:', encodedKey);
+      console.log('📄 [fetchFreshPresignedUrl] Token available:', token ? 'Yes' : 'No');
+      
+      const presignResponse = await fetch(presignUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      console.log('📄 [fetchFreshPresignedUrl] Response status:', presignResponse.status);
+      console.log('📄 [fetchFreshPresignedUrl] Response ok:', presignResponse.ok);
+      
+      if (presignResponse.ok) {
+        const contentType = presignResponse.headers.get('content-type') || '';
+        console.log('📄 [fetchFreshPresignedUrl] Content-Type:', contentType);
+        
+        if (contentType.includes('application/json')) {
+          const jsonData = await presignResponse.json();
+          console.log('📄 [fetchFreshPresignedUrl] Response data:', jsonData);
+          const freshUrl = jsonData.url || jsonData.videoUrl || jsonData.src || jsonData.location || jsonData.Location;
+          
+          if (freshUrl) {
+            console.log('📄 [fetchFreshPresignedUrl] ✅ Got fresh URL:', freshUrl.substring(0, 100) + '...');
+            setIsRefreshingUrl(false);
+            return freshUrl;
+          } else {
+            console.error('📄 [fetchFreshPresignedUrl] ❌ No URL found in response:', jsonData);
+            setIsRefreshingUrl(false);
+            return null;
+          }
+        } else {
+          // If response is not JSON, it might be a direct file - return the presignUrl itself
+          console.log('📄 [fetchFreshPresignedUrl] Non-JSON response, using presignUrl');
+          setIsRefreshingUrl(false);
+          return presignUrl;
+        }
+      } else {
+        const errorText = await presignResponse.text().catch(() => 'Unable to read error');
+        console.error('📄 [fetchFreshPresignedUrl] ❌ Failed to get presigned URL:', presignResponse.status, errorText);
+        setIsRefreshingUrl(false);
+        return null;
+      }
+    } catch (error) {
+      console.error('📄 [fetchFreshPresignedUrl] ❌ Exception:', error);
+      setIsRefreshingUrl(false);
+      return null;
+    }
+  }, []);
+  
+  // Check if URL is expired and refresh if needed
+  const refreshExpiredUrl = useCallback(async () => {
+    if (!viewerMediaKey) {
+      console.log('📄 [refreshExpiredUrl] No viewerMediaKey available');
+      return;
+    }
+    
+    if (isRefreshingUrl) {
+      console.log('📄 [refreshExpiredUrl] Already refreshing, skipping...');
+      return;
+    }
+    
+    console.log('📄 [refreshExpiredUrl] Starting refresh for key:', viewerMediaKey);
+    const freshUrl = await fetchFreshPresignedUrl(viewerMediaKey);
+    
+    if (freshUrl) {
+      const isPDF = viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf');
+      let finalUrl = freshUrl;
+      
+      if (!isPDF) {
+        // Use Google Docs Viewer for non-PDF documents
+        const encodedUrl = encodeURIComponent(freshUrl);
+        finalUrl = `https://docs.google.com/viewer?url=${encodedUrl}&embedded=true`;
+      }
+      
+      console.log('📄 [refreshExpiredUrl] ✅ Setting new URL:', finalUrl.substring(0, 100) + '...');
+      setViewerMediaUrl(finalUrl);
+      setViewerOriginalUrl(freshUrl);
+      setWebViewError(false);
+      console.log('📄 [refreshExpiredUrl] ✅ State updated, WebView should reload');
+    } else {
+      console.error('📄 [refreshExpiredUrl] ❌ Failed to refresh URL - no fresh URL returned');
+      setWebViewError(true);
+    }
+  }, [viewerMediaKey, viewerDocumentName, isRefreshingUrl, fetchFreshPresignedUrl]);
+  
+  // Open document in external browser as fallback
+  const handleOpenInBrowser = useCallback(async () => {
+    let urlToOpen = viewerOriginalUrl || viewerMediaUrl;
+    
+    // If we have a mediaKey and the URL might be expired, try to get a fresh one
+    if (viewerMediaKey && !isRefreshingUrl) {
+      console.log('📄 [handleOpenInBrowser] Checking if URL needs refresh...');
+      const freshUrl = await fetchFreshPresignedUrl(viewerMediaKey);
+      if (freshUrl) {
+        urlToOpen = freshUrl;
+        // Also update the stored URLs
+        setViewerOriginalUrl(freshUrl);
+        const isPDF = viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf');
+        if (!isPDF) {
+          const encodedUrl = encodeURIComponent(freshUrl);
+          setViewerMediaUrl(`https://docs.google.com/viewer?url=${encodedUrl}&embedded=true`);
+        } else {
+          setViewerMediaUrl(freshUrl);
+        }
+      }
+    }
+    
+    if (!urlToOpen) {
+      alert.error('Error', 'No URL available to open');
+      return;
+    }
+    
+    try {
+      const canOpen = await Linking.canOpenURL(urlToOpen);
+      if (canOpen) {
+        await Linking.openURL(urlToOpen);
+      } else {
+        alert.error('Error', 'Cannot open this URL in browser');
+      }
+    } catch (error) {
+      console.error('Failed to open URL in browser:', error);
+      alert.error('Error', 'Failed to open document in browser');
+    }
+  }, [viewerOriginalUrl, viewerMediaUrl, viewerMediaKey, viewerDocumentName, isRefreshingUrl, fetchFreshPresignedUrl, alert]);
 
 
   // Memoize renderMessage to prevent unnecessary re-renders
@@ -1119,10 +1721,16 @@ const ChatDetailScreen = ({ route, navigation }) => {
     
     const myMessage = isMyMessage(message);
     const previousMessage = index > 0 ? enrichedMessages[index - 1] : null;
-    // In group chats, always show sender name below message bubble
-    // This helps identify who sent each message when multiple admins/users are reading
-    const isGroupChat = true; // All chats are group chats (admin-client or admin-designer)
-    const showSenderName = isGroupChat;
+      // In group chats, show sender name below message bubble
+      // This helps identify who sent each message when multiple admins/users are reading
+      const isGroupChat = true; // All chats are group chats (admin-client or admin-designer)
+      
+      // Only show sender name if previous message is from a different sender (or if this is the first message)
+      const currentSenderId = message.SenderId || message.senderId || (myMessage ? user?.id : null);
+      const previousSenderId = previousMessage ? (previousMessage.SenderId || previousMessage.senderId || (isMyMessage(previousMessage) ? user?.id : null)) : null;
+      const isDifferentSender = !previousMessage || (currentSenderId && previousSenderId && String(currentSenderId).trim() !== String(previousSenderId).trim());
+      
+      const showSenderName = isGroupChat && isDifferentSender;
     
     const messageType = message.messageType || message.MessageType;
     const mediaKey = message.mediaKey || message.MediaKey;
@@ -1492,13 +2100,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-      <ImageBackground 
-        source={require('../../assets/images/doodle.png')} 
-        style={styles.container}
-        resizeMode="cover"
-      >
-        <View style={styles.backgroundOverlay}>
-          <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
+      <View style={styles.container}>
+        <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
           <ChatHeader
             title={title}
             clientName={clientName}
@@ -1543,7 +2146,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
               scrollEnabled={true}
               directionalLockEnabled={false} // Allow horizontal gestures within FlatList
               onScrollToIndexFailed={(info) => {
-                // Fallback if scrollToIndex fails
+                // Fallback if scrollToIndex fails - wait for items to be measured
                 if (__DEV__) {
                   console.log('⚠️ [FlatList] scrollToIndexFailed:', {
                     index: info.index,
@@ -1551,18 +2154,32 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     averageItemLength: info.averageItemLength,
                   });
                 }
+                
+                // Calculate how many items need to be measured
+                const itemsToMeasure = info.index - info.highestMeasuredFrameIndex;
+                // Wait longer if more items need to be measured
+                const delay = Math.min(500, Math.max(100, itemsToMeasure * 50));
+                
                 setTimeout(() => {
-                  if (scrollViewRef.current) {
-                    // Use averageItemLength if available, otherwise estimate
-                    const itemHeight = info.averageItemLength || 110;
-                    const offset = itemHeight * info.index;
-                    // Ensure offset is never too small (prevents scrolling to top)
-                    scrollViewRef.current.scrollToOffset({
-                      offset: Math.max(100, offset - 150),
-                      animated: true,
-                    });
+                  if (scrollViewRef.current && enrichedMessages.length > info.index) {
+                    // Try scrolling to index again if items are now measured
+                    try {
+                      scrollViewRef.current.scrollToIndex({
+                        index: info.index,
+                        animated: true,
+                        viewPosition: 0.5, // Center the item
+                      });
+                    } catch (retryError) {
+                      // If it still fails, use offset-based scrolling
+                      const itemHeight = info.averageItemLength || 110;
+                      const offset = itemHeight * info.index;
+                      scrollViewRef.current.scrollToOffset({
+                        offset: Math.max(100, offset - 150),
+                        animated: true,
+                      });
+                    }
                   }
-                }, 100);
+                }, delay);
               }}
               ListHeaderComponent={
                 // Show loading indicator at top when loading older messages
@@ -1652,13 +2269,45 @@ const ChatDetailScreen = ({ route, navigation }) => {
               
               <View style={styles.textInputContainer}>
                 <TextInput
-                  style={styles.textInput}
+                  ref={textInputRef}
+                  style={[styles.textInput, { 
+                    height: textInputHeight, // Dynamic height based on content
+                  }]}
                   placeholder={replyingTo ? "Type a reply..." : "Type a message..."}
                   placeholderTextColor={colors.textLight}
                   value={newMessage}
                   onChangeText={handleTyping}
                   multiline
                   maxLength={500}
+                  scrollEnabled={textInputHeight >= 120}
+                  blurOnSubmit={false}
+                  returnKeyType="default"
+                  onContentSizeChange={(event) => {
+                    // Dynamically adjust height based on content
+                    const { height } = event.nativeEvent.contentSize;
+                    
+                    // Calculate new height: content height + vertical padding (8px top + 8px bottom = 16px)
+                    const calculatedHeight = height + 16;
+                    
+                    // Clamp between min (36px for single line) and max (120px for ~6 lines) - like WhatsApp
+                    const newHeight = Math.max(36, Math.min(calculatedHeight, 120));
+                    
+                    // Update state if height changed (avoid unnecessary updates)
+                    if (Math.abs(newHeight - textInputHeight) > 1) {
+                      setTextInputHeight(newHeight);
+                      
+                      if (__DEV__) {
+                        console.log('[TextInput] Height changed:', {
+                          contentHeight: height,
+                          calculatedHeight: calculatedHeight,
+                          newHeight: newHeight,
+                          oldHeight: textInputHeight,
+                          messageLength: newMessage.length,
+                          willScroll: newHeight >= 120,
+                        });
+                      }
+                    }
+                  }}
                 />
               </View>
               
@@ -1674,7 +2323,6 @@ const ChatDetailScreen = ({ route, navigation }) => {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </View>
 
       {/* Custom Media Selection Modal */}
       <Modal
@@ -1741,6 +2389,19 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     </View>
                     <Text style={styles.modalOptionText}>Video</Text>
                     <Text style={styles.modalOptionSubtext}>Choose from gallery</Text>
+                  </TouchableOpacity>
+
+                  {/* Document/File Picker */}
+                  <TouchableOpacity
+                    style={styles.modalOption}
+                    onPress={handleDocumentPicker}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.modalOptionIcon, { backgroundColor: colors.accent + '15' }]}>
+                      <Icon name="attach-file" size={32} color={colors.accent} />
+                    </View>
+                    <Text style={styles.modalOptionText}>Document</Text>
+                    <Text style={styles.modalOptionSubtext}>Choose any file</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -2026,13 +2687,35 @@ const ChatDetailScreen = ({ route, navigation }) => {
         statusBarTranslucent={true}
       >
         <View style={styles.mediaViewerContainer}>
-          <TouchableOpacity
-            style={styles.mediaViewerCloseButton}
-            onPress={handleCloseMediaViewer}
-            activeOpacity={0.8}
-          >
-            <Icon name="close" size={28} color={colors.textWhite} />
-          </TouchableOpacity>
+          <View style={styles.mediaViewerHeader}>
+            <TouchableOpacity
+              style={styles.mediaViewerCloseButton}
+              onPress={handleCloseMediaViewer}
+              activeOpacity={0.8}
+            >
+              <Icon name="close" size={28} color={colors.textWhite} />
+            </TouchableOpacity>
+            
+            {/* Action buttons for documents */}
+            {viewerMediaType === 'document' && viewerDocumentName && (
+              <View style={styles.documentActionButtons}>
+                <TouchableOpacity
+                  style={styles.documentActionButton}
+                  onPress={handleOpenInBrowser}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="launch" size={24} color={colors.textWhite} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.documentActionButton}
+                  onPress={handleDownloadDocument}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="download" size={24} color={colors.textWhite} />
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
           
           {viewerMediaType === 'image' && viewerMediaUrl ? (
             <ImageZoom
@@ -2063,10 +2746,212 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 paused={false}
               />
             </View>
+          ) : viewerMediaType === 'document' && viewerMediaUrl ? (
+            <View style={styles.mediaViewerDocumentContainer}>
+              {/* Show helpful message for PDFs on Android - WebView can't display them */}
+              {viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf') && Platform.OS === 'android' && !webViewError && !isRefreshingUrl ? (
+                <View style={styles.documentAndroidMessage}>
+                  <Icon name="info-outline" size={48} color={colors.primary} />
+                  <Text style={styles.documentAndroidMessageTitle}>Opening PDF in Browser</Text>
+                  <Text style={styles.documentAndroidMessageText}>
+                    PDFs cannot be displayed in the app viewer on Android. The PDF will open in your browser automatically...
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.documentAndroidMessageButton}
+                    onPress={handleOpenInBrowser}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="launch" size={20} color={colors.textWhite} />
+                    <Text style={styles.documentAndroidMessageButtonText}>Open Now</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : webViewError && !isRefreshingUrl ? (
+                <View style={styles.documentErrorContainer}>
+                  <Icon name="error-outline" size={64} color={colors.textSecondary} />
+                  <Text style={styles.documentErrorText}>
+                    {viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf') && Platform.OS === 'android'
+                      ? 'PDF cannot be displayed in viewer'
+                      : 'Failed to load document'}
+                  </Text>
+                  <Text style={styles.documentErrorSubtext}>
+                    {viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf') && Platform.OS === 'android'
+                      ? 'PDFs cannot be displayed in the in-app viewer on Android. Please open in browser or download.'
+                      : viewerMediaKey 
+                        ? 'The document URL may have expired. Click below to refresh or open in browser.'
+                        : 'The document could not be displayed in the viewer.'}
+                  </Text>
+                  <View style={styles.documentErrorButtons}>
+                    {viewerMediaKey && (
+                      <TouchableOpacity
+                        style={[styles.documentErrorButton, styles.documentErrorButtonSecondary]}
+                        onPress={refreshExpiredUrl}
+                        activeOpacity={0.8}
+                        disabled={isRefreshingUrl}
+                      >
+                        <Icon name="refresh" size={20} color={colors.primary} />
+                        <Text style={[styles.documentErrorButtonText, styles.documentErrorButtonTextSecondary]}>
+                          {isRefreshingUrl ? 'Refreshing...' : 'Refresh URL'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={styles.documentErrorButton}
+                      onPress={handleOpenInBrowser}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="launch" size={20} color={colors.textWhite} />
+                      <Text style={styles.documentErrorButtonText}>Open in Browser</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : isRefreshingUrl ? (
+                <View style={styles.documentErrorContainer}>
+                  <Text style={styles.documentLoadingText}>Refreshing document URL...</Text>
+                </View>
+              ) : (
+                <WebView
+                  key={viewerMediaUrl} // Force re-render when URL changes
+                  source={{ uri: viewerMediaUrl }}
+                  style={styles.mediaViewerDocument}
+                  startInLoadingState={true}
+                  renderLoading={() => (
+                    <View style={styles.documentLoadingOverlay}>
+                      <Text style={styles.documentLoadingText}>Loading document...</Text>
+                    </View>
+                  )}
+                  scalesPageToFit={true}
+                  javaScriptEnabled={true}
+                  domStorageEnabled={true}
+                  allowsInlineMediaPlayback={true}
+                  mediaPlaybackRequiresUserAction={false}
+                  originWhitelist={['*']}
+                  mixedContentMode="always"
+                  // Additional props for better PDF support
+                  allowFileAccess={true}
+                  allowFileAccessFromFileURLs={Platform.OS === 'android'}
+                  allowUniversalAccessFromFileURLs={Platform.OS === 'android'}
+                  // Better rendering
+                  androidLayerType="hardware"
+                  // For Android PDF support
+                  androidHardwareAccelerationDisabled={false}
+                  // Better error handling
+                  onShouldStartLoadWithRequest={(request) => {
+                    console.log('📄 [WebView] Should start load:', request.url);
+                    // Allow all navigation
+                    return true;
+                  }}
+                  onLoadStart={() => {
+                    console.log('📄 [WebView] Load started:', viewerMediaUrl);
+                    setWebViewError(false);
+                  }}
+                  onLoadEnd={(syntheticEvent) => {
+                    const { nativeEvent } = syntheticEvent;
+                    console.log('📄 [WebView] Load ended:', {
+                      url: nativeEvent.url,
+                      loading: nativeEvent.loading,
+                      canGoBack: nativeEvent.canGoBack,
+                      canGoForward: nativeEvent.canGoForward,
+                    });
+                    
+                    // For PDFs, if WebView loads but shows blank, it might not be able to display
+                    // Set a timeout to check if content is actually visible
+                    if (viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf')) {
+                      setTimeout(() => {
+                        // If after 2 seconds the WebView still shows blank, offer to open in browser
+                        console.log('📄 [WebView] PDF loaded - checking if displayable...');
+                        // We'll rely on user feedback or error detection for now
+                      }, 2000);
+                    }
+                    
+                    // Check if the page loaded successfully
+                    // If URL changed to an error page or similar, mark as error
+                    if (nativeEvent.url && (
+                      nativeEvent.url.includes('error') || 
+                      nativeEvent.url.includes('blocked') ||
+                      nativeEvent.url.includes('denied')
+                    )) {
+                      setWebViewError(true);
+                    }
+                  }}
+                  onError={(syntheticEvent) => {
+                    const { nativeEvent } = syntheticEvent;
+                    console.error('📄 [WebView] Error:', {
+                      description: nativeEvent.description,
+                      domain: nativeEvent.domain,
+                      code: nativeEvent.code,
+                      url: nativeEvent.url,
+                    });
+                    
+                    // Check if error description mentions expiration or access denied
+                    const errorDesc = (nativeEvent.description || '').toLowerCase();
+                    if (errorDesc.includes('expired') || errorDesc.includes('access denied') || errorDesc.includes('forbidden')) {
+                      console.log('📄 [WebView] Expired/access error detected, attempting refresh...');
+                      // Use setTimeout to ensure state is ready
+                      setTimeout(() => {
+                        refreshExpiredUrl();
+                      }, 100);
+                    } else {
+                      // For PDFs, if direct loading fails, try Google Docs Viewer
+                      if (viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf') && 
+                          viewerOriginalUrl && !viewerMediaUrl.includes('docs.google.com')) {
+                        console.log('📄 [WebView] Direct PDF loading error, trying Google Docs Viewer...');
+                        const encodedUrl = encodeURIComponent(viewerOriginalUrl);
+                        const googleDocsUrl = `https://docs.google.com/viewer?url=${encodedUrl}&embedded=true`;
+                        setViewerMediaUrl(googleDocsUrl);
+                        setWebViewError(false);
+                      } else {
+                        setWebViewError(true);
+                      }
+                    }
+                  }}
+                  onHttpError={(syntheticEvent) => {
+                    const { nativeEvent } = syntheticEvent;
+                    console.error('📄 [WebView] HTTP error:', {
+                      statusCode: nativeEvent.statusCode,
+                      description: nativeEvent.description,
+                      url: nativeEvent.url,
+                    });
+                    
+                    // Check if it's a 403 Forbidden (likely expired URL)
+                    if (nativeEvent.statusCode === 403) {
+                      console.log('📄 [WebView] 403 Forbidden detected - URL may be expired, attempting refresh...');
+                      // Use setTimeout to ensure state is ready
+                      setTimeout(() => {
+                        refreshExpiredUrl();
+                      }, 100);
+                    } else if (nativeEvent.statusCode >= 400) {
+                      // For PDFs, if direct loading fails with 400+, try Google Docs Viewer
+                      if (viewerDocumentName && viewerDocumentName.toLowerCase().endsWith('.pdf') && 
+                          viewerOriginalUrl && !viewerMediaUrl.includes('docs.google.com')) {
+                        console.log('📄 [WebView] Direct PDF loading failed, trying Google Docs Viewer...');
+                        const encodedUrl = encodeURIComponent(viewerOriginalUrl);
+                        const googleDocsUrl = `https://docs.google.com/viewer?url=${encodedUrl}&embedded=true`;
+                        setViewerMediaUrl(googleDocsUrl);
+                        setWebViewError(false);
+                      } else {
+                        setWebViewError(true);
+                      }
+                    }
+                  }}
+                  onMessage={(event) => {
+                    console.log('📄 [WebView] Message from WebView:', event.nativeEvent.data);
+                    // Check for error messages from the page
+                    const message = event.nativeEvent.data;
+                    if (message && (
+                      message.toLowerCase().includes('error') ||
+                      message.toLowerCase().includes('failed') ||
+                      message.toLowerCase().includes('blocked')
+                    )) {
+                      setWebViewError(true);
+                    }
+                  }}
+                />
+              )}
+            </View>
           ) : null}
         </View>
       </Modal>
-    </ImageBackground>
+      </View>
     </SafeAreaView>
   );
 };
@@ -2079,10 +2964,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundSecondary,
-  },
-  backgroundOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)', // White overlay with 40% opacity
   },
   keyboardContainer: {
     flex: 1,
@@ -2247,7 +3128,7 @@ const styles = StyleSheet.create({
   },
   inputWrapper: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end', // Changed from 'center' to 'flex-end' to align buttons with bottom of expanding input
     backgroundColor: colors.backgroundSecondary,
     borderRadius: 24,
     paddingHorizontal: 16,
@@ -2255,14 +3136,15 @@ const styles = StyleSheet.create({
     minHeight: 50,
   },
   textInput: {
-    flex: 1,
+    // Remove flex: 1 to allow height to work properly
+    width: '100%', // Use width instead of flex
     fontSize: fonts.base,
     color: colors.textPrimary,
-    maxHeight: 100,
     paddingVertical: 8,
     paddingHorizontal: 0,
-    textAlignVertical: 'center',
+    textAlignVertical: 'top', // Shows text from top for multiline
     includeFontPadding: false,
+    // Height will be set dynamically via inline style
   },
   sendButton: {
     width: 36,
@@ -2365,7 +3247,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 4,
     minHeight: 48,
-    justifyContent: 'center',
+    // Remove maxHeight constraint - let it expand dynamically based on textInputHeight
+    justifyContent: 'flex-start', // Top alignment for multiline
+    overflow: 'hidden', // Ensure content doesn't overflow container
   },
   micButton: {
     width: 40,
@@ -2511,13 +3395,15 @@ const styles = StyleSheet.create({
   },
   modalOptions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-around',
     paddingHorizontal: 20,
     paddingVertical: 24,
   },
   modalOption: {
     alignItems: 'center',
-    flex: 1,
+    width: '45%',
+    marginBottom: 20,
     paddingHorizontal: 8,
   },
   modalOptionIcon: {
@@ -2854,6 +3740,149 @@ const styles = StyleSheet.create({
   mediaViewerVideo: {
     width: Dimensions.get('window').width,
     height: Dimensions.get('window').height,
+  },
+  mediaViewerHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  documentDownloadButton: {
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  documentActionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  documentActionButton: {
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  documentErrorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    backgroundColor: colors.background,
+  },
+  documentErrorText: {
+    fontSize: fonts.xl,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  documentErrorSubtext: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  documentErrorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  documentErrorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    gap: 8,
+  },
+  documentErrorButtonSecondary: {
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  documentErrorButtonText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+  },
+  documentErrorButtonTextSecondary: {
+    color: colors.primary,
+  },
+  documentAndroidMessage: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    backgroundColor: colors.background,
+  },
+  documentAndroidMessageTitle: {
+    fontSize: fonts.xl,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  documentAndroidMessageText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 16,
+    lineHeight: 22,
+  },
+  documentAndroidMessageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    gap: 8,
+  },
+  documentAndroidMessageButtonText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+  },
+  mediaViewerDocumentContainer: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  mediaViewerDocument: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+    backgroundColor: '#fff',
+  },
+  documentLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    zIndex: 1,
+  },
+  documentLoadingText: {
+    fontSize: 16,
+    color: colors.textPrimary,
+    fontFamily: fonts.medium,
+    marginTop: 12,
   },
   videoPlayOverlay: {
     position: 'absolute',

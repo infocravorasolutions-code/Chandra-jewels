@@ -20,6 +20,7 @@ import {
   useMarkNotificationReadMutation,
   useMarkAllNotificationsReadMutation,
 } from '../../store/api';
+import { navigateFromNotification } from '../../utils/notificationNavigation';
 
 // Helper function to format relative time
 const formatRelativeTime = (inputDate) => {
@@ -97,7 +98,7 @@ const NotificationsScreen = ({ navigation }) => {
         isRead: Boolean(notification.isRead),
         link: notification.link || null,
         timestamp,
-        raw: notification.raw || notification,
+        raw: notification, // Store full notification object for navigation
       };
     });
   }, [notifications]);
@@ -116,15 +117,52 @@ const NotificationsScreen = ({ navigation }) => {
     }
   }, [refetch, refetchUnreadCount]);
 
-  const markAsRead = useCallback(async (notification) => {
-    if (!notification?.id || notification.isRead) {
-      return;
-    }
+  // Handle navigation for all notifications
+  const handleNotificationNavigation = useCallback((notification) => {
     try {
-      await markNotificationRead(notification.id).unwrap();
+      console.log('📱 [NotificationsScreen] handleNotificationNavigation called with:', {
+        notificationId: notification?.id,
+        notificationType: notification?.type,
+        rawNotification: notification?.raw,
+      });
+
+      const rawNotification = notification.raw || notification;
+      
+      // Use the existing navigateFromNotification utility which handles all notification types
+      // It supports: chat, enquiry, design, pricing, client, metal_price, etc.
+      console.log('📱 [NotificationsScreen] Calling navigateFromNotification for all notification types');
+      navigateFromNotification(rawNotification);
+      console.log('📱 [NotificationsScreen] ✅ navigateFromNotification called');
     } catch (error) {
+      console.error('📱 [NotificationsScreen] ❌ Error handling notification navigation:', error);
+      console.error('📱 [NotificationsScreen] Error stack:', error.stack);
     }
-  }, [markNotificationRead]);
+  }, []);
+
+  const markAsRead = useCallback(async (notification) => {
+    console.log('📱 [NotificationsScreen] markAsRead called with:', {
+      notificationId: notification?.id,
+      isRead: notification?.isRead,
+      type: notification?.type,
+    });
+
+    // Always navigate first (for better UX - user sees navigation immediately)
+    // Then mark as read in the background
+    handleNotificationNavigation(notification);
+
+    // Mark as read (only if not already read)
+    if (notification?.id && !notification.isRead) {
+      try {
+        await markNotificationRead(notification.id).unwrap();
+        console.log('📱 [NotificationsScreen] ✅ Notification marked as read');
+      } catch (error) {
+        console.error('📱 [NotificationsScreen] ❌ Error marking as read:', error);
+        // Navigation already happened, so we continue
+      }
+    } else {
+      console.log('📱 [NotificationsScreen] Notification already read or no ID, skipping mark as read');
+    }
+  }, [markNotificationRead, handleNotificationNavigation]);
 
   const markAllAsRead = useCallback(async () => {
     if (derivedUnreadCount === 0) {

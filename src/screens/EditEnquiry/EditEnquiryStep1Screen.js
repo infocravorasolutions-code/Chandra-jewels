@@ -84,7 +84,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         assignedTo: '',
         priority: 'Normal',
         category: 'Ring',
-        metalColor: 'Gold',
+        metalColor: '',
         metalQuality: '10K',
         stoneType: 'NaturalRegular',
         quantity: '1',
@@ -330,9 +330,9 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       assignedTo: enquiryAssignedTo,
       priority: mappedPriority,
       category: enquiry.category || enquiry.Category || originalData?.Category || 'Ring',
-      metalColor: originalData?.Metal?.Color || enquiry.Metal?.Color || originalData?.metal?.color || 'Gold',
+      metalColor: originalData?.Metal?.Color || enquiry.Metal?.Color || originalData?.metal?.color || '',
       metalQuality: originalData?.Metal?.Quality || enquiry.Metal?.Quality || originalData?.metal?.quality || '10K',
-      stoneType: enquiry.stoneType || enquiry.StoneType || originalData?.StoneType || originalData?.stoneType || 'NaturalRegular',
+      stoneType: enquiry.stoneType || enquiry.StoneType || originalData?.StoneType || originalData?.stoneType || '',
       quantity: safeToString(originalData?.Quantity || enquiry.Quantity || enquiry.quantity || '1'),
       stamping: safeToString(originalData?.Stamping || enquiry.stamping || enquiry.Stamping || ''),
       gatiOrderNumber: safeToString(originalData?.GatiOrderNumber || enquiry.GatiOrderNumber || enquiry.gatiOrderNumber || ''),
@@ -359,7 +359,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     category: 'Ring',
     metalColor: 'Gold',
     metalQuality: '10K',
-    stoneType: 'NaturalRegular',
+    stoneType: '', // Optional field - no default
     quantity: '1',
     stamping: '',
     gatiOrderNumber: '',
@@ -663,12 +663,12 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         Priority: priorityForAPI,
         Quantity: formData.quantity && formData.quantity.trim() ? parseInt(formData.quantity) : null,
         Metal: {
-          Color: formData.metalColor || 'Gold',
+          Color: formData.metalColor || null,
           Quality: formData.metalQuality || '10K',
         },
         StyleNumber: formData.styleNumber && formData.styleNumber.trim() ? formData.styleNumber : null,
         GatiOrderNumber: formData.gatiOrderNumber && formData.gatiOrderNumber.trim() ? formData.gatiOrderNumber : null,
-        StoneType: formData.stoneType || 'NaturalRegular',
+        StoneType: formData.stoneType && formData.stoneType.trim() ? formData.stoneType.trim() : null,
         MetalWeight: {
           From: formData.metalWeightFrom && formData.metalWeightFrom.trim() ? formData.metalWeightFrom.toString() : null,
           To: formData.metalWeightTo && formData.metalWeightTo.trim() ? formData.metalWeightTo.toString() : null,
@@ -806,7 +806,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   ];
 
   const metalColorOptions = [
-    { label: 'Gold', value: 'Gold' },
     { label: 'White Gold', value: 'White Gold' },
     { label: 'Rose Gold', value: 'Rose Gold' },
     { label: 'Yellow Gold', value: 'Yellow Gold' },
@@ -824,8 +823,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Platinum', value: 'Platinum' },
   ];
 
-  // Stone type options from API
-  const stoneTypeOptions = stoneTypesData || [];
+  // Stone type options from API - add "None" option at the beginning for optional field
+  const stoneTypeOptions = [{ label: 'None', value: '' }, ...(stoneTypesData || [])];
 
   if (fetchingEnquiry) {
     return (
@@ -968,7 +967,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         <View style={styles.formRow}>
           <View style={[styles.formField, styles.fullWidthField]}>
             {renderDropdown(
-              'Stone Type*',
+              'Stone Type',
               formData.stoneType,
               stoneTypeOptions,
               (value) => handleInputChange('stoneType', value),

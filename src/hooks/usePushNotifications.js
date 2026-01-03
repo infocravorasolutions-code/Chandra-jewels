@@ -15,6 +15,7 @@ import {
 import { navigationRef } from '../navigation/navigationRef';
 import { isFirstLaunch, markFirstLaunchComplete } from '../utils/firstLaunch';
 import { navigateFromNotification as navigateFromNotificationUtil } from '../utils/notificationNavigation';
+import { displayGroupedChatNotification } from '../utils/chatNotificationGrouping';
 
 const invalidateNotificationTags = (dispatch) => {
   dispatch(
@@ -173,6 +174,19 @@ export const usePushNotifications = () => {
         await createNotificationChannel();
       }
 
+      // Check if this is a chat notification
+      const notificationType = data.type || data.Type || data.notificationType || data.NotificationType;
+      const isChatNotification = notificationType?.toLowerCase() === 'chat' || 
+                                  notificationType?.toLowerCase() === 'message' ||
+                                  notificationType?.toLowerCase() === 'chat_message' ||
+                                  data.chatId || data.ChatId || data.chat_id;
+
+      // Use grouped notification for chat messages
+      if (isChatNotification) {
+        return await displayGroupedChatNotification(title, body, data);
+      }
+
+      // Regular notification for non-chat messages
       await notifee.displayNotification({
         title: title || 'New Notification',
         body: body || '',
@@ -345,9 +359,41 @@ export const usePushNotifications = () => {
         navigateFromNotification(remoteMessage);
       });
 
+      // Check for initial notification (app opened from killed state)
+      // This is CRITICAL for handling notifications when app is killed
+      console.log('[PushNotification] 🔍 Checking for initial notification (killed state)...');
       const initialNotification = await messaging().getInitialNotification();
       if (initialNotification) {
+        console.log('[PushNotification] ========================================');
+        console.log('[PushNotification] 🚨 INITIAL NOTIFICATION FOUND (app opened from killed state)');
+        console.log('[PushNotification] Full notification data:', JSON.stringify(initialNotification, null, 2));
+        console.log('[PushNotification] Notification data object:', JSON.stringify(initialNotification?.data, null, 2));
+        console.log('[PushNotification] Navigation ready:', navigationRef?.isReady?.() || false);
+        console.log('[PushNotification] ========================================');
+        // Store and process notification - it will be handled when navigation is ready
+        // The navigation container's onReady callback will process it
         navigateFromNotification(initialNotification);
+      } else {
+        console.log('[PushNotification] ✅ No initial notification found (app not opened from notification)');
+      }
+      
+      // Also check Notifee for initial notification (Android might use Notifee)
+      try {
+        const notifeeInitialNotification = await notifee.getInitialNotification();
+        if (notifeeInitialNotification) {
+          console.log('[PushNotification] ========================================');
+          console.log('[PushNotification] 🚨 NOTIFEE INITIAL NOTIFICATION FOUND');
+          console.log('[PushNotification] Notifee notification:', JSON.stringify(notifeeInitialNotification, null, 2));
+          console.log('[PushNotification] ========================================');
+          // Convert notifee format to remoteMessage format
+          const remoteMessage = {
+            data: notifeeInitialNotification.notification?.data || {},
+          };
+          navigateFromNotification(remoteMessage);
+        }
+      } catch (notifeeError) {
+        // Notifee might not be available or might throw error if no notification
+        console.log('[PushNotification] Notifee initial notification check:', notifeeError?.message || 'No notification');
       }
 
       unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {

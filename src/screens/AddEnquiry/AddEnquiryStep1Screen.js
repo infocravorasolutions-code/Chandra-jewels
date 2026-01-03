@@ -45,7 +45,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       category: 'Ring',
       metalColor: '', // Empty by default - optional field
       metalQuality: '10K',
-      stoneType: 'NaturalRegular',
+      stoneType: '', // Optional field - no default
       quantity: '1',
       stamping: '',
       status: 'Enquiry Created',
@@ -63,7 +63,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     category: 'Ring',
     metalColor: '', // Empty by default - optional field
     metalQuality: '10K',
-    stoneType: 'NaturalRegular',
+    stoneType: '', // Optional field - no default
     quantity: '1',
     stamping: '',
     status: 'Enquiry Created',
@@ -374,7 +374,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         },
         StyleNumber: null,
         GatiOrderNumber: null,
-        StoneType: formData.stoneType || 'NaturalRegular',
+        StoneType: formData.stoneType && formData.stoneType.trim() ? formData.stoneType.trim() : null,
         MetalWeight: {
           From: null,
           To: null,
@@ -482,8 +482,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Platinum', value: 'Platinum' },
   ];
 
-  // Stone type options from API
-  const stoneTypeOptions = stoneTypesData || [];
+  // Stone type options from API - add "None" option at the beginning for optional field
+  const stoneTypeOptions = [{ label: 'None', value: '' }, ...(stoneTypesData || [])];
 
   return (
     <ScrollView style={styles.container}>

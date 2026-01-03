@@ -24,6 +24,7 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatCurrency, getRoleDisplayName, spacing, responsivePadding, imageSizes } from '../../utils';
 import { FILE_BASE_URL } from '../../config/apiConfig';
+import { navigateFromNotification } from '../../utils/notificationNavigation';
 
 // Client Card Component with Image Support
 const ClientCardWithImage = ({ client, imageUrl, onPress }) => {
@@ -949,20 +950,10 @@ const DashboardScreen = ({ navigation }) => {
                 key={notification.id || notification._id}
                 style={styles.activityItem}
                 onPress={() => {
-                  // Navigate to notification link if available
-                  if (notification.link) {
-                    // Handle navigation based on link type
-                    if (notification.link.includes('enquiry')) {
-                      const enquiryId = notification.link.split('/').pop();
-                      navigation.navigate('SingleEnquiry', { enquiryId });
-                    } else if (notification.link.includes('chat')) {
-                      navigation.navigate('Chats');
-                    } else {
-                      navigation.navigate('Notifications');
-                    }
-                  } else {
-                    navigation.navigate('Notifications');
-                  }
+                  // Use the same navigation utility as NotificationsScreen
+                  // This handles all notification types: enquiry, chat, design, pricing, etc.
+                  const rawNotification = notification.raw || notification;
+                  navigateFromNotification(rawNotification);
                 }}
                 activeOpacity={0.7}
               >

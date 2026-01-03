@@ -633,37 +633,80 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const originalData = enquiry?._originalData || enquiry;
   
   // Extract AssignedTo ID using useMemo to reactively update when enquiry data changes
-  // IMPORTANT: Check _originalData first (raw API response) before normalized enquiry
+  // IMPORTANT: Check StatusHistory first (most accurate), then _originalData, then normalized enquiry
   const assignedToId = useMemo(() => {
-    // Priority 1: Check _originalData (raw API response) first - this is most reliable
-    const fromOriginalData = enquiry?._originalData?.AssignedTo || 
-                            originalData?.AssignedTo ||
-                            originalData?.assignedTo;
+    let id = null;
     
-    // Priority 2: Check normalized enquiry fields
-    const fromEnquiry = enquiry?.AssignedTo || 
-                       enquiry?.assignedTo;
+    // Priority 1: Check StatusHistory (most accurate source - latest assignment)
+    const statusHistory = enquiry?._originalData?.StatusHistory || 
+                         originalData?.StatusHistory || 
+                         enquiry?.StatusHistory || 
+                         [];
     
-    // Priority 3: Use stored fallback if current data doesn't have it
-    const fromFallback = initialAssignedToRef.current;
+    if (Array.isArray(statusHistory) && statusHistory.length > 0) {
+      // Sort by timestamp (latest first)
+      const sortedHistory = [...statusHistory].sort((a, b) => {
+        const dateA = new Date(a.Timestamp || a.timestamp || 0);
+        const dateB = new Date(b.Timestamp || b.timestamp || 0);
+        return dateB - dateA; // Descending order (latest first)
+      });
+      
+      // Find the latest entry that has AssignedTo
+      for (const entry of sortedHistory) {
+        if (entry.AssignedTo || entry.assignedTo) {
+          id = entry.AssignedTo || entry.assignedTo;
+          console.log('[SingleEnquiry] ✅ Found AssignedTo in StatusHistory:', id);
+          break;
+        }
+      }
+    }
     
-    const id = fromOriginalData || fromEnquiry || fromFallback || null;
+    // Priority 2: Check _originalData (raw API response) - this is most reliable if StatusHistory doesn't have it
+    if (!id) {
+      id = enquiry?._originalData?.AssignedTo || 
+           originalData?.AssignedTo ||
+           originalData?.assignedTo;
+      if (id) {
+        console.log('[SingleEnquiry] ✅ Found AssignedTo in _originalData:', id);
+      }
+    }
+    
+    // Priority 3: Check normalized enquiry fields
+    if (!id) {
+      id = enquiry?.AssignedTo || 
+           enquiry?.assignedTo;
+      if (id) {
+        console.log('[SingleEnquiry] ✅ Found AssignedTo in enquiry:', id);
+      }
+    }
+    
+    // Priority 4: Use stored fallback if current data doesn't have it
+    if (!id) {
+      id = initialAssignedToRef.current;
+      if (id) {
+        console.log('[SingleEnquiry] ⚠️ Using fallback AssignedTo:', id);
+      }
+    }
     
     // Update fallback if we found a new value
     if (id && id !== initialAssignedToRef.current) {
       initialAssignedToRef.current = id;
     }
     
+    // Handle case where id might be an object (shouldn't happen, but just in case)
+    if (id && typeof id === 'object') {
+      console.warn('[SingleEnquiry] ⚠️ AssignedTo is an object, extracting ID:', id);
+      id = id.id || id._id || id.toString();
+    }
+    
     // Debug: Log assignedToId extraction with detailed info
     console.log('[SingleEnquiry] 🔍 AssignedTo ID extracted (useMemo):', {
+      'StatusHistory length': statusHistory?.length || 0,
       'enquiry?._originalData?.AssignedTo': enquiry?._originalData?.AssignedTo,
       'originalData?.AssignedTo': originalData?.AssignedTo,
       'originalData?.assignedTo': originalData?.assignedTo,
       'enquiry?.AssignedTo': enquiry?.AssignedTo,
       'enquiry?.assignedTo': enquiry?.assignedTo,
-      'fromOriginalData': fromOriginalData,
-      'fromEnquiry': fromEnquiry,
-      'fromFallback': fromFallback,
       'Final assignedToId': id,
       'assignedToId type': typeof id,
       'originalData exists': !!originalData,
@@ -671,8 +714,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       'enquiry._originalData exists': !!enquiry?._originalData,
     });
     
-    return id;
+    return id || null;
   }, [
+    enquiry?._originalData?.StatusHistory, // Check StatusHistory
+    originalData?.StatusHistory,
+    enquiry?.StatusHistory,
     enquiry?._originalData?.AssignedTo, // Check _originalData.AssignedTo specifically
     originalData?.AssignedTo,
     originalData?.assignedTo,
@@ -1556,13 +1602,58 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                          originalData?.deadline ||
                          null;
     // Use assignedToName from hook (extracted at component level with useMemo)
-    const assignedTo = assignedToName || '-';
+    // If useUserName returns '-' or the userId (fallback), try to get name from usersList directly
+    let assignedTo = assignedToName;
+    
+    // Check if we need to look up the user manually
+    const needsLookup = !assignedTo || 
+                       assignedTo === '-' || 
+                       assignedTo === assignedToId ||
+                       (assignedTo && assignedTo.startsWith('User ') && assignedToId);
+    
+    // If user not found in map, try to find in usersList directly
+    if (needsLookup && assignedToId && usersList && usersList.length > 0) {
+      const assignedToIdStr = String(assignedToId || '').trim();
+      const foundUser = usersList.find(u => {
+        const userId = String(u.id || u._id || '').trim();
+        const userIdNoSpaces = userId.replace(/\s/g, '');
+        const assignedToIdNoSpaces = assignedToIdStr.replace(/\s/g, '');
+        return userId === assignedToIdStr || 
+               userIdNoSpaces === assignedToIdNoSpaces ||
+               String(userId).toLowerCase() === assignedToIdStr.toLowerCase();
+      });
+      
+      if (foundUser) {
+        assignedTo = foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || assignedTo;
+        console.log('[SingleEnquiry] ✅ Found user in usersList:', {
+          'userId': foundUser.id || foundUser._id,
+          'name': assignedTo
+        });
+      }
+    }
+    
+    // Final fallback - if still no name found but we have an ID
+    if ((!assignedTo || assignedTo === '-' || assignedTo === assignedToId) && assignedToId) {
+      // If we have an assignedToId but no name, show a truncated ID instead of just '-'
+      const idStr = String(assignedToId).trim();
+      if (idStr.length > 8) {
+        assignedTo = `User ${idStr.substring(0, 8)}...`;
+        console.log('[SingleEnquiry] ⚠️ Using truncated ID as fallback:', assignedTo);
+      } else {
+        assignedTo = `User ${idStr}`;
+        console.log('[SingleEnquiry] ⚠️ Using ID as fallback:', assignedTo);
+      }
+    } else if (!assignedTo || assignedTo === '-') {
+      assignedTo = '-';
+    }
     
     // Debug: Log final assignedTo value being used for display
     console.log('[SingleEnquiry] 📋 Final AssignedTo for display:', {
       'assignedToId': assignedToId,
+      'assignedToName (from hook)': assignedToName,
       'assignedTo (final)': assignedTo,
       'will display': assignedTo !== '-',
+      'usersList length': usersList?.length || 0,
       'renderEnquiryDetails called': true,
     });
     
@@ -2057,43 +2148,91 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const [imageDataUri, setImageDataUri] = useState(initialDataUri || null);
     const [imageLoading, setImageLoading] = useState(false);
     const [imageError, setImageError] = useState(false);
+    
+    // Log state changes
+    useEffect(() => {
+      console.log(`🖼️ [ImageWithFallback #${index}] 📊 State changed:`, {
+        imageDataUri: imageDataUri ? `exists (${imageDataUri.length} chars)` : 'null',
+        imageLoading,
+        imageError,
+      });
+    }, [imageDataUri, imageLoading, imageError, index]);
     const lastImageKeyRef = useRef(null);
     const isFetchingRef = useRef(false);
     const mountedRef = useRef(true);
     
+    // Log component mount/update
+    useEffect(() => {
+      console.log(`🖼️ [ImageWithFallback #${index}] Component mounted/updated:`, {
+        imageKey: imageKey || 'none',
+        imageId: imageId || 'none',
+        imageUri: imageUri ? (imageUri.substring(0, 50) + '...') : 'none',
+        initialDataUri: initialDataUri ? 'provided' : 'none',
+        currentImageDataUri: imageDataUri ? 'exists' : 'none',
+        imageLoading,
+        imageError,
+      });
+    }, [index, imageKey, imageId, imageUri, initialDataUri]);
+    
     // Reset mounted flag on mount
     useEffect(() => {
       mountedRef.current = true;
+      console.log(`🖼️ [ImageWithFallback #${index}] Component mounted`);
       return () => {
         mountedRef.current = false;
+        console.log(`🖼️ [ImageWithFallback #${index}] Component unmounted`);
       };
     }, []);
     
     useEffect(() => {
       if (initialDataUri && initialDataUri !== imageDataUri) {
+        console.log(`🖼️ [ImageWithFallback #${index}] Setting initialDataUri:`, {
+          hasInitialDataUri: !!initialDataUri,
+          initialDataUriLength: initialDataUri?.length || 0,
+        });
         setImageDataUri(initialDataUri);
+        setImageLoading(false);
+        setImageError(false);
       }
-    }, [initialDataUri, imageDataUri]);
+    }, [initialDataUri, imageDataUri, index]);
     
     // Fetch image with authentication and caching
     const fetchImageWithAuth = useCallback(async (imageUrl, cacheKey) => {
+      console.log(`🖼️ [ImageWithFallback #${index}] fetchImageWithAuth called:`, {
+        imageUrl: imageUrl ? (imageUrl.substring(0, 80) + '...') : 'none',
+        cacheKey: cacheKey || 'none',
+        hasImageDataUri: !!imageDataUri,
+        isFetching: isFetchingRef.current,
+      });
+      
       if (!imageUrl) {
+        console.log(`🖼️ [ImageWithFallback #${index}] ❌ No imageUrl provided`);
         return;
       }
       
-      // Don't fetch if we already have the data URI or if already fetching
-      if (imageDataUri || isFetchingRef.current) {
+      // Don't fetch if we already have the data URI
+      if (imageDataUri) {
+        console.log(`🖼️ [ImageWithFallback #${index}] ⏭️ Skipping fetch - already have imageDataUri`);
+        return;
+      }
+      
+      // Don't fetch if already fetching (prevent duplicate requests)
+      if (isFetchingRef.current) {
+        console.log(`🖼️ [ImageWithFallback #${index}] ⏭️ Skipping fetch - already fetching`);
         return;
       }
       
       isFetchingRef.current = true;
+      console.log(`🖼️ [ImageWithFallback #${index}] 🚀 Starting image fetch`);
       
       try {
         setImageLoading(true);
         setImageError(false);
+        console.log(`🖼️ [ImageWithFallback #${index}] 📥 Fetching image from:`, imageUrl.substring(0, 100));
         
         const token = await AsyncStorage.getItem('token');
         if (!token) {
+          console.log(`🖼️ [ImageWithFallback #${index}] ❌ No token found`);
           setImageError(true);
           setImageLoading(false);
           return;
@@ -2107,11 +2246,15 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           },
         });
 
+        console.log(`🖼️ [ImageWithFallback #${index}] 📡 Response status:`, response.status, response.statusText);
+        
         if (response.ok) {
           const contentType = response.headers.get('content-type') || '';
+          console.log(`🖼️ [ImageWithFallback #${index}] 📦 Content-Type:`, contentType);
           
           // Check if response is JSON (API returns a URL object)
           if (contentType.includes('application/json')) {
+            console.log(`🖼️ [ImageWithFallback #${index}] 📄 Response is JSON, extracting image URL`);
             const jsonData = await response.json();
             
             // Extract the actual image URL from JSON
@@ -2163,6 +2306,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             
             const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
+            console.log(`🖼️ [ImageWithFallback #${index}] ✅ Image loaded (JSON path):`, {
+              contentType: imageContentType,
+              dataUriLength: dataUri.length,
+              base64Length: base64.length,
+            });
             
             // Save to cache (fire-and-forget, don't block on storage errors)
             if (cacheKey) {
@@ -2179,11 +2327,14 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               });
             }
             
+            console.log(`🖼️ [ImageWithFallback #${index}] 🎯 Setting imageDataUri (JSON path)`);
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
+            console.log(`🖼️ [ImageWithFallback #${index}] ✅ State updated - imageDataUri set, loading=false`);
           } else {
             // Direct image response
+            console.log(`🖼️ [ImageWithFallback #${index}] 📷 Response is direct image`);
             
             const arrayBuffer = await response.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
@@ -2208,6 +2359,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             
             const imageContentType = contentType || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
+            console.log(`🖼️ [ImageWithFallback #${index}] ✅ Image loaded (direct):`, {
+              contentType: imageContentType,
+              dataUriLength: dataUri.length,
+              base64Length: base64.length,
+            });
             
             // Save to cache (fire-and-forget, don't block on storage errors)
             if (cacheKey) {
@@ -2216,28 +2372,40 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               });
             }
             
+            console.log(`🖼️ [ImageWithFallback #${index}] 🎯 Setting imageDataUri (direct)`);
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
+            console.log(`🖼️ [ImageWithFallback #${index}] ✅ State updated - imageDataUri set, loading=false`);
           }
         } else {
+          console.log(`🖼️ [ImageWithFallback #${index}] ❌ Response not OK:`, response.status, response.statusText);
           setImageError(true);
           setImageLoading(false);
         }
       } catch (error) {
+        console.log(`🖼️ [ImageWithFallback #${index}] ❌ Fetch error:`, error.message);
         setImageError(true);
         setImageLoading(false);
       } finally {
         isFetchingRef.current = false;
+        console.log(`🖼️ [ImageWithFallback #${index}] 🔄 Fetch completed, isFetchingRef reset`);
       }
     }, [imageDataUri, getCachedImage, saveImageToCache]);
     
     useEffect(() => {
       // Generate unique key for this image
       const currentImageKey = imageKey || imageId || imageUri || `image_${index}`;
+      console.log(`🖼️ [ImageWithFallback #${index}] 🔄 useEffect triggered:`, {
+        currentImageKey,
+        lastImageKey: lastImageKeyRef.current,
+        hasImageDataUri: !!imageDataUri,
+        hasInitialDataUri: !!initialDataUri,
+      });
       
       // If a preloaded URI is provided, use it immediately and skip further work
       if (initialDataUri) {
+        console.log(`🖼️ [ImageWithFallback #${index}] ⚡ Using initialDataUri`);
         lastImageKeyRef.current = currentImageKey;
         setImageDataUri(initialDataUri);
         setImageLoading(false);
@@ -2258,14 +2426,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         imageUrl = `${API_BASE_URL}/api/enquiries/files/${imageId}`;
       }
       
+      console.log(`🖼️ [ImageWithFallback #${index}] 🔗 Generated URL:`, {
+        imageUrl: imageUrl ? (imageUrl.substring(0, 80) + '...') : 'none',
+        cacheKey: cacheKey || 'none',
+      });
+      
       if (!imageUrl) {
+        console.log(`🖼️ [ImageWithFallback #${index}] ❌ No imageUrl generated`);
         setImageError(true);
         return;
       }
       
       // Check if this is the same image we already loaded
       if (lastImageKeyRef.current === currentImageKey && imageDataUri) {
-        // Same image already loaded, don't reload
+        console.log(`🖼️ [ImageWithFallback #${index}] ⏭️ Same image already loaded, skipping`);
         return;
       }
       
@@ -2275,14 +2449,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         const cacheAge = Date.now() - (cached.timestamp || 0);
         const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
         if (cacheAge < maxAge) {
+          console.log(`🖼️ [ImageWithFallback #${index}] 💾 Memory cache HIT`);
           lastImageKeyRef.current = currentImageKey;
           setImageDataUri(cached.dataUri);
           setImageLoading(false);
           setImageError(false);
           return; // Exit early - found in memory cache
       } else {
+          console.log(`🖼️ [ImageWithFallback #${index}] 💾 Memory cache expired, deleting`);
           memoryCacheRef.current.delete(cacheKey);
         }
+      } else {
+        console.log(`🖼️ [ImageWithFallback #${index}] 💾 Memory cache MISS`);
       }
       
       // Check cache (AsyncStorage) and fetch if needed
@@ -2294,21 +2472,29 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           try {
             const cached = await getCachedImage(cacheKey);
             if (cached && mountedRef.current) {
+              console.log(`🖼️ [ImageWithFallback #${index}] 💾 AsyncStorage cache HIT`);
               // Cache hit - set directly without loading state
               lastImageKeyRef.current = currentImageKey;
               setImageDataUri(cached);
               setImageLoading(false);
               setImageError(false);
               return;
+            } else {
+              console.log(`🖼️ [ImageWithFallback #${index}] 💾 AsyncStorage cache MISS`);
             }
           } catch (error) {
+            console.log(`🖼️ [ImageWithFallback #${index}] 💾 AsyncStorage cache read error:`, error.message);
             // Cache read failed, continue with fetch
           }
         }
         
         // Cache miss - reset state and fetch
-        if (!mountedRef.current) return;
+        if (!mountedRef.current) {
+          console.log(`🖼️ [ImageWithFallback #${index}] ⏭️ Component unmounted, skipping fetch`);
+          return;
+        }
         
+        console.log(`🖼️ [ImageWithFallback #${index}] 🚀 Starting image load (cache miss)`);
         lastImageKeyRef.current = currentImageKey;
         setImageDataUri(null);
         setImageError(false);
@@ -2335,7 +2521,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       );
     }
     
-    if (imageLoading || !imageDataUri) {
+    // Show loading state only if we don't have imageDataUri yet
+    if (!imageDataUri) {
+      console.log(`🖼️ [ImageWithFallback #${index}] 🎨 Rendering LOADING state:`, {
+        imageLoading,
+        imageError,
+        hasImageDataUri: false,
+      });
       return (
         <View style={containerStyle}>
           <View style={placeholderStyle}>
@@ -2357,6 +2549,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     
     // If onPress is null, render without TouchableOpacity (for modal - zoom handled by parent ScrollView)
     if (onPress === null) {
+      console.log(`🖼️ [ImageWithFallback #${index}] 🎨 Rendering MODAL image:`, {
+        hasImageDataUri: !!imageDataUri,
+        imageDataUriLength: imageDataUri?.length || 0,
+      });
       return (
         <View style={styles.modalImageWrapper}>
           <OptimizedImage
@@ -2366,12 +2562,22 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             showLoader={false}
             cacheEnabled={false}
             onError={() => {
+              console.log(`🖼️ [ImageWithFallback #${index}] ❌ OptimizedImage onError (modal)`);
               setImageError(true);
+            }}
+            onLoad={() => {
+              console.log(`🖼️ [ImageWithFallback #${index}] ✅ OptimizedImage onLoad (modal)`);
             }}
           />
         </View>
       );
     }
+    
+    console.log(`🖼️ [ImageWithFallback #${index}] 🎨 Rendering IMAGE:`, {
+      hasImageDataUri: !!imageDataUri,
+      imageDataUriLength: imageDataUri?.length || 0,
+      hasOnPress: !!onPress,
+    });
     
     return (
       <TouchableOpacity
@@ -2388,9 +2594,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         <EnquiryImage
           source={{ uri: imageDataUri }}
           onError={() => {
+            console.log(`🖼️ [ImageWithFallback #${index}] ❌ EnquiryImage onError`);
             setImageError(true);
           }}
           onLoad={() => {
+            console.log(`🖼️ [ImageWithFallback #${index}] ✅ EnquiryImage onLoad`);
           }}
         />
       </TouchableOpacity>

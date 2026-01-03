@@ -344,7 +344,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         },
         StyleNumber: formData.styleNumber || null,
         GatiOrderNumber: formData.gatiOrderNumber || null,
-        StoneType: formData.stoneType || 'NaturalRegular',
+        StoneType: formData.stoneType && formData.stoneType.trim() ? formData.stoneType.trim() : null,
         MetalWeight: {
           From: formData.metalWeightFrom ? (() => {
             const cleaned = formData.metalWeightFrom.toString().replace(/[^0-9.]/g, '');

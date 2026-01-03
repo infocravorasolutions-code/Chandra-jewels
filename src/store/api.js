@@ -18,6 +18,12 @@ const baseQuery = fetchBaseQuery({
       } else {
         
       }
+      // Ensure Content-Type is set for JSON requests (RTK Query does this automatically, but being explicit)
+      if (!headers.get('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+      }
+      // Set Accept header to match web behavior
+      headers.set('Accept', 'application/json');
     } catch (error) {
     }
     return headers;
@@ -2026,8 +2032,12 @@ export const api = createApi({
         
         const versionParam = version ? `?version=${encodeURIComponent(version)}` : '';
         
-        // Send pricing array directly (not wrapped in Pricing key)
-        const requestBody = Array.isArray(pricingData) ? pricingData : [pricingData];
+        // Wrap pricing array in Pricing key to match web format
+        // Web sends: { Pricing: [...] }
+        const pricingArray = Array.isArray(pricingData) ? pricingData : [pricingData];
+        const requestBody = {
+          Pricing: pricingArray
+        };
         
         const endpoint = `/api/enquiries/${enquiryId}/upload/${designType}${versionParam}`;
         
@@ -2036,23 +2046,84 @@ export const api = createApi({
             url: endpoint,
             method: 'PUT',
             versionParam,
-            requestBodyIsArray: Array.isArray(requestBody),
-            pricingArrayLength: requestBody?.length || 0,
-            firstPricingEntry: requestBody?.[0] ? {
-              MetalPrice: requestBody[0].MetalPrice,
-              DiamondsPrice: requestBody[0].DiamondsPrice,
-              TotalPrice: requestBody[0].TotalPrice,
-              Metal: requestBody[0].Metal,
-              StonesCount: requestBody[0].Stones?.length || 0,
+            requestBodyIsObject: typeof requestBody === 'object' && !Array.isArray(requestBody),
+            hasPricingKey: 'Pricing' in requestBody,
+            pricingArrayLength: requestBody?.Pricing?.length || 0,
+            firstPricingEntry: requestBody?.Pricing?.[0] ? {
+              MetalPrice: requestBody.Pricing[0].MetalPrice,
+              DiamondsPrice: requestBody.Pricing[0].DiamondsPrice,
+              TotalPrice: requestBody.Pricing[0].TotalPrice,
+              Metal: requestBody.Pricing[0].Metal,
+              StonesCount: requestBody.Pricing[0].Stones?.length || 0,
+              ClientPricingMessage: requestBody.Pricing[0].ClientPricingMessage || 'MISSING',
             } : null,
-            fullRequestBody: JSON.stringify(requestBody, null, 2).substring(0, 2000),
+            allEntriesClientPricingMessages: requestBody?.Pricing?.map((entry, idx) => ({
+              entryIndex: idx + 1,
+              ClientPricingMessage: entry.ClientPricingMessage || 'MISSING',
+              hasClientPricingMessage: !!(entry.ClientPricingMessage),
+              messageLength: entry.ClientPricingMessage?.length || 0,
+            })) || [],
+            // Log full ClientPricingMessage for each entry to verify it's in the request
+            allMessages: requestBody?.Pricing?.map((entry, idx) => `Entry ${idx + 1}: "${entry.ClientPricingMessage || 'MISSING'}"`) || [],
+            // Log the FULL request body to see exactly what's being sent
+            fullRequestBodyPreview: JSON.stringify(requestBody, null, 2).substring(0, 2000),
+            // Also log just the ClientPricingMessage fields from the full body
+            fullRequestBodyClientPricingMessages: JSON.stringify(
+              requestBody?.Pricing?.map((entry, idx) => ({
+                entryIndex: idx + 1,
+                ClientPricingMessage: entry.ClientPricingMessage,
+                messageType: typeof entry.ClientPricingMessage,
+                messageLength: entry.ClientPricingMessage?.length || 0,
+                isString: typeof entry.ClientPricingMessage === 'string',
+                isEmpty: !entry.ClientPricingMessage || entry.ClientPricingMessage.trim() === '',
+              })) || [],
+              null,
+              2
+            ),
           });
+        }
+        
+        // Log the exact body being sent to verify ClientPricingMessage is included
+        if (__DEV__) {
+          console.log('💾 [savePricing API] ========== FINAL REQUEST BODY ==========');
+          console.log('💾 [savePricing API] Request body type:', typeof requestBody);
+          console.log('💾 [savePricing API] Request body is object:', typeof requestBody === 'object' && !Array.isArray(requestBody));
+          console.log('💾 [savePricing API] Has Pricing key:', 'Pricing' in requestBody);
+          console.log('💾 [savePricing API] Pricing array length:', requestBody?.Pricing?.length || 0);
+          requestBody?.Pricing?.forEach((entry, idx) => {
+            console.log(`💾 [savePricing API] Entry ${idx + 1} ClientPricingMessage in body:`, entry.ClientPricingMessage || 'MISSING');
+            console.log(`💾 [savePricing API] Entry ${idx + 1} has ClientPricingMessage key:`, 'ClientPricingMessage' in entry);
+            console.log(`💾 [savePricing API] Entry ${idx + 1} ClientPricingMessage value:`, JSON.stringify(entry.ClientPricingMessage));
+          });
+          console.log('💾 [savePricing API] Full request body JSON:', JSON.stringify(requestBody, null, 2));
+          console.log('💾 [savePricing API] =========================================');
+        }
+        
+        // RTK Query automatically serializes objects to JSON
+        // But we'll verify the body structure matches web exactly
+        if (__DEV__) {
+          const stringifiedBody = JSON.stringify(requestBody);
+          console.log('💾 [savePricing API] ========== BODY SERIALIZATION CHECK ==========');
+          console.log('💾 [savePricing API] Body will be serialized by RTK Query');
+          console.log('💾 [savePricing API] Body length (when stringified):', stringifiedBody.length, 'characters');
+          // Verify Entry 2's ClientPricingMessage is in the serialized body
+          const entry2FullMessage = '"ClientPricingMessage":"this is from the mobile test"';
+          const entry2MessageIndex = stringifiedBody.indexOf(entry2FullMessage);
+          console.log('💾 [savePricing API] Entry 2 full message found at index:', entry2MessageIndex !== -1 ? entry2MessageIndex : 'NOT FOUND');
+          if (entry2MessageIndex === -1) {
+            // Try to find what's actually in the body
+            const entry2Partial = stringifiedBody.match(/"ClientPricingMessage":"this is from the mobile[^"]*"/);
+            console.log('💾 [savePricing API] Entry 2 message found (partial):', entry2Partial ? entry2Partial[0] : 'NOT FOUND');
+          }
+          console.log('💾 [savePricing API] =========================================');
         }
         
         return {
           url: endpoint,
           method: 'PUT',
-          body: requestBody, // Direct array: [...]
+          body: requestBody, // RTK Query will automatically serialize this to JSON
+          // Note: RTK Query automatically sets Content-Type: application/json
+          // Don't override headers - let RTK Query handle it automatically to match web behavior
         };
       },
       invalidatesTags: (result, error, { enquiryId }) => [
@@ -3134,8 +3205,16 @@ export const api = createApi({
       transformResponse: (data, meta, arg) => {
         if (__DEV__) {
           console.log('getChats API Response (raw):', data);
-          console.log('Is Array?', Array.isArray(data));
-          if (meta?.response) {
+          console.log('Response type:', Array.isArray(data) ? 'Array' : typeof data);
+          if (data && typeof data === 'object' && !Array.isArray(data)) {
+            console.log('Response structure:', {
+              hasData: !!data.Data,
+              dataIsArray: Array.isArray(data.Data),
+              hasChats: !!data.chats,
+              chatsIsArray: Array.isArray(data.chats),
+              hasDataLower: !!data.data,
+              dataLowerIsArray: Array.isArray(data.data),
+            });
           }
         }
 
@@ -3769,6 +3848,12 @@ export const api = createApi({
             message: notification.Body || notification.body || '',
             type: notification.Type || notification.type || 'system_alert',
             link: notification.Link || notification.link || '',
+            // Extract navigation-related fields from raw notification
+            enquiryId: notification.EnquiryId || notification.enquiryId || notification.Enquiry || notification.enquiry?._id || notification.Enquiry?._id || null,
+            chatId: notification.ChatId || notification.chatId || notification.Chat || notification.chat?._id || notification.Chat?._id || null,
+            clientId: notification.ClientId || notification.clientId || notification.Client || notification.client?._id || notification.Client?._id || null,
+            chatType: notification.ChatType || notification.chatType || null,
+            designType: notification.DesignType || notification.designType || null,
             isRead:
               notification.Read ??
               notification.read ??

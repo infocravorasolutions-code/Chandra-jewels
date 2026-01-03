@@ -9,6 +9,7 @@ class SocketService {
     this.socket = null;
     this.connected = false;
     this.isConnecting = false;
+    this.currentUserId = null; // Store userId for reconnection
     this.listeners = {
       newMessage: [],
       messagesRead: [],
@@ -23,26 +24,52 @@ class SocketService {
    * Connect to WebSocket server
    * @param {string} userId - Current user ID
    */
-  async connect(userId) {
+  async connect(userId, forceReconnect = false) {
+    // Store userId for reconnection
+    if (userId) {
+      this.currentUserId = userId;
+    }
+
+    // If force reconnect, disconnect existing socket first
+    if (forceReconnect && this.socket) {
+      console.log('🔄 [SocketService] Force reconnecting - disconnecting existing socket');
+      try {
+        this.socket.removeAllListeners();
+        this.socket.disconnect();
+        this.socket = null;
+        this.connected = false;
+      } catch (error) {
+        console.error('❌ [SocketService] Error disconnecting for force reconnect:', error);
+      }
+    }
+
     // Prevent multiple connection attempts
-    if (this.socket?.connected) {
-      
+    if (this.socket?.connected && !forceReconnect) {
+      if (__DEV__) {
+        console.log('✅ [SocketService] Socket already connected, skipping');
+      }
       return;
     }
 
-    if (this.isConnecting) {
-      
+    if (this.isConnecting && !forceReconnect) {
+      if (__DEV__) {
+        console.log('⏳ [SocketService] Connection already in progress, skipping');
+      }
       return;
     }
 
     // Clean up any existing socket before creating a new one
     if (this.socket && !this.socket.connected) {
-      
+      if (__DEV__) {
+        console.log('🧹 [SocketService] Cleaning up disconnected socket');
+      }
       try {
         this.socket.removeAllListeners();
         this.socket.disconnect();
       } catch (error) {
-        
+        if (__DEV__) {
+          console.warn('⚠️ [SocketService] Error cleaning up socket:', error);
+        }
       }
       this.socket = null;
     }
@@ -81,7 +108,7 @@ class SocketService {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 10000, // Max 10 seconds between attempts
-        reconnectionAttempts: 5, // Limit to 5 attempts to prevent resource exhaustion
+        reconnectionAttempts: Infinity, // Keep trying to reconnect indefinitely (for background/foreground)
         timeout: 20000,
         auth: {
           token: token, // Send raw token (backend will handle Bearer prefix if needed)
@@ -94,13 +121,18 @@ class SocketService {
 
       // Connection events
       this.socket.on('connect', () => {
-        
+        console.log('✅ [SocketService] Socket connected successfully!', {
+          socketId: this.socket?.id,
+          userId: userId,
+          timestamp: new Date().toISOString(),
+        });
         
         this.connected = true;
         this.isConnecting = false;
         
         // Join notification room for offline push notifications
         if (userId) {
+          console.log('🔔 [SocketService] Joining notification room for userId:', userId);
           this.socket.emit('joinNotificationRoom', userId);
         }
         
@@ -109,6 +141,7 @@ class SocketService {
           try {
             callback();
           } catch (error) {
+            console.error('❌ [SocketService] Error in connect callback:', error);
           }
         });
       });
@@ -119,12 +152,19 @@ class SocketService {
       });
 
       this.socket.on('reconnect', (attemptNumber) => {
+        console.log('✅ [SocketService] Socket reconnected automatically!', {
+          attemptNumber,
+          socketId: this.socket?.id,
+          userId: userId,
+          timestamp: new Date().toISOString(),
+        });
         
         this.connected = true;
         this.isConnecting = false;
         
         // Rejoin notification room after reconnection
         if (userId) {
+          console.log('🔔 [SocketService] Rejoining notification room after reconnect:', userId);
           this.socket.emit('joinNotificationRoom', userId);
         }
       });
@@ -145,13 +185,25 @@ class SocketService {
         // Transport errors are often temporary network issues
         const isTransportError = reason === 'transport error' || reason === 'transport close';
         const isServerDisconnect = reason === 'io server disconnect';
+        const isClientDisconnect = reason === 'io client disconnect';
         
-        if (__DEV__) {
-          if (isTransportError) {
-            console.warn('⚠️ WebSocket transport error (network issue, will auto-reconnect):', reason);
-          } else if (isServerDisconnect) {
-          } else {
-          }
+        console.log('🔌 [SocketService] Socket disconnected:', {
+          reason,
+          isTransportError,
+          isServerDisconnect,
+          isClientDisconnect,
+          willAutoReconnect: !isServerDisconnect && !isClientDisconnect,
+          timestamp: new Date().toISOString(),
+        });
+        
+        if (isTransportError) {
+          console.warn('⚠️ WebSocket transport error (network issue, will auto-reconnect):', reason);
+        } else if (isServerDisconnect) {
+          console.warn('⚠️ Server disconnected socket (may need manual reconnect):', reason);
+        } else if (isClientDisconnect) {
+          console.log('ℹ️ Client disconnected socket (manual disconnect)');
+        } else {
+          console.log('ℹ️ Socket disconnected:', reason);
         }
         
         // Reset connection state
@@ -163,6 +215,7 @@ class SocketService {
           try {
             callback(reason);
           } catch (error) {
+            console.error('❌ [SocketService] Error in disconnect callback:', error);
           }
         });
         
@@ -171,7 +224,7 @@ class SocketService {
         if (isServerDisconnect) {
           // Server disconnected - don't auto-reconnect
           // User will need to manually reconnect or refresh
-          
+          console.warn('⚠️ [SocketService] Server disconnected - auto-reconnect disabled');
         }
       });
 
@@ -290,6 +343,24 @@ class SocketService {
       this.socket = null;
       this.isConnecting = false;
     }
+    this.currentUserId = null;
+  }
+
+  /**
+   * Reconnect to WebSocket server (uses stored userId)
+   */
+  async reconnect() {
+    if (this.currentUserId && !this.isConnecting && !this.socket?.connected) {
+      console.log('🔄 [SocketService] Reconnecting with stored userId:', this.currentUserId);
+      return await this.connect(this.currentUserId);
+    }
+  }
+
+  /**
+   * Get current user ID
+   */
+  getCurrentUserId() {
+    return this.currentUserId;
   }
 
   /**

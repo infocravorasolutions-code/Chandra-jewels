@@ -17,6 +17,7 @@ import { AnimatedLogoLoader, ErrorBoundary } from './src/components/common';
 import { AlertProvider } from './src/context/AlertContext';
 import UsersProvider from './src/components/providers/UsersProvider';
 import PushNotificationsInitializer from './src/components/providers/PushNotificationsInitializer';
+import SocketConnectionManager from './src/components/providers/SocketConnectionManager';
 
 const AppContent = () => {
   const isDarkMode = useColorScheme() === 'dark';
@@ -43,6 +44,7 @@ const AppContent = () => {
         <UsersProvider>
           <AlertProvider>
             <PushNotificationsInitializer />
+            <SocketConnectionManager />
             <AppNavigator />
           </AlertProvider>
         </UsersProvider>

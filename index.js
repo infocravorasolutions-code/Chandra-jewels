@@ -4,10 +4,12 @@
 
 import 'react-native-gesture-handler';
 import * as Sentry from '@sentry/react-native';
-import { AppRegistry } from 'react-native';
+import { AppRegistry, Platform } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
+import notifee, { AndroidImportance } from '@notifee/react-native';
 import App from './App';
 import { name as appName } from './app.json';
+import { displayGroupedChatNotification } from './src/utils/chatNotificationGrouping';
 
 // Suppress React Native Firebase deprecation warnings (they're harmless)
 // These warnings are about migrating to modular API, but current API still works
@@ -89,27 +91,68 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
     const title = remoteMessage?.notification?.title || 
                   remoteMessage?.data?.Title || 
                   remoteMessage?.data?.title ||
-                  'New Notification';
+                  remoteMessage?.data?.senderName ||
+                  '';
     const body = remoteMessage?.notification?.body || 
                  remoteMessage?.data?.Body || 
                  remoteMessage?.data?.body ||
                  remoteMessage?.data?.message || 
                  '';
     
-    // Only display if we have content
-    if (!title && !body) {
-      console.warn('[FCM Background] ⚠️ No title or body found in message - cannot display notification');
-      console.warn('[FCM Background] ⚠️ This usually means backend sent data-only payload without notification field');
-      console.warn('[FCM Background] ⚠️ Check backend FCM payload format - should include "notification" field for Android');
-      return;
+    // Extract chatId early to determine if this is a chat notification
+    const chatId = remoteMessage?.data?.chatId || 
+                   remoteMessage?.data?.ChatId || 
+                   remoteMessage?.data?.chat_id;
+    
+    // Check if this is a chat notification
+    const notificationType = remoteMessage?.data?.type || remoteMessage?.data?.Type || 
+                            remoteMessage?.data?.notificationType || remoteMessage?.data?.NotificationType;
+    const isChatNotification = notificationType?.toLowerCase() === 'chat' || 
+                               notificationType?.toLowerCase() === 'message' ||
+                               notificationType?.toLowerCase() === 'chat_message' ||
+                               !!chatId;
+    
+    // For chat notifications, we MUST have chatId and body, otherwise skip
+    if (isChatNotification) {
+      if (!chatId) {
+        console.warn('[FCM Background] ⚠️ Chat notification but no chatId found - skipping');
+        console.warn('[FCM Background] ⚠️ Data:', JSON.stringify(remoteMessage?.data || {}));
+        return;
+      }
+      if (!body && !title) {
+        console.warn('[FCM Background] ⚠️ Chat notification but no body or title - skipping');
+        return;
+      }
+    } else {
+      // For non-chat notifications, only display if we have content
+      if (!title && !body) {
+        console.warn('[FCM Background] ⚠️ No title or body found in message - cannot display notification');
+        console.warn('[FCM Background] ⚠️ This usually means backend sent data-only payload without notification field');
+        console.warn('[FCM Background] ⚠️ Check backend FCM payload format - should include "notification" field for Android');
+        return;
+      }
     }
     
-    console.log('[FCM Background] ✅ Extracted notification content:', { title, body });
+    console.log('[FCM Background] ✅ Extracted notification content:', { 
+      title, 
+      body, 
+      chatId, 
+      isChatNotification,
+      notificationType 
+    });
     console.log('[FCM Background] Creating notification channel...');
     
     // Display notification
     console.log('[FCM Background] Displaying notification with Notifee...');
-    const notificationId = await notifee.displayNotification({
+    let notificationId;
+    
+    if (isChatNotification) {
+      // Use grouped notification for chat messages
+      console.log('[FCM Background] Using grouped chat notification');
+      notificationId = await displayGroupedChatNotification(title, body, remoteMessage?.data || {});
+    } else {
+      // Regular notification for non-chat messages
+      notificationId = await notifee.displayNotification({
       id: `bg_${remoteMessage?.messageId || Date.now()}`, // Unique ID
       title,
       body,
@@ -137,6 +180,7 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
         badge: true,
       },
     });
+    }
     
     console.log('[FCM Background] ✅ Notification displayed successfully!');
     console.log('[FCM Background] Notification ID:', notificationId);
