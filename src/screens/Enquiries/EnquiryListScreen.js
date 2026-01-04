@@ -1589,7 +1589,7 @@ const EnquiryListScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
           
-          <View style={styles.sortOptionsList}>
+          <ScrollView style={styles.sortOptionsList}>
             {sortOptions.map((option) => (
               <TouchableOpacity
                 key={option.key}
@@ -1622,7 +1622,7 @@ const EnquiryListScreen = ({ navigation }) => {
                 )}
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>

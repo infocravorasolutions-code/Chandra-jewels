@@ -9,7 +9,9 @@ import {
   Text,
   Image,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Input, Button } from '../../components/common';
 import { colors } from '../../constants/colors';
@@ -50,6 +52,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       stamping: '',
       status: 'Enquiry Created',
       assignedTo: '',
+      budget: '',
+      specialRemarks: '',
+      approvedDate: '',
     };
   };
 
@@ -68,6 +73,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     stamping: '',
     status: 'Enquiry Created',
     assignedTo: '',
+    budget: '',
+    specialRemarks: '',
+    approvedDate: '',
   });
   const [errors, setErrors] = useState({});
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -77,6 +85,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
+  const [showApprovedDatePicker, setShowApprovedDatePicker] = useState(false);
+  const [tempApprovedDate, setTempApprovedDate] = useState(new Date());
   
   // Fetch clients for dropdown (using cached hook)
   const { clients: clientsData = [] } = useClients({
@@ -391,6 +401,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         CoralCode: null,
         CadCode: null,
         Category: formData.category || 'Ring',
+        Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+        SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
+        ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
         // Do NOT include ReferenceImages here - they will be uploaded in Step 2
       };
 
@@ -600,6 +613,19 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
 
+        {/* Row 3.5: Budget (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Budget"
+              placeholder="Enter budget amount"
+              value={formData.budget}
+              onChangeText={(value) => handleInputChange('budget', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+
         {/* Row 4: Status and Assigned To - Hidden for client users */}
         {!isClient && (
           <View style={styles.formRow}>
@@ -683,6 +709,114 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
             />
           </View>
         </View>
+
+        {/* Row 8: Special Remarks (full width textarea) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Special Remarks"
+              placeholder="Special Remarks"
+              value={formData.specialRemarks}
+              onChangeText={(value) => handleInputChange('specialRemarks', value)}
+              multiline
+              numberOfLines={4}
+            />
+          </View>
+        </View>
+
+        {/* Row 9: Approved Date (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Text style={styles.dropdownLabel}>Approved Date</Text>
+            <TouchableOpacity
+              style={[styles.dropdown, { minHeight: 44 }]}
+              onPress={() => {
+                if (formData.approvedDate) {
+                  try {
+                    setTempApprovedDate(new Date(formData.approvedDate));
+                  } catch (e) {
+                    setTempApprovedDate(new Date());
+                  }
+                } else {
+                  setTempApprovedDate(new Date());
+                }
+                setShowApprovedDatePicker(true);
+              }}
+              activeOpacity={0.7}>
+              <Text style={[
+                styles.dropdownText,
+                !formData.approvedDate && styles.dropdownPlaceholder,
+              ]}>
+                {formData.approvedDate || 'Select Approved Date'}
+              </Text>
+              <IconComponent 
+                name="calendar-today" 
+                size={20} 
+                color={colors.primary} 
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Date Picker Modal for Approved Date */}
+        {showApprovedDatePicker && Platform.OS === 'ios' && (
+          <Modal
+            transparent={true}
+            animationType="slide"
+            visible={showApprovedDatePicker}
+            onRequestClose={() => setShowApprovedDatePicker(false)}>
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => setShowApprovedDatePicker(false)}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation()}
+                style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <TouchableOpacity
+                    onPress={() => setShowApprovedDatePicker(false)}
+                    style={styles.datePickerCancel}>
+                    <Text style={styles.datePickerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.datePickerTitle}>Select Approved Date</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const formattedDate = tempApprovedDate.toISOString().split('T')[0];
+                      handleInputChange('approvedDate', formattedDate);
+                      setShowApprovedDatePicker(false);
+                    }}
+                    style={styles.datePickerDone}>
+                    <Text style={styles.datePickerDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={tempApprovedDate}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, date) => {
+                    if (date) setTempApprovedDate(date);
+                  }}
+                  style={styles.datePicker}
+                />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        )}
+        {showApprovedDatePicker && Platform.OS === 'android' && (
+          <DateTimePicker
+            value={tempApprovedDate}
+            mode="date"
+            display="default"
+            onChange={(event, date) => {
+              setShowApprovedDatePicker(false);
+              if (event.type === 'set' && date) {
+                const formattedDate = date.toISOString().split('T')[0];
+                handleInputChange('approvedDate', formattedDate);
+              }
+            }}
+          />
+        )}
 
         <TouchableOpacity
           onPress={handleNext}
@@ -912,6 +1046,44 @@ const styles = StyleSheet.create({
   },
   weightInput: {
     flex: 1,
+  },
+  datePickerContainer: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 20,
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  datePickerCancel: {
+    padding: 8,
+  },
+  datePickerCancelText: {
+    fontSize: fonts.base,
+    color: colors.textSecondary,
+  },
+  datePickerTitle: {
+    fontSize: fonts.lg,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  datePickerDone: {
+    padding: 8,
+  },
+  datePickerDoneText: {
+    fontSize: fonts.base,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  datePicker: {
+    width: '100%',
+    height: 200,
   },
 });
 

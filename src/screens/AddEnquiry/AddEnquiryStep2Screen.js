@@ -343,7 +343,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           Quality: formData.metalQuality || '10K',
         },
         StyleNumber: formData.styleNumber || null,
-        GatiOrderNumber: formData.gatiOrderNumber || null,
+        GatiOrderNumber: formData.GatiOrderNumber || null,
         StoneType: formData.stoneType && formData.stoneType.trim() ? formData.stoneType.trim() : null,
         MetalWeight: {
           From: formData.metalWeightFrom ? (() => {
@@ -385,6 +385,9 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         CoralCode: enquiryToEdit?.CoralCode || null,
         CadCode: enquiryToEdit?.CadCode || null,
         Category: formData.category || 'Ring',
+        Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+        SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
+        ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
       };
       
       // Note: ReferenceImages are now uploaded separately via uploadReferenceImages endpoint
@@ -435,7 +438,10 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           },
           Stamping: formData.stamping || null,
           StyleNumber: formData.styleNumber || null,
-          GatiOrderNumber: formData.gatiOrderNumber || null,
+          GatiOrderNumber: formData.GatiOrderNumber || null,
+          Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+          SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
+          ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
           // Preserve original fields
           ClientId: enquiryToEdit.ClientId || enquiryToEdit.clientId,
           AssignedTo: enquiryToEdit.AssignedTo || enquiryToEdit.assignedTo,
@@ -446,7 +452,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           clientId: enquiryToEdit.clientId,
           createdAt: enquiryToEdit.createdAt,
           status: enquiryToEdit.status,
-          budget: enquiryToEdit.budget,
+          budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : (enquiryToEdit.budget || null),
         };
         
         Alert.alert(
@@ -613,6 +619,15 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           </View>
         )}
 
+        {formData.budget && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Budget</Text>
+            <Text style={styles.summaryValue}>
+              {formData.budget ? `₹${parseFloat(formData.budget).toLocaleString('en-IN')}` : 'Not specified'}
+            </Text>
+          </View>
+        )}
+
         {formData.stoneType && (
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Stone Type</Text>
@@ -661,10 +676,10 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           </View>
         )}
 
-        {formData.gatiOrderNumber && (
+        {formData.GatiOrderNumber && (
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Gati Order Number</Text>
-            <Text style={styles.summaryValue}>{formData.gatiOrderNumber}</Text>
+            <Text style={styles.summaryValue}>{formData.GatiOrderNumber}</Text>
           </View>
         )}
 
@@ -679,6 +694,20 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Description</Text>
             <Text style={styles.descriptionText}>{formData.description}</Text>
+          </View>
+        )}
+
+        {formData.specialRemarks && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Special Remarks</Text>
+            <Text style={styles.descriptionText}>{formData.specialRemarks}</Text>
+          </View>
+        )}
+
+        {formData.approvedDate && (
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Approved Date</Text>
+            <Text style={styles.summaryValue}>{formatDate(formData.approvedDate)}</Text>
           </View>
         )}
       </View>

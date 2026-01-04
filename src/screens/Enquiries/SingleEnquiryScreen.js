@@ -632,6 +632,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // Get original data for accessing raw API fields
   const originalData = enquiry?._originalData || enquiry;
   
+  console.log('originalData-------gatiOrderNumber-->', enquiry);
   // Extract AssignedTo ID using useMemo to reactively update when enquiry data changes
   // IMPORTANT: Check StatusHistory first (most accurate), then _originalData, then normalized enquiry
   const assignedToId = useMemo(() => {
@@ -1241,7 +1242,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
     
-    
+    console.log('originalData-------gati-->', originalData);
     
     // Determine which design type and version to approve
     // Priority: Latest coral version, or latest cad version if no coral
@@ -1564,6 +1565,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                        originalData?.styleNumber ||
                        null;
     // Extract Gati Order Number - check ALL possible locations and variations
+    console.log('originalData-------gatiOrderNumber-->', originalData);
     const gatiOrderNumber = originalData?.GatiOrderNumber || 
                             originalData?.gatiOrderNumber ||
                             originalData?.Gati_Order_Number ||
@@ -1596,6 +1598,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                      enquiry?.quantity ||
                      originalData?.quantity ||
                      null;
+    const budget = originalData?.Budget || 
+                   enquiry?.Budget || 
+                   enquiry?.budget ||
+                   originalData?.budget ||
+                   null;
+    const specialRemarks = originalData?.SpecialRemarks || 
+                           enquiry?.SpecialRemarks || 
+                           enquiry?.specialRemarks ||
+                           originalData?.specialRemarks ||
+                           null;
+    const approvedDate = originalData?.ApprovedDate || 
+                         enquiry?.ApprovedDate || 
+                         enquiry?.approvedDate ||
+                         originalData?.approvedDate ||
+                         null;
     const shippingDate = originalData?.ShippingDate || 
                          enquiry?.ShippingDate || 
                          enquiry?.deadline ||
@@ -1850,6 +1867,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           )}
         </Card>
 
+        {/* Special Remarks Card - visible to all users */}
+        {specialRemarks && (
+          <Card style={styles.detailsCard}>
+            <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
+              Special Remarks
+            </Text>
+            <Text style={[styles.descriptionText, { color: colors.textSecondary, fontSize: 13, lineHeight: 20 }]}>
+              {specialRemarks}
+            </Text>
+          </Card>
+        )}
+
         {/* Metal Details Card */}
         <Card style={styles.detailsCard}>
           <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 }]}>
@@ -1872,6 +1901,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             {renderDetailRow(
               { icon: 'category', label: 'Category', value: category },
               { icon: 'inventory', label: 'Quantity', value: quantity ? `${quantity}` : null }
+            )}
+            {/* Budget - Only visible to Client and Admin */}
+            {(user?.role === 'client' || user?.role === 'admin') && budget && (
+              renderDetailRow(
+                { icon: 'account-balance-wallet', label: 'Budget', value: budget ? `${budget}` : null },
+                null
+              )
             )}
             {renderDetailRow(
               { icon: 'grain', label: 'Stone Type', value: stoneType },
@@ -1901,7 +1937,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             )}
             {renderDetailRow(
               { icon: 'calendar-today', label: 'Shipping Date', value: shippingDate ? formatDate(shippingDate) : null },
-              null
+              { icon: 'check-circle', label: 'Approved Date', value: approvedDate ? formatDate(approvedDate) : null }
             )}
           </View>
         </Card>
@@ -2834,7 +2870,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     // Check if Coral/CAD data exists
     const hasCoral = coralCode || coralVersions.length > 0;
     const hasCAD = cadCode || cadVersions.length > 0;
-
+console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
     return (
       <Card style={styles.versionsCard}>
         <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
@@ -2858,7 +2894,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 >
                   <Icon name="description" size={16} color={colors.primary} />
                   <Text style={[styles.fileName, { color: colors.success, fontSize: 13 }]}>
-                    {version.Version || `Version ${index + 1}`} {index === coralVersions.length - 1 && '(Latest)'}
+                   Coral - {version.Version || `Version ${index + 1}`} - {version.CoralCode} {version.IsApprovedVersion==true ? '- Approved' : ''} 
                   </Text>
                   <Icon name="visibility" size={16} color={colors.primary} />
                 </TouchableOpacity>
@@ -2888,7 +2924,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 >
                   <Icon name="description" size={16} color={colors.primary} />
                   <Text style={[styles.fileName, { color: colors.success, fontSize: 13 }]}>
-                    {version.Version || `Version ${index + 1}`} {index === cadVersions.length - 1 && '(Latest)'}
+                   CAD - {version.Version || `Version ${index + 1}`} - {version.CadCode} {version.IsApprovedVersion==true ? '- Approved' : ''} 
                   </Text>
                   <Icon name="visibility" size={16} color={colors.primary} />
                 </TouchableOpacity>

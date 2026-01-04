@@ -89,7 +89,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         stoneType: 'NaturalRegular',
         quantity: '1',
         stamping: '',
-        gatiOrderNumber: '',
+        GatiOrderNumber: '',
         styleNumber: '',
         metalWeightFrom: '',
         metalWeightTo: '',
@@ -97,6 +97,9 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         diamondWeightFrom: '',
         diamondWeightTo: '',
         diamondWeightExact: '',
+        budget: '',
+        specialRemarks: '',
+        approvedDate: '',
       };
     }
     
@@ -335,7 +338,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       stoneType: enquiry.stoneType || enquiry.StoneType || originalData?.StoneType || originalData?.stoneType || '',
       quantity: safeToString(originalData?.Quantity || enquiry.Quantity || enquiry.quantity || '1'),
       stamping: safeToString(originalData?.Stamping || enquiry.stamping || enquiry.Stamping || ''),
-      gatiOrderNumber: safeToString(originalData?.GatiOrderNumber || enquiry.GatiOrderNumber || enquiry.gatiOrderNumber || ''),
+      GatiOrderNumber: safeToString(originalData?.GatiOrderNumber || enquiry.GatiOrderNumber || enquiry.GatiOrderNumber || ''),
       styleNumber: safeToString(originalData?.StyleNumber || enquiry.StyleNumber || enquiry.styleNumber || ''),
       metalWeightFrom: safeToString(metalWeight.From || metalWeight.from || ''),
       metalWeightTo: safeToString(metalWeight.To || metalWeight.to || ''),
@@ -344,6 +347,9 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       diamondWeightTo: safeToString(diamondWeight.To || diamondWeight.to || ''),
       diamondWeightExact: safeToString(diamondWeight.Exact || diamondWeight.exact || ''),
       deadline: formatDateForInput(originalData?.ShippingDate || enquiry.ShippingDate || enquiry.deadline || ''),
+      budget: safeToString(originalData?.Budget || enquiry.Budget || enquiry.budget || ''),
+      specialRemarks: safeToString(originalData?.SpecialRemarks || enquiry.SpecialRemarks || enquiry.specialRemarks || ''),
+      approvedDate: formatDateForInput(originalData?.ApprovedDate || enquiry.ApprovedDate || enquiry.approvedDate || ''),
     };
   };
 
@@ -362,7 +368,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     stoneType: '', // Optional field - no default
     quantity: '1',
     stamping: '',
-    gatiOrderNumber: '',
+    GatiOrderNumber: '',
     styleNumber: '',
     metalWeightFrom: '',
     metalWeightTo: '',
@@ -371,6 +377,9 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
     diamondWeightTo: '',
     diamondWeightExact: '',
     deadline: '',
+    budget: '',
+    specialRemarks: '',
+    approvedDate: '',
   });
   const [errors, setErrors] = useState({});
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -382,6 +391,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [tempDate, setTempDate] = useState(new Date());
+  const [showApprovedDatePicker, setShowApprovedDatePicker] = useState(false);
+  const [tempApprovedDate, setTempApprovedDate] = useState(new Date());
 
 
   // Update form data when enquiry changes or when fetched data arrives
@@ -667,7 +678,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
           Quality: formData.metalQuality || '10K',
         },
         StyleNumber: formData.styleNumber && formData.styleNumber.trim() ? formData.styleNumber : null,
-        GatiOrderNumber: formData.gatiOrderNumber && formData.gatiOrderNumber.trim() ? formData.gatiOrderNumber : null,
+        GatiOrderNumber: formData.GatiOrderNumber && formData.GatiOrderNumber.trim() ? formData.GatiOrderNumber : null,
         StoneType: formData.stoneType && formData.stoneType.trim() ? formData.stoneType.trim() : null,
         MetalWeight: {
           From: formData.metalWeightFrom && formData.metalWeightFrom.trim() ? formData.metalWeightFrom.toString() : null,
@@ -685,6 +696,9 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
         CoralCode: finalEnquiryToEdit?.CoralCode || finalEnquiryToEdit?.coralCode || null,
         CadCode: finalEnquiryToEdit?.CadCode || finalEnquiryToEdit?.cadCode || null,
         Category: formData.category || 'Ring',
+        Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+        SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
+        ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
       };
 
       
@@ -983,8 +997,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
             <Input
               label="Gati Order"
               placeholder="Gati Order"
-              value={formData.gatiOrderNumber}
-              onChangeText={(value) => handleInputChange('gatiOrderNumber', value)}
+              value={formData.GatiOrderNumber}
+              onChangeText={(value) => handleInputChange('GatiOrderNumber', value)}
             />
           </View>
           <View style={styles.formField}>
@@ -1117,6 +1131,19 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
 
+        {/* Row 10.5: Budget (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Budget"
+              placeholder="Enter budget amount"
+              value={formData.budget}
+              onChangeText={(value) => handleInputChange('budget', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+
         {/* Row 11: Remarks (full width textarea) */}
         <View style={styles.formRow}>
           <View style={[styles.formField, styles.fullWidthField]}>
@@ -1129,6 +1156,54 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
               numberOfLines={4}
               error={errors.description}
             />
+          </View>
+        </View>
+
+        {/* Row 12: Special Remarks (full width textarea) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Special Remarks"
+              placeholder="Special Remarks"
+              value={formData.specialRemarks}
+              onChangeText={(value) => handleInputChange('specialRemarks', value)}
+              multiline
+              numberOfLines={4}
+            />
+          </View>
+        </View>
+
+        {/* Row 13: Approved Date (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Text style={styles.label}>Approved Date</Text>
+            <TouchableOpacity
+              style={styles.dateInputButton}
+              onPress={() => {
+                if (formData.approvedDate) {
+                  try {
+                    setTempApprovedDate(new Date(formData.approvedDate));
+                  } catch (e) {
+                    setTempApprovedDate(new Date());
+                  }
+                } else {
+                  setTempApprovedDate(new Date());
+                }
+                setShowApprovedDatePicker(true);
+              }}
+              activeOpacity={0.7}>
+              <Text style={[
+                styles.dateInputText,
+                !formData.approvedDate && styles.dateInputPlaceholder,
+              ]}>
+                {formData.approvedDate || 'Select Approved Date'}
+              </Text>
+              <IconComponent 
+                name="calendar-today" 
+                size={20} 
+                color={colors.primary} 
+              />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1187,6 +1262,66 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
               if (event.type === 'set' && date) {
                 const formattedDate = date.toISOString().split('T')[0];
                 handleInputChange('deadline', formattedDate);
+              }
+            }}
+          />
+        )}
+
+        {/* Approved Date Picker Modal */}
+        {showApprovedDatePicker && Platform.OS === 'ios' && (
+          <Modal
+            transparent={true}
+            animationType="slide"
+            visible={showApprovedDatePicker}
+            onRequestClose={() => setShowApprovedDatePicker(false)}>
+            <TouchableOpacity
+              style={styles.datePickerModal}
+              activeOpacity={1}
+              onPress={() => setShowApprovedDatePicker(false)}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation()}
+                style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <TouchableOpacity
+                    onPress={() => setShowApprovedDatePicker(false)}
+                    style={styles.datePickerCancel}>
+                    <Text style={styles.datePickerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.datePickerTitle}>Select Approved Date</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const formattedDate = tempApprovedDate.toISOString().split('T')[0];
+                      handleInputChange('approvedDate', formattedDate);
+                      setShowApprovedDatePicker(false);
+                    }}
+                    style={styles.datePickerDone}>
+                    <Text style={styles.datePickerDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={tempApprovedDate}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, date) => {
+                    if (date) setTempApprovedDate(date);
+                  }}
+                  style={styles.datePicker}
+                />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        )}
+        {showApprovedDatePicker && Platform.OS === 'android' && (
+          <DateTimePicker
+            value={tempApprovedDate}
+            mode="date"
+            display="default"
+            onChange={(event, date) => {
+              setShowApprovedDatePicker(false);
+              if (event.type === 'set' && date) {
+                const formattedDate = date.toISOString().split('T')[0];
+                handleInputChange('approvedDate', formattedDate);
               }
             }}
           />

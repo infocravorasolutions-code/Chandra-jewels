@@ -383,6 +383,60 @@ const ChatDetailScreen = ({ route, navigation }) => {
     return name && name !== senderId ? name : null;
   }, [usersList]);
 
+  // Helper function to get user profile data (name, image) from SenderId
+  const getSenderProfileData = useCallback((senderId) => {
+    if (!senderId || !usersList || usersList.length === 0) {
+      return { name: null, image: null };
+    }
+    
+    const idStr = String(senderId).trim();
+    
+    // Try to find user in usersList
+    const foundUser = usersList.find(u => {
+      const userId = String(u.id || u._id || '').trim();
+      const noSpacesId = idStr.replace(/\s/g, '');
+      const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').replace(/\s/g, '');
+      return userId === idStr || userId === noSpacesId || userId === cleanId;
+    });
+    
+    if (foundUser) {
+      const name = foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || null;
+      // Try to get profile image from various possible fields
+      const image = foundUser.profileImage || 
+                    foundUser.profilePicture || 
+                    foundUser.avatar || 
+                    foundUser.photo || 
+                    foundUser.picture || 
+                    foundUser.image ||
+                    foundUser.ProfileImage ||
+                    foundUser.ProfilePicture ||
+                    foundUser.Avatar ||
+                    foundUser.Photo ||
+                    foundUser.Picture ||
+                    foundUser.Image ||
+                    null;
+      
+      // If image is a relative path, prepend FILE_BASE_URL
+      let imageUrl = null;
+      if (image) {
+        if (typeof image === 'string' && (image.startsWith('http://') || image.startsWith('https://'))) {
+          imageUrl = image;
+        } else if (typeof image === 'string' && image.trim()) {
+          imageUrl = `${FILE_BASE_URL}${image.startsWith('/') ? image : `/${image}`}`;
+        }
+      }
+      
+      return { name, image: imageUrl };
+    }
+    
+    // Fallback to getUserName utility
+    const name = getUserName(senderId);
+    return { 
+      name: name && name !== senderId ? name : null, 
+      image: null 
+    };
+  }, [usersList]);
+
   // Create sender lookup map (senderId -> { name, role })
   const senderMap = useMemo(() => {
     const map = new Map();
@@ -1721,7 +1775,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
     
     const myMessage = isMyMessage(message);
     const previousMessage = index > 0 ? enrichedMessages[index - 1] : null;
-      // In group chats, show sender name below message bubble
+      // In group chats, show sender name above message bubble (WhatsApp style)
       // This helps identify who sent each message when multiple admins/users are reading
       const isGroupChat = true; // All chats are group chats (admin-client or admin-designer)
       
@@ -1852,12 +1906,42 @@ const ChatDetailScreen = ({ route, navigation }) => {
           }
         }}
       >
-        <SwipeableMessage
-          message={message}
-          myMessage={myMessage}
-          onSwipeRight={() => handleReplyToMessage(message)}
-          onLongPress={() => handleShowReadReceipts(message)}
-        >
+        {showSenderName && !myMessage ? (
+          // WhatsApp style: Profile picture on left, name and bubble on right
+          (() => {
+            const senderId = message.SenderId || message.senderId;
+            const senderProfile = getSenderProfileData(senderId);
+            const senderName = message?.senderName || message?.SenderName || senderProfile.name || 'Unknown';
+            const senderImage = senderProfile.image;
+            const firstLetter = senderName && senderName !== 'Unknown' ? senderName.charAt(0).toUpperCase() : '?';
+            
+            return (
+              <View style={styles.messageWithSenderContainer}>
+                {/* Profile Avatar on the left */}
+                <View style={styles.senderAvatarContainer}>
+                  {senderImage ? (
+                    <Image
+                      source={{ uri: senderImage }}
+                      style={styles.senderAvatar}
+                      defaultSource={require('../../assets/images/logo.png')}
+                    />
+                  ) : (
+                    <View style={styles.senderAvatarPlaceholder}>
+                      <Text style={styles.senderAvatarText}>{firstLetter}</Text>
+                    </View>
+                  )}
+                </View>
+                {/* Name and message bubble on the right */}
+                <View style={styles.senderContentContainer}>
+                  <Text style={styles.senderNameTextAbove}>
+                    {senderName}
+                  </Text>
+                  <SwipeableMessage
+                    message={message}
+                    myMessage={myMessage}
+                    onSwipeRight={() => handleReplyToMessage(message)}
+                    onLongPress={() => handleShowReadReceipts(message)}
+                  >
           <View style={[
             styles.messageBubble,
             myMessage ? styles.myMessageBubble : styles.otherMessageBubble,
@@ -2036,25 +2120,200 @@ const ChatDetailScreen = ({ route, navigation }) => {
               ) : null}
             </View>
           </View>
-        </SwipeableMessage>
-        
-        {/* Sender name below message bubble for group chats */}
-        {showSenderName && (
-          <View style={[
-            styles.senderNameBelow,
-            myMessage ? styles.senderNameBelowMy : styles.senderNameBelowOther
-          ]}>
-            <Text style={[
-              styles.senderNameText,
-              myMessage ? styles.senderNameTextMy : styles.senderNameTextOther
+                    </SwipeableMessage>
+                  </View>
+                </View>
+              );
+            })()
+        ) : (
+          // Regular message without sender name (my messages or consecutive messages from same sender)
+          <View style={!myMessage ? styles.messageWithLeftSpacing : null}>
+            <SwipeableMessage
+              message={message}
+              myMessage={myMessage}
+              onSwipeRight={() => handleReplyToMessage(message)}
+              onLongPress={() => handleShowReadReceipts(message)}
+            >
+            <View style={[
+              styles.messageBubble,
+              myMessage ? styles.myMessageBubble : styles.otherMessageBubble,
+              isImage && styles.imageMessageBubble,
+              isVideo && styles.videoMessageBubble,
+              isFile && styles.fileMessageBubble,
+              isHighlighted && styles.highlightedMessageBubble,
+              repliedMessage && styles.messageBubbleWithReply,
             ]}>
-              {myMessage ? 'You' : (message?.senderName || message?.SenderName || 'Unknown')}
-            </Text>
+              {/* Reply Preview */}
+              {repliedMessage && (
+                <TouchableOpacity
+                  style={[
+                    styles.replyPreview,
+                    myMessage ? styles.replyPreviewMy : styles.replyPreviewOther,
+                  ]}
+                  onPress={() => {
+                    const messageId = repliedMessage._id || repliedMessage.id;
+                    if (messageId) {
+                      const messageIdStr = String(messageId).trim();
+                      scrollToMessage(messageIdStr, setHighlightedMessageId);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[
+                    styles.replyPreviewLine,
+                    myMessage ? styles.replyPreviewLineMy : styles.replyPreviewLineOther,
+                  ]} />
+                  <Icon
+                    name="reply"
+                    size={16}
+                    color={myMessage ? colors.textWhite : colors.primary}
+                    style={styles.replyPreviewIcon}
+                  />
+                  <View style={styles.replyPreviewContent}>
+                    <Text style={[
+                      styles.replyPreviewName,
+                      myMessage ? styles.replyPreviewNameMy : styles.replyPreviewNameOther,
+                    ]}>
+                      {repliedMessage.senderName || 'Unknown'}
+                    </Text>
+                    {(repliedMessage.messageType === 'image' || repliedMessage.messageType === 'video') && repliedMessage.mediaUrl ? (
+                      <View style={styles.replyPreviewMedia}>
+                        <Image
+                          source={{ uri: repliedMessage.mediaUrl }}
+                          style={styles.replyPreviewThumbnail}
+                          resizeMode="cover"
+                        />
+                        <Text 
+                          style={[
+                            styles.replyPreviewText,
+                            myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
+                          ]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {repliedMessage.text || repliedMessage.Message || repliedMessage.message || (repliedMessage.messageType === 'image' ? 'Photo' : 'Video')}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text 
+                        style={[
+                          styles.replyPreviewText,
+                          myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {repliedMessage.text || repliedMessage.Message || repliedMessage.message || 'Message'}
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+              
+              {repliedMessage && (
+                <View style={{ height: 4 }} />
+              )}
+              
+              {isImage && mediaKey ? (
+                <TouchableOpacity 
+                  onPress={() => handleFilePress(mediaKey, mediaName, 'image')}
+                  activeOpacity={0.8}>
+                  <Image
+                    source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
+                    style={styles.messageImage}
+                    resizeMode="cover"
+                  />
+                  {message.text && (
+                    <Text style={[
+                      styles.messageText,
+                      myMessage ? styles.myMessageText : styles.otherMessageText,
+                      styles.imageCaption,
+                    ]}>
+                      {message.text}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ) : isVideo && mediaKey ? (
+                <TouchableOpacity 
+                  onPress={() => handleFilePress(mediaKey, mediaName, 'video')}
+                  activeOpacity={0.8}
+                  style={styles.videoContainer}>
+                  <Video
+                    source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
+                    style={styles.messageVideo}
+                    controls={false}
+                    resizeMode="cover"
+                    paused={true}
+                  />
+                  <View style={styles.videoPlayOverlay}>
+                    <Icon name="play-circle-filled" size={40} color={colors.textWhite} />
+                  </View>
+                  {message.text && (
+                    <Text style={[
+                      styles.messageText,
+                      myMessage ? styles.myMessageText : styles.otherMessageText,
+                      styles.videoCaption,
+                    ]}>
+                      {message.text}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ) : isFile && mediaKey ? (
+                <TouchableOpacity 
+                  onPress={() => handleFilePress(mediaKey, mediaName)}
+                  style={styles.fileMessageContainer}
+                  activeOpacity={0.8}>
+                  <Icon name="insert-drive-file" size={24} color={myMessage ? colors.textWhite : colors.primary} />
+                  <View style={styles.fileMessageInfo}>
+                    <Text style={[
+                      styles.fileMessageName,
+                      myMessage ? styles.myMessageText : styles.otherMessageText,
+                    ]} numberOfLines={1}>
+                      {mediaName || 'File'}
+                    </Text>
+                    <Text style={[
+                      styles.fileMessageSize,
+                      myMessage ? styles.myMessageTime : styles.otherMessageTime,
+                    ]}>
+                      Tap to download
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ) : (
+                <Text style={[
+                  styles.messageText,
+                  myMessage ? styles.myMessageText : styles.otherMessageText,
+                  repliedMessage && styles.messageTextWithReply,
+                ]}>
+                  {message.text || message.Message || message.message || ''}
+                </Text>
+              )}
+              
+              <View style={styles.messageFooter}>
+                <Text style={[
+                  styles.messageTime,
+                  myMessage ? styles.myMessageTime : styles.otherMessageTime,
+                ]}>
+                  {formatMessageTime(message.timestamp || message.Timestamp)}
+                </Text>
+                
+                {myMessage ? (
+                  <View style={styles.messageStatusContainer}>
+                    <Icon
+                      name={getMessageStatusIcon(message.status || 'sent')}
+                      size={16}
+                      color={getMessageStatusColor(message.status || 'sent', true, colors)}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          </SwipeableMessage>
           </View>
         )}
       </View>
     );
-  }, [enrichedMessages, user, isMyMessage, handleReplyToMessage, handleShowReadReceipts, handleFilePress, getMediaUrl, scrollViewRef, highlightedMessageId, storeMessagePosition, scrollToMessage, setHighlightedMessageId]);
+  }, [enrichedMessages, user, isMyMessage, handleReplyToMessage, handleShowReadReceipts, handleFilePress, getMediaUrl, scrollViewRef, highlightedMessageId, storeMessagePosition, scrollToMessage, setHighlightedMessageId, getSenderProfileData]);
 
   // Prepare header props
   const enquiryTitle = finalEnquiry?.title || finalEnquiry?.Name || finalEnquiry?.name || enquiry?.title || enquiry?.Name || enquiry?.name;
@@ -3161,7 +3420,7 @@ const styles = StyleSheet.create({
   
   // New styles for modern chat design
   messageWrapper: {
-    marginBottom: 8,
+    marginBottom: 0, // Minimal spacing between messages like WhatsApp
   },
   highlightedMessageWrapper: {
     backgroundColor: 'rgba(16, 53, 52, 0.2)', // Theme color background (20% opacity)
@@ -3191,7 +3450,53 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: colors.textWhite,
   },
-  // Sender name below message bubble (for group chats)
+  // WhatsApp style: Profile picture on left, name and bubble on right
+  messageWithSenderContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 1,
+  },
+  // Left spacing for messages from other users (to align with profile picture position)
+  messageWithLeftSpacing: {
+    marginLeft: 40, // 32px (avatar width) + 8px (margin) = 40px total
+  },
+  senderAvatarContainer: {
+    marginRight: 8,
+    marginTop: 2,
+  },
+  senderAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  senderAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  senderAvatarText: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: colors.textWhite,
+    fontWeight: '700',
+  },
+  senderContentContainer: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  senderNameTextAbove: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: colors.primary, // Use theme color for sender names
+    fontWeight: '600',
+    marginBottom: 0, // Reduced spacing between name and message
+    marginLeft: 0,
+  },
+  // Sender name below message bubble (for group chats) - kept for backward compatibility
   senderNameBelow: {
     marginTop: 2,
     marginBottom: 4,

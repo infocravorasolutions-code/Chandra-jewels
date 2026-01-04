@@ -17,6 +17,7 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { useUploadImageMutation, useUpdateEnquiryMutation } from '../../store/api';
 import { useAuth } from '../../context/AuthContext';
+import { formatDate } from '../../utils';
 
 const EditEnquiryStep2Screen = ({ route, navigation }) => {
   const { formData, enquiry } = route.params;
@@ -231,6 +232,9 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         CoralCode: enquiry.CoralCode || enquiry.coralCode || null,
         CadCode: enquiry.CadCode || enquiry.cadCode || null,
         Category: formData.category || 'Ring',
+        Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+        SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
+        ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
       };
 
       // Add uploaded images to existing images if any
@@ -288,7 +292,9 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         clientId: formData.clientId || enquiry.clientId,
         createdAt: enquiry.createdAt,
         status: enquiry.status,
-        budget: enquiry.budget,
+        budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : (enquiry.budget || null),
+        specialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : (enquiry.specialRemarks || enquiry.SpecialRemarks || null),
+        approvedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : (enquiry.approvedDate || enquiry.ApprovedDate || null),
       };
       
       if (__DEV__) {
@@ -347,6 +353,28 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
           <BodyText style={styles.summaryLabel}>Priority:</BodyText>
           <BodyText style={styles.summaryValue}>{formData.priority}</BodyText>
         </View>
+        {formData.budget && (
+          <View style={styles.summaryRow}>
+            <BodyText style={styles.summaryLabel}>Budget:</BodyText>
+            <BodyText style={styles.summaryValue}>
+              {formData.budget ? `₹${parseFloat(formData.budget).toLocaleString('en-IN')}` : 'Not specified'}
+            </BodyText>
+          </View>
+        )}
+        {formData.specialRemarks && (
+          <View style={styles.summaryRow}>
+            <BodyText style={styles.summaryLabel}>Special Remarks:</BodyText>
+            <BodyText style={styles.summaryValue}>{formData.specialRemarks}</BodyText>
+          </View>
+        )}
+        {formData.approvedDate && (
+          <View style={styles.summaryRow}>
+            <BodyText style={styles.summaryLabel}>Approved Date:</BodyText>
+            <BodyText style={styles.summaryValue}>
+              {formData.approvedDate ? formatDate(formData.approvedDate) : 'Not specified'}
+            </BodyText>
+          </View>
+        )}
         {existingImages.length > 0 && (
           <View style={styles.summaryRow}>
             <BodyText style={styles.summaryLabel}>Existing Images:</BodyText>
