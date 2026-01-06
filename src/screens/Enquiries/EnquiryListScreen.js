@@ -1117,12 +1117,12 @@ const EnquiryListScreen = ({ navigation }) => {
   // Handler for downloading all enquiries as PDF
   const handleDownloadAllPDF = async () => {
     try {
-      // Get the function from the module
-      const downloadFn = pdfGeneratorModule?.downloadAllEnquiriesPDF;
+      // Use backend PDF download endpoint for better performance with large datasets
+      const downloadFn = pdfGeneratorModule?.downloadEnquiriesPDFFromBackend;
       
       if (!downloadFn || typeof downloadFn !== 'function') {
         if (__DEV__) {
-          console.error('downloadAllEnquiriesPDF not available:', {
+          console.error('downloadEnquiriesPDFFromBackend not available:', {
             module: pdfGeneratorModule,
             moduleType: typeof pdfGeneratorModule,
             moduleKeys: pdfGeneratorModule ? Object.keys(pdfGeneratorModule) : 'no module',
@@ -1136,48 +1136,98 @@ const EnquiryListScreen = ({ navigation }) => {
         return;
       }
 
-      // Use enrichedEnquiries (all enquiries with client names) for the PDF
-      const enquiriesToExport = enrichedEnquiries && enrichedEnquiries.length > 0 
-        ? enrichedEnquiries 
-        : enquiries;
+      // Build filters object from current filters, search query, and sorting
+      // This matches what the backend expects for the export-pdf endpoint
+      const exportFilters = {};
       
-      if (!enquiriesToExport || enquiriesToExport.length === 0) {
-        Alert.alert('No Data', 'No enquiries available to export.');
-        return;
+      // Add search query if present
+      if (searchQuery && searchQuery.trim()) {
+        exportFilters.search = searchQuery.trim();
       }
+      
+      // Add all active filters
+      Object.entries(resolvedFilters).forEach(([key, value]) => {
+        if (value && value !== 'all' && value !== 'All') {
+          exportFilters[key] = value;
+        }
+      });
+      
+      // Add sorting parameters
+      const sortFieldMap = {
+        'AssignedDate': 'AssignedDate',
+        'CreatedDate': 'CreatedDate',
+        'CurrentStatus': 'CurrentStatus',
+        'AssignedTo': 'AssignedTo',
+        'Name': 'Name',
+        'Category': 'Category',
+        'ClientId': 'ClientId',
+        'Priority': 'Priority',
+        'Metal': 'Metal',
+        'StoneType': 'StoneType',
+        'ShippingDate': 'ShippingDate',
+        'createdAt': 'CreatedDate',
+        'assignedDate': 'AssignedDate',
+        'status': 'CurrentStatus',
+        'title': 'Name',
+        'clientName': 'ClientId',
+      };
+      
+      const backendSortField = sortFieldMap[sortBy] || sortBy || 'AssignedDate';
+      const sortDirection = sortOrder || 'desc';
+      exportFilters.sortBy = backendSortField;
+      exportFilters.sortOrder = sortDirection;
+
+      // Some backend implementations reuse the search pipeline and may expect paging flags.
+      // We force "noPaging" and set a high limit as a safeguard.
+      exportFilters.noPaging = true;
+      exportFilters.page = 1;
+      exportFilters.limit = 10000;
 
       // Debug: Log what we're exporting
       if (__DEV__) {
-        console.log('========== EXPORTING ENQUIRIES TO PDF ==========');
-        console.log('Total enquiries to export:', enquiriesToExport.length);
-        console.log('Is array:', Array.isArray(enquiriesToExport));
-        console.log('First enquiry keys:', enquiriesToExport[0] ? Object.keys(enquiriesToExport[0]) : 'no data');
-        console.log('Sample enquiry:', enquiriesToExport[0] ? JSON.stringify(enquiriesToExport[0]).substring(0, 300) : 'no data');
-        console.log('================================================');
+        console.log('========== EXPORTING ENQUIRIES TO PDF (BACKEND) ==========');
+        console.log('Filters:', exportFilters);
+        console.log('Total enquiries in current view:', enquiries.length);
+        console.log('===========================================================');
       }
 
+      // Show loading alert
       Alert.alert(
-        'Generating PDF',
-        `Generating PDF for ${enquiriesToExport.length} enquiries...`,
+        'Downloading PDF',
+        'Downloading PDF from server... This may take a moment for large datasets.',
         [],
         { cancelable: false }
       );
 
-      await downloadFn(enquiriesToExport);
-      
-      Alert.alert(
-        'Success',
-        `PDF generated successfully for ${enquiriesToExport.length} enquiries! Check your share/download options.`,
-        [{ text: 'OK' }]
-      );
+      // Download PDF from backend with progress callback
+      const result = await downloadFn(exportFilters, {
+        onProgress: (progress) => {
+          if (__DEV__) {
+            console.log('PDF Download Progress:', progress.status, progress.message);
+          }
+        },
+      });
+
+      if (result.cancelled) {
+        // User cancelled, no need to show alert
+        return;
+      }
+
+      if (result.success) {
+        Alert.alert(
+          'Success',
+          'PDF downloaded successfully! Check your share/download options.',
+          [{ text: 'OK' }]
+        );
+      }
     } catch (error) {
       if (__DEV__) {
-        console.error('Error generating PDF:', error);
+        console.error('Error downloading PDF:', error);
       }
       const errorMessage = error?.message || 'Unknown error occurred';
       Alert.alert(
         'Error',
-        `Failed to generate PDF: ${errorMessage}. Please try again.`,
+        `Failed to download PDF: ${errorMessage}. Please try again.`,
         [{ text: 'OK' }]
       );
     }

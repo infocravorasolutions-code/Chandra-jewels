@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
   FlatList,
+  Dimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/cards/Cards';
@@ -25,6 +26,8 @@ import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as XLSX from 'xlsx';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const PricingScreen = ({ route, navigation }) => {
   const { enquiry: routeEnquiry, designType, enquiryId } = route.params || {}; // designType: 'coral' or 'cad'
@@ -145,6 +148,7 @@ const PricingScreen = ({ route, navigation }) => {
         lossPercent: (pricingEntry?.LossPercent || pricingEntry?.lossPercent || pricingEntry?.Loss || 0).toString(),
         labour: (pricingEntry?.Labour || pricingEntry?.labour || 0).toString(),
         duties: (pricingEntry?.Duties || pricingEntry?.duties || 0).toString(),
+        dutiesAmount: (pricingEntry?.DutiesAmount || pricingEntry?.dutiesAmount || 0).toString(),
         extraCharges: (pricingEntry?.ExtraCharges || pricingEntry?.extraCharges || 0).toString(),
         undercutPrice: (pricingEntry?.UndercutPrice || pricingEntry?.undercutPrice || 0).toString(),
         clientPricingMessage: pricingEntry?.ClientPricingMessage || '',
@@ -174,6 +178,7 @@ const PricingScreen = ({ route, navigation }) => {
         lossPercent: '0',
         labour: '0',
         duties: '0',
+        dutiesAmount: '0',
         extraCharges: '0',
         undercutPrice: '0',
         clientPricingMessage: '',
@@ -190,7 +195,7 @@ const PricingScreen = ({ route, navigation }) => {
   const formData = pricingEntriesState[latestEntryIndex]?.formData || {
     metalPrice: '0', diamondPrice: '0', totalPrice: '0', metalWeight: '0',
     diamondWeight: '0', totalPieces: '0', lossPercent: '0', labour: '0',
-    duties: '0', extraCharges: '0', undercutPrice: '0', clientPricingMessage: '',
+    duties: '0', dutiesAmount: '0', extraCharges: '0', undercutPrice: '0', clientPricingMessage: '',
     metalRateOverride: '',
   };
   const stones = pricingEntriesState[latestEntryIndex]?.stones || [];
@@ -1103,10 +1108,14 @@ const PricingScreen = ({ route, navigation }) => {
       }));
 
       // Build pricing object according to API structure
+      // IMPORTANT: Field order matches web payload structure exactly
+      // Note: DutiesAmount is included in web payload but calculated by backend
+      // We include it as null/0 to match web structure, backend will recalculate
         return {
           MetalPrice: parseFloat(entryFormData.metalPrice) || 0,
           DiamondsPrice: parseFloat(entryFormData.diamondPrice) || 0,
           TotalPrice: parseFloat(entryFormData.totalPrice) || 0,
+          DutiesAmount: parseFloat(entryFormData.dutiesAmount) || 0, // Match web structure, backend will recalculate
           DiamondWeight: parseFloat(entryFormData.diamondWeight) || 0,
           TotalPieces: parseInt(entryFormData.totalPieces) || 0,
         Metal: {
@@ -1780,8 +1789,11 @@ const PricingScreen = ({ route, navigation }) => {
           
           // Handle DutiesAmount if it's separate from Client.Duties
           if (response.DutiesAmount !== undefined && response.DutiesAmount !== null) {
-            // If DutiesAmount exists, we might want to store it or use it for display
-            console.log('ℹ️ DutiesAmount from response:', response.DutiesAmount);
+            // Update dutiesAmount in formData
+            updatedFormData.dutiesAmount = response.DutiesAmount.toString();
+            if (__DEV__) {
+              console.log('✅ Updated dutiesAmount:', updatedFormData.dutiesAmount, 'from', response.DutiesAmount);
+            }
           }
           
           console.log('After Update - Updated Form Data:', JSON.stringify(updatedFormData, null, 2));
@@ -2158,6 +2170,9 @@ const PricingScreen = ({ route, navigation }) => {
           <CustomText variant="body" style={styles.pricingEntryInfoText}>
             Metal Quality: {entryFormData.metalQuality || '10K'}
           </CustomText>
+          <CustomText variant="body" style={styles.pricingEntryInfoText}>
+            Duties Amount: ${(parseFloat(entryFormData.dutiesAmount) || 0).toFixed(2)}
+          </CustomText>
         </View>
         
         {/* Editable Pricing Details Grid */}
@@ -2169,21 +2184,21 @@ const PricingScreen = ({ route, navigation }) => {
               value={entryFormData.metalPrice}
               onChangeText={(value) => updatePricingEntryFormData(index, 'metalPrice', value)}
               keyboardType="numeric"
-              style={styles.gridInputThird}
+              style={[styles.gridInputThird, styles.compactInputField]}
             />
             <Input
               label="Diamonds Price*"
               value={entryFormData.diamondPrice}
               onChangeText={(value) => updatePricingEntryFormData(index, 'diamondPrice', value)}
               keyboardType="numeric"
-              style={styles.gridInputThird}
+              style={[styles.gridInputThird, styles.compactInputField]}
             />
             <Input
               label="Total Price*"
               value={entryFormData.totalPrice}
               onChangeText={(value) => updatePricingEntryFormData(index, 'totalPrice', value)}
               keyboardType="numeric"
-              style={styles.gridInputThird}
+              style={[styles.gridInputThird, styles.compactInputField]}
               editable={false}
             />
           </View>
@@ -2195,21 +2210,21 @@ const PricingScreen = ({ route, navigation }) => {
               value={entryFormData.metalWeight}
               onChangeText={(value) => updatePricingEntryFormData(index, 'metalWeight', value)}
               keyboardType="numeric"
-              style={styles.gridInputThird}
+              style={[styles.gridInputThird, styles.compactInputField]}
             />
             <Input
               label="Diamond Weight"
               value={entryFormData.diamondWeight}
               onChangeText={(value) => updatePricingEntryFormData(index, 'diamondWeight', value)}
               keyboardType="numeric"
-              style={styles.gridInputThird}
+              style={[styles.gridInputThird, styles.compactInputField]}
             />
             <Input
               label="Total Pieces"
               value={entryFormData.totalPieces}
               onChangeText={(value) => updatePricingEntryFormData(index, 'totalPieces', value)}
               keyboardType="numeric"
-              style={styles.gridInputThird}
+              style={[styles.gridInputThird, styles.compactInputField]}
             />
           </View>
 
@@ -2220,28 +2235,28 @@ const PricingScreen = ({ route, navigation }) => {
               value={entryFormData.lossPercent}
               onChangeText={(value) => updatePricingEntryFormData(index, 'lossPercent', value)}
               keyboardType="numeric"
-              style={styles.gridInputQuarter}
+              style={[styles.gridInputQuarter, styles.compactInputField]}
             />
             <Input
               label="Labour"
               value={entryFormData.labour}
               onChangeText={(value) => updatePricingEntryFormData(index, 'labour', value)}
               keyboardType="numeric"
-              style={styles.gridInputQuarter}
+              style={[styles.gridInputQuarter, styles.compactInputField]}
             />
             <Input
               label="Duties"
               value={entryFormData.duties}
               onChangeText={(value) => updatePricingEntryFormData(index, 'duties', value)}
               keyboardType="numeric"
-              style={styles.gridInputQuarter}
+              style={[styles.gridInputQuarter, styles.compactInputField]}
             />
             <Input
               label="Extra Charges"
               value={entryFormData.extraCharges}
               onChangeText={(value) => updatePricingEntryFormData(index, 'extraCharges', value)}
               keyboardType="numeric"
-              style={styles.gridInputQuarter}
+              style={[styles.gridInputQuarter, styles.compactInputField]}
             />
           </View>
         </View>
@@ -2249,22 +2264,22 @@ const PricingScreen = ({ route, navigation }) => {
         {/* Editable Stones Table for this pricing entry */}
         <View style={styles.pricingEntryStonesContainer}>
           <View style={styles.stonesHeader}>
-            <Heading level={5} style={styles.pricingEntryStonesTitle}>Stones</Heading>
+            <Heading level={5} style={[styles.pricingEntryStonesTitle, { flex: 1 }]}>Stones</Heading>
             <TouchableOpacity
               onPress={() => addStoneToPricingEntry(index)}
               style={[styles.stonesButton, styles.addButton]}
               activeOpacity={0.8}
             >
               <View style={styles.stonesBtnContent}>
-                <Icon name="add" size={18} color={colors.textWhite} />
-                <Text style={styles.stonesBtnText}>Add Stone</Text>
+                <Icon name="add" size={14} color={colors.textWhite} />
+                <Text style={styles.stonesBtnText} numberOfLines={1}>Add Stone</Text>
               </View>
             </TouchableOpacity>
           </View>
 
           {/* Change Stone Type and Metal Quality for All Stones in this pricing entry */}
           <View style={styles.stoneFilterRow}>
-            <View style={{ flex: 1, marginRight: 8 }}>
+            <View style={{ flex: 1, marginRight: 4 }}>
               <Text style={styles.stoneFilterLabel}>Change All Stones</Text>
               <TouchableOpacity
                 style={styles.stoneFilterButton}
@@ -2274,10 +2289,10 @@ const PricingScreen = ({ route, navigation }) => {
                 <Text style={styles.stoneFilterButtonText} numberOfLines={1}>
                   Select Stone Type
                 </Text>
-                <Icon name="arrow-drop-down" size={20} color={colors.textSecondary} />
+                <Icon name="arrow-drop-down" size={16} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
-            <View style={{ flex: 1, marginLeft: 8 }}>
+            <View style={{ flex: 1, marginLeft: 4 }}>
               <Text style={styles.stoneFilterLabel}>Metal Quality</Text>
               <TouchableOpacity
                 style={styles.stoneFilterButton}
@@ -2287,7 +2302,7 @@ const PricingScreen = ({ route, navigation }) => {
                 <Text style={styles.stoneFilterButtonText} numberOfLines={1}>
                   {entryFormData.metalQuality || 'Select Quality'}
                 </Text>
-                <Icon name="arrow-drop-down" size={20} color={colors.textSecondary} />
+                <Icon name="arrow-drop-down" size={16} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
           </View>
@@ -2391,71 +2406,56 @@ const PricingScreen = ({ route, navigation }) => {
           
           {entryStones.length > 0 ? (
               <View style={styles.tableWrapper}>
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={true}
-                  style={styles.tableScrollContainer}
-                >
-                  <View>
-                    {/* Table Header - same as in main form */}
+                {/* Table Header */}
                     <View style={styles.tableHeader}>
-                      <View style={[styles.tableHeaderCell, styles.tableCellNumber]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellType]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexType]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Type</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
-                      </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Shape</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>MM</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellMedium]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Weight</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                    <CustomText variant="caption" style={styles.tableHeaderText}>Wt</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Pieces</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                    <CustomText variant="caption" style={styles.tableHeaderText}>Pcs</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Carat</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                    <CustomText variant="caption" style={styles.tableHeaderText}>Ct</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Price</CustomText>
                       </View>
-                      <View style={[styles.tableHeaderCell, styles.tableCellAction]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                    <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
+                  </View>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexAction]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Action</CustomText>
                       </View>
                     </View>
                     
-                    {/* Table Body - Editable */}
+                {/* Table Body */}
                     <View style={styles.tableBody}>
                       {entryStones.map((stone, originalIndex) => (
                       <View key={originalIndex} style={[styles.tableRow, originalIndex % 2 === 1 && styles.tableRowEven]}>
-                        <View style={[styles.tableCell, styles.tableCellNumber]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexNumber]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {originalIndex + 1}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellType]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexType]}>
                           {renderTypeDropdown(`${index}-${originalIndex}`, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '', index, originalIndex)}
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <TextInput
-                            style={styles.tableInput}
-                            value={stone.Color || ''}
-                            onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Color', value)}
-                            placeholder="Color"
-                            placeholderTextColor={colors.textLight}
-                          />
-                        </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.Shape || ''}
@@ -2464,7 +2464,7 @@ const PricingScreen = ({ route, navigation }) => {
                             placeholderTextColor={colors.textLight}
                           />
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.MM || ''}
@@ -2474,7 +2474,7 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellMedium]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexMedium]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.Sieve || ''}
@@ -2484,7 +2484,7 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.Weight || '0'}
@@ -2494,7 +2494,7 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.Pieces || '0'}
@@ -2504,7 +2504,7 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.CaratWeight || '0'}
@@ -2514,7 +2514,7 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.Price || '0'}
@@ -2524,7 +2524,16 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellAction]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                      <TextInput
+                        style={styles.tableInput}
+                        value={stone.Color || ''}
+                        onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Color', value)}
+                        placeholder="Color"
+                        placeholderTextColor={colors.textLight}
+                      />
+                    </View>
+                    <View style={[styles.tableCell, styles.tableCellFlexAction]}>
                           <TouchableOpacity
                             onPress={() => {
                               Alert.alert(
@@ -2542,14 +2551,12 @@ const PricingScreen = ({ route, navigation }) => {
                             }}
                             style={styles.tableDeleteButton}
                           >
-                            <Icon name="delete" size={18} color={colors.error} />
+                        <Icon name="delete" size={14} color={colors.error} />
                           </TouchableOpacity>
                         </View>
                       </View>
                     ))}
                   </View>
-                </View>
-              </ScrollView>
               </View>
             ) : (
               <CustomText variant="body" style={styles.noStonesText}>
@@ -2600,6 +2607,9 @@ const PricingScreen = ({ route, navigation }) => {
           )}
           <CustomText variant="body" style={styles.pricingEntryInfoText}>
             Metal Quality: {pricingEntry?.Metal?.Quality || originalData?.Metal?.Quality || enquiry?.Metal?.Quality || '10K'}
+          </CustomText>
+          <CustomText variant="body" style={styles.pricingEntryInfoText}>
+            Duties Amount: ${(pricingEntry?.DutiesAmount || pricingEntry?.dutiesAmount || 0).toFixed(2)}
           </CustomText>
         </View>
         
@@ -2683,105 +2693,97 @@ const PricingScreen = ({ route, navigation }) => {
           <View style={styles.pricingEntryStonesContainer}>
             <Heading level={5} style={styles.pricingEntryStonesTitle}>Stones</Heading>
             <View style={styles.tableWrapper}>
-              <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={true}
-                style={styles.tableScrollContainer}
-              >
-                <View>
                   {/* Table Header */}
                   <View style={styles.tableHeader}>
-                    <View style={[styles.tableHeaderCell, styles.tableCellNumber]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellType]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexType]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>Type</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
-                    </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>Shape</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>MM</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellMedium]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Weight</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                  <CustomText variant="caption" style={styles.tableHeaderText}>Wt</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Pieces</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                  <CustomText variant="caption" style={styles.tableHeaderText}>Pcs</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Carat</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexCt]}>
+                  <CustomText variant="caption" style={styles.tableHeaderText}>Ct</CustomText>
                     </View>
-                    <View style={[styles.tableHeaderCell, styles.tableCellSmall]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexPrice]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>Price</CustomText>
                     </View>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                  <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
+                </View>
                   </View>
                   
                   {/* Table Body */}
                   <View style={styles.tableBody}>
                     {pricingStones.map((stone, stoneIndex) => (
-                      <View key={stoneIndex} style={[styles.tableRow, stoneIndex % 2 === 1 && styles.tableRowEven]}>
-                        <View style={[styles.tableCell, styles.tableCellNumber]}>
+                  <View key={stoneIndex} style={[styles.tableRow, styles.tableRowView, stoneIndex % 2 === 1 && styles.tableRowEven]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexNumber]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {stoneIndex + 1}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellType]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexType]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {stone.Type || '-'}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
-                            {stone.Color || '-'}
-                          </CustomText>
-                        </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {stone.Shape || '-'}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {stone.MM || '-'}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellMedium]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexMedium]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {stone.Sieve || '-'}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
+                      <CustomText variant="body" style={styles.tableCellText} numberOfLines={1}>
                             {parseFloat(stone.Weight || 0).toFixed(3)}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {stone.Pieces || 0}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexCt]}>
                           <CustomText variant="body" style={styles.tableCellText}>
                             {parseFloat(stone.CaratWeight || 0).toFixed(3)}
                           </CustomText>
                         </View>
-                        <View style={[styles.tableCell, styles.tableCellSmall]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexPrice]}>
+                      <CustomText variant="body" style={styles.tableCellText} numberOfLines={1}>
                             ${parseFloat(stone.Price || 0).toFixed(2)}
                           </CustomText>
                         </View>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
+                      <CustomText variant="body" style={styles.tableCellText}>
+                        {stone.Color || '-'}
+                      </CustomText>
+                    </View>
                       </View>
                     ))}
                   </View>
-                </View>
-              </ScrollView>
             </View>
           </View>
         )}
@@ -2813,10 +2815,10 @@ const PricingScreen = ({ route, navigation }) => {
             </CustomText>
           ) : (
             <CustomText variant="body" style={styles.infoText}>
-              The Metal Rate considered for quotation was ${metalRateConsidered.toFixed(2)} per gram.{'\n'}
+              {/* The Metal Rate considered for quotation was ${metalRateConsidered.toFixed(2)} per gram.{'\n'} */}
               The Latest Metal Rate is ${latestMetalRate.toFixed(2)} per gram.{'\n'}
               Please click on calculate to update calculations according to latest rates.{'\n'}
-              The Duties considered for quotation was ${dutiesConsidered.toFixed(2)}.
+              {/* The Duties considered for quotation was ${dutiesConsidered.toFixed(2)}. */}
             </CustomText>
           )}
         </Card>
@@ -2857,8 +2859,8 @@ const PricingScreen = ({ route, navigation }) => {
                 }}
                 activeOpacity={0.8}
               >
-                <Icon name="content-copy" size={20} color={colors.textWhite} />
-                <Text style={styles.addPricingButtonText}>Copy Last Pricing</Text>
+                <Icon name="content-copy" size={16} color={colors.textWhite} />
+                <Text style={styles.addPricingButtonText} numberOfLines={1}>Copy Last Pricing</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
@@ -2892,8 +2894,8 @@ const PricingScreen = ({ route, navigation }) => {
               }}
               activeOpacity={0.8}
             >
-              <Icon name="add" size={20} color={colors.textWhite} />
-              <Text style={styles.addPricingButtonText}>+ Add Pricing</Text>
+              <Icon name="add" size={16} color={colors.textWhite} />
+              <Text style={styles.addPricingButtonText} numberOfLines={1}>+ Add Pricing</Text>
             </TouchableOpacity>
           </View>
           {pricingEntriesState.length > 0 ? (
@@ -2905,6 +2907,7 @@ const PricingScreen = ({ route, navigation }) => {
                 MetalPrice: parseFloat(entryFormData.metalPrice) || 0,
                 DiamondsPrice: parseFloat(entryFormData.diamondPrice) || 0,
                 TotalPrice: parseFloat(entryFormData.totalPrice) || 0,
+                DutiesAmount: parseFloat(entryFormData.dutiesAmount) || 0,
                 DiamondWeight: parseFloat(entryFormData.diamondWeight) || 0,
                 TotalPieces: parseInt(entryFormData.totalPieces) || 0,
                 Metal: {
@@ -2954,7 +2957,7 @@ const PricingScreen = ({ route, navigation }) => {
                       }}
                       activeOpacity={0.8}
                     >
-                      <Icon name="edit" size={18} color={colors.primary} />
+                      <Icon name="edit" size={14} color={colors.primary} />
                       <Text style={styles.editButtonText}>Edit</Text>
                     </TouchableOpacity>
                   </View>
@@ -2970,8 +2973,8 @@ const PricingScreen = ({ route, navigation }) => {
                       style={[styles.pricingEntryActionButton, styles.downloadButton]}
                       activeOpacity={0.8}
                     >
-                      <Icon name="file-download" size={18} color={colors.textWhite} />
-                      <Text style={styles.pricingEntryActionButtonText}>Download Pricing</Text>
+                      <Icon name="file-download" size={14} color={colors.textWhite} />
+                      <Text style={styles.pricingEntryActionButtonText} numberOfLines={1}>Download Pricing</Text>
                     </TouchableOpacity>
                   </View>
                 </Card>
@@ -3017,7 +3020,7 @@ const PricingScreen = ({ route, navigation }) => {
                 }}
                 activeOpacity={0.8}
               >
-                <Icon name="close" size={24} color={colors.textPrimary} />
+                <Icon name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
@@ -3030,7 +3033,7 @@ const PricingScreen = ({ route, navigation }) => {
               )}
             </ScrollView>
             <View style={styles.modalFooter}>
-              <View style={styles.modalFooterTopRow}>
+              <View style={styles.modalFooterSingleRow}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.cancelModalButton]}
                   onPress={() => {
@@ -3043,7 +3046,7 @@ const PricingScreen = ({ route, navigation }) => {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.modalButtonText, styles.cancelModalButtonText]}>Close</Text>
+                  <Text style={[styles.modalButtonText, styles.cancelModalButtonText]} numberOfLines={1}>Close</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
@@ -3070,14 +3073,10 @@ const PricingScreen = ({ route, navigation }) => {
                   <Text style={[
                     styles.modalButtonText, 
                     styles.saveModalButtonText
-                  ]}>
+                  ]} numberOfLines={1}>
                     {isSaving ? 'Saving...' : 'Save Changes'}
                   </Text>
                 </TouchableOpacity>
-              </View>
-              
-              {/* Calculate and Sync Buttons */}
-              <View style={styles.modalFooterActionRow}>
                 <TouchableOpacity
                   onPress={async () => {
                     console.log('🔘 CALCULATE BUTTON PRESSED IN UI (Add Modal)');
@@ -3095,12 +3094,11 @@ const PricingScreen = ({ route, navigation }) => {
                   style={[styles.modalActionButton, styles.calculateBtn, isCalculating && styles.btnDisabled]}
                   activeOpacity={0.7}
                 >
-                  <Icon name="calculate" size={16} color={colors.textWhite} />
-                  <Text style={styles.modalActionButtonText}>
+                  <Icon name="calculate" size={14} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText} numberOfLines={1}>
                     {isCalculating ? "Calculating..." : "Calculate"}
                   </Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   onPress={async () => {
                     if (editingEntryIndex !== null && pricingEntriesState[editingEntryIndex]) {
@@ -3111,9 +3109,9 @@ const PricingScreen = ({ route, navigation }) => {
                   style={[styles.modalActionButton, styles.syncBtn, isSyncing && styles.btnDisabled]}
                   activeOpacity={0.7}
                 >
-                  <Icon name="sync" size={16} color={colors.textWhite} />
-                  <Text style={styles.modalActionButtonText}>
-                    {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
+                  <Icon name="sync" size={14} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText} numberOfLines={1}>
+                    {isSyncing ? 'Syncing...' : 'Sync'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -3152,7 +3150,7 @@ const PricingScreen = ({ route, navigation }) => {
                 }}
                 activeOpacity={0.8}
               >
-                <Icon name="close" size={24} color={colors.textPrimary} />
+                <Icon name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
@@ -3165,7 +3163,7 @@ const PricingScreen = ({ route, navigation }) => {
               )}
             </ScrollView>
             <View style={styles.modalFooter}>
-              <View style={styles.modalFooterTopRow}>
+              <View style={styles.modalFooterSingleRow}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.cancelModalButton]}
                   onPress={() => {
@@ -3178,7 +3176,7 @@ const PricingScreen = ({ route, navigation }) => {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.modalButtonText, styles.cancelModalButtonText]}>Cancel</Text>
+                  <Text style={[styles.modalButtonText, styles.cancelModalButtonText]} numberOfLines={1}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
@@ -3203,14 +3201,10 @@ const PricingScreen = ({ route, navigation }) => {
                   <Text style={[
                     styles.modalButtonText, 
                     styles.saveModalButtonText
-                  ]}>
+                  ]} numberOfLines={1}>
                     {isSaving ? 'Saving...' : 'Save New Pricing'}
                   </Text>
                 </TouchableOpacity>
-              </View>
-              
-              {/* Calculate and Sync Buttons */}
-              <View style={styles.modalFooterActionRow}>
                 <TouchableOpacity
                   onPress={async () => {
                     console.log('🔘 CALCULATE BUTTON PRESSED IN UI (Edit Modal)');
@@ -3228,12 +3222,11 @@ const PricingScreen = ({ route, navigation }) => {
                   style={[styles.modalActionButton, styles.calculateBtn, isCalculating && styles.btnDisabled]}
                   activeOpacity={0.7}
                 >
-                  <Icon name="calculate" size={16} color={colors.textWhite} />
-                  <Text style={styles.modalActionButtonText}>
+                  <Icon name="calculate" size={14} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText} numberOfLines={1}>
                     {isCalculating ? "Calculating..." : "Calculate"}
                   </Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   onPress={async () => {
                     if (editingEntryIndex !== null && pricingEntriesState[editingEntryIndex]) {
@@ -3244,9 +3237,9 @@ const PricingScreen = ({ route, navigation }) => {
                   style={[styles.modalActionButton, styles.syncBtn, isSyncing && styles.btnDisabled]}
                   activeOpacity={0.7}
                 >
-                  <Icon name="sync" size={16} color={colors.textWhite} />
-                  <Text style={styles.modalActionButtonText}>
-                    {isSyncing ? 'Syncing...' : 'Sync Client Pricing'}
+                  <Icon name="sync" size={14} color={colors.textWhite} />
+                  <Text style={styles.modalActionButtonText} numberOfLines={1}>
+                    {isSyncing ? 'Syncing...' : 'Sync'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -3271,14 +3264,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: 10,
+    paddingBottom: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 10,
   },
   headerTitle: {
     color: colors.textPrimary,
@@ -3289,37 +3282,37 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   infoCard: {
-    marginBottom: 16,
-    padding: 20,
+    marginBottom: 10,
+    padding: 10,
     backgroundColor: colors.background,
-    borderRadius: 12,
-    borderLeftWidth: 4,
+    borderRadius: 8,
+    borderLeftWidth: 3,
     borderLeftColor: colors.primary,
   },
   infoText: {
     color: colors.textSecondary,
-    fontSize: fonts.sm,
+    fontSize: fonts.xs,
     fontFamily: fonts.regular,
-    lineHeight: 20,
+    lineHeight: 16,
   },
   pricingCard: {
-    marginBottom: 16,
-    padding: 20,
+    marginBottom: 10,
+    padding: 12,
     backgroundColor: colors.background,
-    borderRadius: 12,
+    borderRadius: 8,
   },
   sectionTitle: {
-    marginBottom: 16,
+    marginBottom: 10,
     color: colors.textPrimary,
     fontFamily: fonts.bold,
-    fontSize: fonts.lg,
+    fontSize: fonts.base,
   },
   pricingGrid: {
-    gap: 16,
+    gap: 6,
   },
   inputRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     flexWrap: 'wrap',
   },
   gridInput: {
@@ -3329,20 +3322,28 @@ const styles = StyleSheet.create({
   inputRowThree: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 6,
     flexWrap: 'nowrap',
   },
   gridInputThird: {
     flexBasis: '32%',
+    marginBottom: 4,
   },
   inputRowFour: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 6,
     flexWrap: 'nowrap',
   },
   gridInputQuarter: {
     flexBasis: '24%',
+    marginBottom: 4,
+  },
+  compactInputField: {
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+    fontSize: 10,
+    minHeight: 28,
   },
   undercutCard: {
     marginBottom: 16,
@@ -3371,7 +3372,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   stonesHeader: {
-    marginBottom: 12,
+    marginBottom: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
   },
   stonesButtonsContainer: {
     flexDirection: 'row',
@@ -3383,56 +3388,57 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 12,
+    marginBottom: 6,
+    gap: 6,
   },
   stoneFilterLabel: {
     flex: 1,
     color: colors.textSecondary,
     fontFamily: fonts.medium,
-    fontSize: fonts.sm,
+    fontSize: 10,
+    marginBottom: 3,
   },
   stoneFilterButton: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minWidth: 170,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    minWidth: 120,
     backgroundColor: colors.backgroundSecondary,
   },
   stoneFilterButtonText: {
     flex: 1,
     marginRight: 4,
     fontFamily: fonts.medium,
+    fontSize: 10,
   },
   metalRateOverrideContainer: {
-    marginBottom: 12,
+    marginBottom: 6,
   },
   metalRateOverrideInput: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: fonts.base,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    fontSize: 10,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     backgroundColor: colors.background,
-    marginTop: 8,
-    color: colors.textPrimary,
+    marginTop: 3,
   },
   stonesButton: {
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    minHeight: 44,
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    minHeight: 32,
     justifyContent: 'center',
     alignItems: 'center',
-    flex: 1,
-    minWidth: '45%',
+    flexShrink: 1,
+    maxWidth: 120,
   },
   stonesBtnContent: {
     flexDirection: 'row',
@@ -3443,8 +3449,8 @@ const styles = StyleSheet.create({
   stonesBtnText: {
     color: colors.textWhite,
     fontFamily: fonts.bold,
-    fontSize: fonts.sm,
-    letterSpacing: 0.2,
+    fontSize: fonts.xs,
+    letterSpacing: 0.1,
   },
   addButton: {
     backgroundColor: colors.primary,
@@ -3457,7 +3463,7 @@ const styles = StyleSheet.create({
   },
   tableWrapper: {
     backgroundColor: colors.background,
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
@@ -3469,8 +3475,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.primaryDark || '#1976D2',
   },
   tableHeaderCell: {
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
     borderRightWidth: 1,
     borderRightColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
@@ -3479,11 +3485,11 @@ const styles = StyleSheet.create({
   tableHeaderText: {
     color: colors.textWhite,
     fontFamily: fonts.bold,
-    fontSize: fonts.xs,
+    fontSize: 9,
     textAlign: 'center',
   },
   tableScrollContainer: {
-    // Removed maxHeight to allow all stone rows to be visible and scrollable
+    // Removed - using flex layout instead
   },
   tableBody: {
     backgroundColor: colors.background,
@@ -3502,66 +3508,112 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    minHeight: 50,
+    minHeight: 28,
   },
   tableRowEven: {
     backgroundColor: colors.backgroundSecondary,
   },
   tableCell: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: 2,
+    paddingHorizontal: 2,
     borderRightWidth: 1,
     borderRightColor: colors.border,
     justifyContent: 'center',
     alignItems: 'center',
-    minHeight: 50,
+    minHeight: 28,
   },
   tableCellText: {
-    fontSize: fonts.xs,
+    fontSize: 10,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     textAlign: 'center',
+    lineHeight: 12,
+    flexShrink: 1,
   },
   tableInput: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    fontSize: fonts.xs,
+    borderRadius: 2,
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+    fontSize: 9,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     backgroundColor: colors.backgroundSecondary,
     textAlign: 'center',
-    minWidth: 60,
+    minWidth: 40,
     width: '100%',
   },
   tableCellNumber: {
-    width: 40,
-    minWidth: 40,
+    width: 25,
+    minWidth: 25,
   },
   tableCellType: {
-    width: 120,
-    minWidth: 120,
-  },
-  tableCellSmall: {
     width: 80,
     minWidth: 80,
   },
+  tableCellSmall: {
+    width: 50,
+    minWidth: 50,
+  },
   tableCellMedium: {
-    width: 100,
-    minWidth: 100,
+    width: 65,
+    minWidth: 65,
   },
   tableCellAction: {
-    width: 60,
-    minWidth: 60,
+    width: 40,
+    minWidth: 40,
     borderRightWidth: 0,
   },
+  // Flex-based column widths for responsive table
+  tableCellFlexNumber: {
+    flex: 0.4,
+    maxWidth: 30,
+  },
+  tableCellFlexType: {
+    flex: 1.2,
+    maxWidth: 90,
+  },
+  tableCellFlexSmall: {
+    flex: 0.8,
+    maxWidth: 55,
+  },
+  tableCellFlexMedium: {
+    flex: 1,
+    maxWidth: 70,
+  },
+  tableCellFlexAction: {
+    flex: 0.5,
+    maxWidth: 40,
+    borderRightWidth: 0,
+  },
+  // Wider columns for view mode
+  tableCellFlexCt: {
+    flex: 1.2,
+    maxWidth: 70,
+  },
+  tableCellFlexPrice: {
+    flex: 1.2,
+    maxWidth: 75,
+  },
+  tableCellCompact: {
+    minHeight: 20,
+    paddingVertical: 1,
+  },
+  // Compact styles for view mode table
+  tableRowView: {
+    minHeight: 22,
+  },
+  tableCellView: {
+    minHeight: 22,
+    paddingVertical: 1,
+    paddingHorizontal: 1,
+  },
   tableDeleteButton: {
-    padding: 6,
+    padding: 3,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 4,
+    borderRadius: 3,
   },
   dropdownButton: {
     flexDirection: 'row',
@@ -3645,33 +3697,33 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   messageCard: {
-    marginBottom: 20,
-    padding: 20,
+    marginBottom: 10,
+    padding: 10,
     backgroundColor: colors.background,
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
   },
   messageLabel: {
-    marginBottom: 12,
-    fontSize: fonts.base,
+    marginBottom: 6,
+    fontSize: fonts.xs,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
   },
   messageInputWrapper: {
-    marginTop: 8,
+    marginTop: 4,
   },
   messageInput: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: fonts.base,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: fonts.xs,
     fontFamily: fonts.regular,
     color: colors.textPrimary,
     backgroundColor: colors.background,
-    minHeight: 100,
+    minHeight: 60,
     textAlignVertical: 'top',
   },
   messageDisplayBox: {
@@ -3691,23 +3743,23 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   actionButtonsCard: {
-    marginTop: 8,
-    padding: 20,
+    marginTop: 6,
+    padding: 10,
     backgroundColor: colors.background,
-    borderRadius: 12,
+    borderRadius: 8,
   },
   actionButtons: {
-    gap: 12,
+    gap: 8,
   },
   actionButtonsRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
   actionBtn: {
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    minHeight: 50,
+    borderRadius: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    minHeight: 38,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -3723,8 +3775,8 @@ const styles = StyleSheet.create({
   btnText: {
     color: colors.textWhite,
     fontFamily: fonts.bold,
-    fontSize: fonts.base,
-    letterSpacing: 0.2,
+    fontSize: fonts.xs,
+    letterSpacing: 0.1,
   },
   saveBtn: {
     backgroundColor: colors.primary,
@@ -3762,33 +3814,33 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   allPricingEntriesContainer: {
-    marginBottom: 24,
+    marginBottom: 12,
   },
   allPricingEntriesTitle: {
     color: colors.textPrimary,
     fontFamily: fonts.bold,
-    fontSize: fonts.xl,
-    marginBottom: 16,
+    fontSize: fonts.base,
+    marginBottom: 10,
   },
   pricingButtonsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
+    gap: 8,
+    marginBottom: 10,
     flexWrap: 'wrap',
   },
   addPricingButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
     backgroundColor: colors.primary,
-    gap: 8,
-    minHeight: 44,
+    gap: 6,
+    minHeight: 36,
     flex: 1,
-    minWidth: 140,
+    minWidth: 120,
   },
   copyPricingButton: {
     backgroundColor: colors.accent || '#D4AF37',
@@ -3796,7 +3848,7 @@ const styles = StyleSheet.create({
   addPricingButtonText: {
     color: colors.textWhite,
     fontFamily: fonts.bold,
-    fontSize: fonts.base,
+    fontSize: fonts.xs,
   },
   noPricingText: {
     textAlign: 'center',
@@ -3805,10 +3857,10 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
   },
   pricingEntryCard: {
-    marginBottom: 20,
-    padding: 20,
+    marginBottom: 10,
+    padding: 12,
     backgroundColor: colors.background,
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -3816,8 +3868,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    paddingBottom: 8,
+    marginBottom: 8,
+    paddingBottom: 6,
     borderBottomWidth: 2,
     borderBottomColor: colors.primary,
   },
@@ -3825,28 +3877,28 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.textPrimary,
     fontFamily: fonts.bold,
-    fontSize: fonts.lg,
+    fontSize: fonts.base,
   },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
     backgroundColor: colors.primary + '20',
-    gap: 6,
+    gap: 4,
   },
   editButtonText: {
     color: colors.primary,
     fontFamily: fonts.medium,
-    fontSize: fonts.sm,
+    fontSize: fonts.xs,
   },
   pricingEntryActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 16,
-    paddingTop: 16,
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
@@ -3854,17 +3906,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+    gap: 4,
     flex: 1,
     minWidth: '30%',
   },
   pricingEntryActionButtonText: {
     color: colors.textWhite,
     fontFamily: fonts.medium,
-    fontSize: fonts.sm,
+    fontSize: 10,
   },
   modalContainer: {
     flex: 1,
@@ -3874,7 +3926,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    padding: 10,
     paddingTop: 50,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
@@ -3884,48 +3936,54 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.textPrimary,
     fontFamily: fonts.bold,
-    fontSize: fonts.xl,
+    fontSize: fonts.sm,
   },
   closeButton: {
-    padding: 8,
+    padding: 6,
   },
   modalContent: {
     flex: 1,
   },
   modalContentContainer: {
-    padding: 20,
+    padding: 10,
   },
   modalFooter: {
-    padding: 20,
+    padding: 8,
     backgroundColor: colors.background,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
   modalFooterTopRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
+    gap: 6,
+    marginBottom: 6,
   },
   modalFooterActionRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 6,
+  },
+  modalFooterSingleRow: {
+    flexDirection: 'row',
+    gap: 4,
+    flexWrap: 'wrap',
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
+    minWidth: '22%',
+    paddingVertical: 7,
+    paddingHorizontal: 6,
+    borderRadius: 5,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: colors.textPrimary,
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 1,
     },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    minHeight: 44,
+    shadowRadius: 3,
+    elevation: 2,
+    minHeight: 30,
   },
   cancelModalButton: {
     backgroundColor: colors.backgroundSecondary,
@@ -3941,8 +3999,8 @@ const styles = StyleSheet.create({
   },
   modalButtonText: {
     fontFamily: fonts.bold,
-    fontSize: 15,
-    letterSpacing: 0.3,
+    fontSize: 10,
+    letterSpacing: 0,
   },
   cancelModalButtonText: {
     color: colors.textPrimary,
@@ -3955,62 +4013,64 @@ const styles = StyleSheet.create({
   },
   modalActionButton: {
     flex: 1,
+    minWidth: '22%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    borderRadius: 5,
+    gap: 2,
     shadowColor: colors.textPrimary,
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 1,
     },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-    minHeight: 42,
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+    minHeight: 30,
   },
   modalActionButtonText: {
     color: colors.textWhite,
     fontFamily: fonts.semibold || fonts.bold,
-    fontSize: 14,
-    letterSpacing: 0.2,
+    fontSize: 10,
+    letterSpacing: 0,
+    flexShrink: 1,
   },
   pricingEntryInfo: {
-    marginBottom: 16,
-    padding: 12,
+    marginBottom: 8,
+    padding: 6,
     backgroundColor: colors.backgroundSecondary,
-    borderRadius: 8,
+    borderRadius: 4,
   },
   pricingEntryInfoText: {
-    color: colors.textSecondary,
-    fontSize: fonts.sm,
-    fontFamily: fonts.medium,
-  },
-  pricingEntryLabel: {
-    marginBottom: 4,
     color: colors.textSecondary,
     fontSize: fonts.xs,
     fontFamily: fonts.medium,
   },
+  pricingEntryLabel: {
+    marginBottom: 2,
+    color: colors.textSecondary,
+    fontSize: 10,
+    fontFamily: fonts.medium,
+  },
   pricingEntryValue: {
     color: colors.textPrimary,
-    fontSize: fonts.base,
+    fontSize: fonts.xs,
     fontFamily: fonts.bold,
   },
   pricingEntryStonesContainer: {
-    marginTop: 20,
-    paddingTop: 16,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
   pricingEntryStonesTitle: {
-    marginBottom: 12,
+    marginBottom: 8,
     color: colors.textPrimary,
     fontFamily: fonts.bold,
-    fontSize: fonts.base,
+    fontSize: fonts.xs,
   },
 });
 

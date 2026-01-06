@@ -7,7 +7,7 @@ import Share from 'react-native-share';
 import { Platform, Alert } from 'react-native';
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { FILE_BASE_URL } from '../config/apiConfig';
+import { FILE_BASE_URL, API_BASE_URL } from '../config/apiConfig';
 import { getUserName } from './userUtils';
 
 // Import PDF generation library (react-native-html-to-pdf)
@@ -1745,6 +1745,177 @@ export const downloadAllEnquiriesPDF = async (enquiries) => {
   }
 };
 
+/**
+ * Download enquiries PDF from backend endpoint
+ * This function downloads PDF directly from the backend API, which handles
+ * large datasets (100-200+ enquiries) more efficiently than client-side generation
+ * 
+ * @param {Object} filters - Query parameters/filters to pass to the backend
+ * @param {Object} options - Additional options
+ * @param {Function} options.onProgress - Optional progress callback
+ * @returns {Promise<Object>} Result object with success status and file path
+ */
+export const downloadEnquiriesPDFFromBackend = async (filters = {}, options = {}) => {
+  try {
+    if (__DEV__) {
+      console.log('========== DOWNLOADING PDF FROM BACKEND ==========');
+      console.log('Filters:', filters);
+    }
+
+    // Get authentication token
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      throw new Error('Authentication token not found. Please log in again.');
+    }
+
+    // Build query string from filters
+    const queryParams = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== '' && value !== 'all' && value !== 'All') {
+        queryParams.append(key, String(value));
+      }
+    });
+
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/api/enquiries/export-pdf${queryString ? `?${queryString}` : ''}`;
+
+    if (__DEV__) {
+      console.log('PDF Download URL:', url);
+    }
+
+    // Call progress callback if provided
+    if (options.onProgress) {
+      options.onProgress({ status: 'downloading', message: 'Downloading PDF from server...' });
+    }
+
+    // Make GET request with authentication
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/pdf',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = 'Failed to download PDF';
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.message || errorJson.error || errorMessage;
+      } catch (e) {
+        // If response is not JSON, use status text
+        errorMessage = response.statusText || errorMessage;
+      }
+
+      if (__DEV__) {
+        console.log('PDF error response (first 500 chars):', (errorText || '').slice(0, 500));
+      }
+
+      throw new Error(`${errorMessage} (Status: ${response.status})`);
+    }
+
+    // Get the PDF as arrayBuffer (React Native compatible)
+    const arrayBuffer = await response.arrayBuffer();
+
+    if (options.onProgress) {
+      options.onProgress({ status: 'processing', message: 'Processing PDF file...' });
+    }
+
+    // Convert arrayBuffer to base64 (React Native compatible approach)
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const chunkSize = 8192;
+    
+    // Convert bytes to binary string in chunks to avoid memory issues
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      // Use Array.from to avoid "Maximum call stack size exceeded" error
+      binary += String.fromCharCode(...Array.from(chunk));
+    }
+    
+    // Convert binary string to base64
+    let base64;
+    try {
+      // Try btoa first (available in some React Native environments)
+      if (typeof btoa !== 'undefined') {
+        base64 = btoa(binary);
+      } else if (typeof Buffer !== 'undefined') {
+        // Fallback to Buffer (Node.js compatible)
+        base64 = Buffer.from(binary, 'binary').toString('base64');
+      } else {
+        // Fallback to manual base64 encoding
+        base64 = toBase64(binary);
+      }
+    } catch (e) {
+      // If btoa fails, try Buffer or manual encoding
+      if (typeof Buffer !== 'undefined') {
+        base64 = Buffer.from(binary, 'binary').toString('base64');
+      } else {
+        base64 = toBase64(binary);
+      }
+    }
+
+    // Create filename with timestamp
+    const timestamp = new Date().toISOString().split('T')[0];
+    const filename = `Enquiries_Report_${timestamp}`;
+    const fileUri = `${RNFS.DownloadDirectoryPath}/${filename}.pdf`;
+
+    // Save file using react-native-fs
+    await RNFS.writeFile(fileUri, base64, 'base64');
+
+    // Verify file exists and is not empty
+    const fileExists = await RNFS.exists(fileUri);
+    if (!fileExists) {
+      throw new Error('PDF file was not saved successfully');
+    }
+
+    const fileStats = await RNFS.stat(fileUri);
+    if (fileStats.size === 0) {
+      throw new Error('Saved PDF file is empty');
+    }
+
+    if (__DEV__) {
+      console.log('✅ PDF downloaded successfully');
+      console.log('File path:', fileUri);
+      console.log('File size:', fileStats.size, 'bytes');
+    }
+
+    if (options.onProgress) {
+      options.onProgress({ status: 'sharing', message: 'Opening share dialog...' });
+    }
+
+    // Share/open the PDF
+    await Share.open({
+      title: 'Download Enquiries PDF',
+      message: `Enquiries Report - ${timestamp}`,
+      url: `file://${fileUri}`,
+      type: 'application/pdf',
+      filename: filename,
+      subject: `Enquiries Report - ${timestamp}`,
+    });
+
+    return {
+      success: true,
+      filePath: fileUri,
+      filename: `${filename}.pdf`,
+    };
+  } catch (error) {
+    if (__DEV__) {
+      console.error('❌ PDF download error:', error);
+    }
+
+    // Handle user cancellation
+    if (error.message === 'User did not share' || error.message?.includes('User did not share')) {
+      return { success: false, cancelled: true };
+    }
+
+    // Re-throw other errors
+    throw error;
+  }
+};
+
 // Debug: Verify export is available
 if (__DEV__) {
   console.log('pdfGenerator.js module fully loaded. Exports available:', {
@@ -1752,6 +1923,7 @@ if (__DEV__) {
     downloadEnquiryPDF: typeof downloadEnquiryPDF !== 'undefined' ? 'YES' : 'NO',
     generateEnquiryHTML: typeof generateEnquiryHTML !== 'undefined' ? 'YES' : 'NO',
     generateEnquiriesListHTML: typeof generateEnquiriesListHTML !== 'undefined' ? 'YES' : 'NO',
+    downloadEnquiriesPDFFromBackend: typeof downloadEnquiriesPDFFromBackend !== 'undefined' ? 'YES' : 'NO',
   });
 }
 
