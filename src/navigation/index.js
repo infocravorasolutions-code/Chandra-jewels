@@ -6,7 +6,7 @@ import { AnimatedLogoLoader } from '../components/common';
 import { navigationRef } from './navigationRef';
 import { processPendingNotification } from '../utils/notificationNavigation';
 
-const AppNavigator = () => {
+const AppNavigator = ({ showOnboarding, onOnboardingComplete }) => {
   const { isAuthenticated, isLoading } = useAuth();
 
   // Process pending notification when both navigation and auth are ready
@@ -56,7 +56,11 @@ const AppNavigator = () => {
         }
       }}
     >
-      <StackNavigator isAuthenticated={isAuthenticated} />
+      <StackNavigator 
+        isAuthenticated={isAuthenticated}
+        showOnboarding={showOnboarding}
+        onOnboardingComplete={onOnboardingComplete}
+      />
     </NavigationContainer>
   );
 };

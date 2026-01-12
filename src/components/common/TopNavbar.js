@@ -59,12 +59,11 @@ const TopNavbar = ({ navigation }) => {
               style={styles.logoImage}
               resizeMode="contain"
             />
-            {/* Header Logo Image */}
-            <Image 
-              source={images.headerLogo}
-              style={styles.headerLogoImage}
-              resizeMode="contain"
-            />
+            {/* Brand mark as text (crisp on real devices vs small raster image) */}
+            <View style={styles.brandMark}>
+              <Text style={styles.brandMarkPrimary}>CHANDRA</Text>
+              <Text style={styles.brandMarkSecondary}>JEWELS</Text>
+            </View>
           </View>
         </View>
 
@@ -167,10 +166,26 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
   },
-  headerLogoImage: {
-    width: 120,
-    height: 50,
+  brandMark: {
     marginLeft: 8,
+    justifyContent: 'center',
+    flexShrink: 1,
+  },
+  brandMarkPrimary: {
+    fontFamily: fonts.medium,
+    fontSize: 22,
+    lineHeight: 20,
+  color: '#c0a46e',
+    letterSpacing: 0.5,
+    includeFontPadding: false,
+  },
+  brandMarkSecondary: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 12,
+    color: '#c0a46e',
+    letterSpacing: 1.2,
+    includeFontPadding: false,
   },
   rightSection: {
     flexDirection: 'row',

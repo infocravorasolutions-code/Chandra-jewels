@@ -46,9 +46,17 @@ export const StatusCard = ({ title, value, icon, color = colors.primary, valueCo
 
 export const EnquiryStatusCard = ({ status, value, color, borderColor, icon, onPress, style }) => (
   <Card style={[styles.enquiryStatusCard, { borderColor: borderColor || color }, style]} onPress={onPress}>
-    <Text style={styles.statusLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
-      {status}
-    </Text>
+    <View style={styles.statusLabelContainer}>
+      <Text 
+        style={styles.statusLabel} 
+        numberOfLines={2} 
+        adjustsFontSizeToFit 
+        minimumFontScale={0.6}
+        allowFontScaling={true}
+      >
+        {status}
+      </Text>
+    </View>
     <Text style={styles.statusValue}>{formatCount(value)}</Text>
   </Card>
 );
@@ -1256,7 +1264,8 @@ const styles = StyleSheet.create({
   enquiryStatusCard: {
     backgroundColor: colors.textWhite || '#FFFFFF',
     borderRadius: 10,
-    padding: 12,
+    padding: 8,
+    paddingVertical: 10,
     marginBottom: 12,
     borderWidth: 2,
     borderColor: '#E5E5E5',
@@ -1291,13 +1300,22 @@ const styles = StyleSheet.create({
   statusIconContainer: {
     marginLeft: 2,
   },
+  statusLabelContainer: {
+    width: '100%',
+    minHeight: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   statusLabel: {
-    fontSize: fonts.xs || 11,
+    fontSize: 9,
     fontFamily: fonts.medium || fonts.regular,
     color: colors.textPrimary || '#000000',
     textAlign: 'center',
-    marginBottom: 6,
-    flexWrap: 'wrap',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    lineHeight: 12,
+    width: '100%',
   },
   statusValue: {
     fontSize: fonts.xl || 24,

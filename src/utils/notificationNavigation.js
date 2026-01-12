@@ -332,7 +332,6 @@ export const navigateFromNotification = (notificationData, isRetry = false) => {
         case 'design':
         case 'design_uploaded':
         case 'design_updated':
-        case 'asset_upload':
           // Check if we have enquiryId
           const designEnquiryId = enquiryId && enquiryId !== notificationId ? enquiryId : null;
           
@@ -367,6 +366,70 @@ export const navigateFromNotification = (notificationData, isRetry = false) => {
               return;
             } else {
               console.warn('[Notification Navigation] ⚠️ Could not extract enquiry name from design notification');
+              navigationRef.navigate('MainTabs', { screen: 'Enquiries' });
+              return;
+            }
+          }
+          break;
+        case 'asset_upload':
+        case 'uploaded':
+        case 'file_uploaded':
+        case 'reference_uploaded':
+        case 'image_uploaded':
+          // Reference images/uploads should navigate to SingleEnquiry, not DesignViewer
+          // Check if this is actually a design upload (has designType or mentions "design" in message)
+          const uploadMessage = data.message || data.Message || data.body || data.Body || '';
+          const isDesignUpload = /design/i.test(uploadMessage) || /coral/i.test(uploadMessage) || /cad/i.test(uploadMessage) || data.designType || data.DesignType;
+          
+          if (isDesignUpload) {
+            // This is a design upload, handle like design_uploaded
+            const uploadDesignEnquiryId = enquiryId && enquiryId !== notificationId ? enquiryId : null;
+            
+            if (uploadDesignEnquiryId) {
+              navigationRef.navigate('DesignViewer', {
+                enquiryId: uploadDesignEnquiryId,
+                designType: data.designType || data.DesignType || designType || 'cad',
+              });
+              return;
+            } else {
+              // Extract enquiry name for design upload
+              const enquiryNameMatch = uploadMessage.match(/enquiry\s+"([^"]+)"/i) || 
+                                     uploadMessage.match(/enquiry\s+([^".]+)/i);
+              
+              if (enquiryNameMatch && enquiryNameMatch[1]) {
+                const enquiryName = enquiryNameMatch[1].trim();
+                const isCoral = /coral/i.test(uploadMessage);
+                const detectedDesignType = isCoral ? 'coral' : (designType || 'cad');
+                searchAndNavigateToDesign(enquiryName, detectedDesignType);
+                return;
+              }
+            }
+          }
+          
+          // Default: Reference image upload - navigate to SingleEnquiry
+          const uploadEnquiryId = enquiryId && enquiryId !== notificationId ? enquiryId : null;
+          
+          if (uploadEnquiryId) {
+            console.log('[Notification Navigation] ✅ Navigating to: SingleEnquiry screen (reference upload) with enquiryId:', uploadEnquiryId);
+            navigationRef.navigate('SingleEnquiry', { enquiryId: uploadEnquiryId });
+            return;
+          } else {
+            // Try to extract enquiry name from message
+            const message = data.message || data.Message || data.body || data.Body || '';
+            console.log('[Notification Navigation] 🔍 Upload notification, extracting enquiry name from message:', message);
+            
+            const enquiryNameMatch = message.match(/enquiry\s+"([^"]+)"/i) || 
+                                   message.match(/enquiry\s+([^".]+)/i);
+            
+            if (enquiryNameMatch && enquiryNameMatch[1]) {
+              const enquiryName = enquiryNameMatch[1].trim();
+              console.log('[Notification Navigation] 🔍 Extracted enquiry name for upload:', enquiryName);
+              
+              // Search for enquiry and navigate to SingleEnquiry (not DesignViewer)
+              searchAndNavigateToEnquiry(enquiryName);
+              return;
+            } else {
+              console.warn('[Notification Navigation] ⚠️ Could not extract enquiry name from upload notification');
               navigationRef.navigate('MainTabs', { screen: 'Enquiries' });
               return;
             }

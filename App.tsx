@@ -18,22 +18,35 @@ import { AlertProvider } from './src/context/AlertContext';
 import UsersProvider from './src/components/providers/UsersProvider';
 import PushNotificationsInitializer from './src/components/providers/PushNotificationsInitializer';
 import SocketConnectionManager from './src/components/providers/SocketConnectionManager';
+import { isFirstLaunch } from './src/utils/firstLaunch';
 
 const AppContent = () => {
   const isDarkMode = useColorScheme() === 'dark';
   const { isLoading: authLoading } = useAuth();
   const [splashFinished, setSplashFinished] = useState(false);
+  const [checkingFirstLaunch, setCheckingFirstLaunch] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   
-  // Auth state is now checked by AuthContext on mount
-  // No need to dispatch checkAuthState here
+  // Check first launch after splash finishes
+  useEffect(() => {
+    const checkFirstLaunch = async () => {
+      if (splashFinished && !authLoading) {
+        const firstLaunch = await isFirstLaunch();
+        setShowOnboarding(firstLaunch);
+        setCheckingFirstLaunch(false);
+      }
+    };
+    
+    checkFirstLaunch();
+  }, [splashFinished, authLoading]);
 
   // Show splash screen first
   if (!splashFinished) {
     return <SplashScreen onAnimationFinish={() => setSplashFinished(true)} />;
   }
 
-  // Show loader while auth is loading
-  if (authLoading) {
+  // Show loader while checking first launch or auth is loading
+  if (checkingFirstLaunch || authLoading) {
     return <AnimatedLogoLoader size={50} />;
   }
 
@@ -45,7 +58,7 @@ const AppContent = () => {
           <AlertProvider>
             <PushNotificationsInitializer />
             <SocketConnectionManager />
-            <AppNavigator />
+            <AppNavigator showOnboarding={showOnboarding} onOnboardingComplete={() => setShowOnboarding(false)} />
           </AlertProvider>
         </UsersProvider>
       </SafeAreaProvider>

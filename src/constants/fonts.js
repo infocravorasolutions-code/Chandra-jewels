@@ -20,6 +20,17 @@ export const fonts = {
   light: 'AvenirLTStd-Light',        // Light weight
   black: 'AvenirLTStd-Black',        // Extra bold
   book: 'AvenirLTStd-Book',          // Book weight (lighter than regular)
+
+  // Montserrat (optional; add .ttf files under src/assets/fonts and run `npx react-native-asset`)
+  // Expected file names (examples):
+  // - Montserrat-Bold.ttf      -> "Montserrat-Bold"
+  // - Montserrat-SemiBold.ttf  -> "Montserrat-SemiBold"
+  // - Montserrat-Medium.ttf    -> "Montserrat-Medium"
+  // - Montserrat-Regular.ttf   -> "Montserrat-Regular"
+  montserratRegular: 'Montserrat-Regular',
+  montserratMedium: 'Montserrat-Medium',
+  montserratSemiBold: 'Montserrat-SemiBold',
+  montserratBold: 'Montserrat-Bold',
   
   // ==================== FONT SIZES ====================
   // Responsive font sizes (scaled based on device)

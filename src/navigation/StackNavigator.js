@@ -5,6 +5,7 @@ import { fonts } from '../constants/fonts';
 
 // Import screens
 import LoginScreen from '../screens/Auth/LoginScreen';
+import OnboardingScreen from '../screens/Onboarding/OnboardingScreen';
 import BottomTabs from './BottomTabs';
 import SingleEnquiryScreen from '../screens/Enquiries/SingleEnquiryScreen';
 import AddEnquiryStep1Screen from '../screens/AddEnquiry/AddEnquiryStep1Screen';
@@ -30,7 +31,7 @@ import UploadDesignScreen from '../screens/UploadDesign/UploadDesignScreen';
 
 const Stack = createStackNavigator();
 
-const StackNavigator = ({ isAuthenticated }) => {
+const StackNavigator = ({ isAuthenticated, showOnboarding, onOnboardingComplete }) => {
   
   return (
     <Stack.Navigator
@@ -202,13 +203,29 @@ const StackNavigator = ({ isAuthenticated }) => {
         </>
       ) : (
         // Unauthenticated screens
-        <Stack.Screen
-          name="Login"
-          component={LoginScreen}
-          options={{
-            headerShown: false,
-          }}
-        />
+        <>
+          {showOnboarding ? (
+            <Stack.Screen
+              name="Onboarding"
+              options={{
+                headerShown: false,
+              }}>
+              {(props) => (
+                <OnboardingScreen
+                  {...props}
+                  onComplete={onOnboardingComplete}
+                />
+              )}
+            </Stack.Screen>
+          ) : null}
+          <Stack.Screen
+            name="Login"
+            component={LoginScreen}
+            options={{
+              headerShown: false,
+            }}
+          />
+        </>
       )}
     </Stack.Navigator>
   );

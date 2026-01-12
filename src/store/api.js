@@ -3273,10 +3273,35 @@ export const api = createApi({
           // Handle paginated response format from guide: { Total, page, limit, TotalPages, Data }
           if (data.Data && Array.isArray(data.Data)) {
             chatsArray = data.Data;
+            // Store pagination metadata in meta for access
+            if (meta) {
+              meta.pagination = {
+                total: data.Total || data.total || 0,
+                page: data.page || data.Page || arg.page || 1,
+                limit: data.limit || data.Limit || arg.limit || 10,
+                totalPages: data.TotalPages || data.totalPages || 1,
+              };
+            }
           } else if (data.chats && Array.isArray(data.chats)) {
             chatsArray = data.chats;
+            if (meta) {
+              meta.pagination = {
+                total: data.Total || data.total || 0,
+                page: data.page || data.Page || arg.page || 1,
+                limit: data.limit || data.Limit || arg.limit || 10,
+                totalPages: data.TotalPages || data.totalPages || 1,
+              };
+            }
           } else if (data.data && Array.isArray(data.data)) {
             chatsArray = data.data;
+            if (meta) {
+              meta.pagination = {
+                total: data.Total || data.total || 0,
+                page: data.page || data.Page || arg.page || 1,
+                limit: data.limit || data.Limit || arg.limit || 10,
+                totalPages: data.TotalPages || data.totalPages || 1,
+              };
+            }
           } else {
             
             return [];

@@ -34,7 +34,7 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string/>
 	<key>NSCameraUsageDescription</key>
 	<string>We need access to your camera to take photos for enquiry references</string>
 	<key>NSPhotoLibraryUsageDescription</key>
