@@ -2,10 +2,11 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   View,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   RefreshControl,
   Text,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,8 +23,42 @@ import { fonts } from '../../constants/fonts';
 import Icon from '../../components/common/Icon';
 import { formatDateTime, truncateText } from '../../utils/helpers';
 import { getUserName } from '../../utils/userUtils';
+
+// Format time like WhatsApp (short format)
+const formatShortTime = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffTime = today - messageDate;
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 0) {
+    // Today - show time only
+    return date.toLocaleString('en-IN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).toLowerCase();
+  } else if (diffDays === 1) {
+    // Yesterday
+    return 'Yesterday';
+  } else if (diffDays < 7) {
+    // This week - show day name
+    return date.toLocaleDateString('en-IN', { weekday: 'short' });
+  } else {
+    // Older - show date
+    return date.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+};
 import { useUsers } from '../../features/users/usersHooks';
 import socketService from '../../services/socketService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_BASE_URL } from '../../config/apiConfig';
 
 const ChatsScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -34,6 +69,17 @@ const ChatsScreen = ({ navigation }) => {
   // Track typing status per chat: { chatId: { isTyping: boolean, userName: string } }
   const [typingStatus, setTypingStatus] = useState({});
   const typingTimeoutsRef = useRef({}); // Store timeouts per chat
+  
+  // Pagination state for both chat types
+  const [page1, setPage1] = useState(1);
+  const [page2, setPage2] = useState(1);
+  const [hasMore1, setHasMore1] = useState(true);
+  const [hasMore2, setHasMore2] = useState(true);
+  const [isLoadingMore1, setIsLoadingMore1] = useState(false);
+  const [isLoadingMore2, setIsLoadingMore2] = useState(false);
+  const [allChats1, setAllChats1] = useState([]); // Accumulated chats for type 1
+  const [allChats2, setAllChats2] = useState([]); // Accumulated chats for type 2
+  const PAGE_SIZE = 25; // Load 25 chats per page
   
   // Load users to enable name lookup by ID
   const { users: usersList } = useUsers();
@@ -138,7 +184,7 @@ const ChatsScreen = ({ navigation }) => {
     error: chatsError1, 
     refetch: refetchChats1 
   } = useGetChatsQuery(
-    { page: 1, limit: 50, search: searchQuery, type: chatType1 },
+    { page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType1 },
     {
       skip: !user,
       refetchOnFocus: true, // Refetch when screen comes into focus
@@ -153,13 +199,437 @@ const ChatsScreen = ({ navigation }) => {
     error: chatsError2, 
     refetch: refetchChats2 
   } = useGetChatsQuery(
-    { page: 1, limit: 50, search: searchQuery, type: chatType2 },
+    { page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType2 },
     {
       skip: !user || !isAdmin || !chatType2,
       refetchOnFocus: true, // Refetch when screen comes into focus
       pollingInterval: 5000, // Poll every 5 seconds as safety net (WebSocket handles instant updates)
     }
   );
+
+  // Reset pagination when search query changes
+  useEffect(() => {
+    setPage1(1);
+    setPage2(1);
+    setAllChats1([]);
+    setAllChats2([]);
+    setHasMore1(true);
+    setHasMore2(true);
+    hasLoadedMore1Ref.current = false; // Reset refs when search changes
+    hasLoadedMore2Ref.current = false;
+  }, [searchQuery, chatType1, chatType2]);
+
+  // Update accumulated chats when API data changes (for first page only)
+  // Use a ref to track if we've manually loaded more pages to prevent overwriting
+  const hasLoadedMore1Ref = useRef(false);
+  const hasLoadedMore2Ref = useRef(false);
+
+  useEffect(() => {
+    if (!chatsLoading1 && chatsFromAPI1 && Array.isArray(chatsFromAPI1) && chatsFromAPI1.length > 0) {
+      // Only update if we're on page 1 and haven't manually loaded more pages
+      if (page1 === 1 && !hasLoadedMore1Ref.current) {
+        // First page - replace all chats
+        if (__DEV__) {
+          console.log('🔄 [ChatsScreen] Updating allChats1 from RTK Query (page 1):', {
+            count: chatsFromAPI1.length,
+          });
+        }
+        setAllChats1(chatsFromAPI1);
+        // Check if there are more pages
+        const hasMore = chatsFromAPI1.length >= PAGE_SIZE;
+        setHasMore1(hasMore);
+      } else if (page1 === 1 && hasLoadedMore1Ref.current) {
+        // Page was reset to 1 (e.g., after search or refresh), reset the ref
+        hasLoadedMore1Ref.current = false;
+        setAllChats1(chatsFromAPI1);
+        const hasMore = chatsFromAPI1.length >= PAGE_SIZE;
+        setHasMore1(hasMore);
+      }
+    }
+  }, [chatsFromAPI1, chatsLoading1, page1]);
+
+  useEffect(() => {
+    if (!chatsLoading2 && chatsFromAPI2 && Array.isArray(chatsFromAPI2) && chatsFromAPI2.length > 0) {
+      // Only update if we're on page 2 and haven't manually loaded more pages
+      if (page2 === 1 && !hasLoadedMore2Ref.current) {
+        // First page - replace all chats
+        if (__DEV__) {
+          console.log('🔄 [ChatsScreen] Updating allChats2 from RTK Query (page 1):', {
+            count: chatsFromAPI2.length,
+          });
+        }
+        setAllChats2(chatsFromAPI2);
+        // Check if there are more pages
+        const hasMore = chatsFromAPI2.length >= PAGE_SIZE;
+        setHasMore2(hasMore);
+      } else if (page2 === 1 && hasLoadedMore2Ref.current) {
+        // Page was reset to 1 (e.g., after search or refresh), reset the ref
+        hasLoadedMore2Ref.current = false;
+        setAllChats2(chatsFromAPI2);
+        const hasMore = chatsFromAPI2.length >= PAGE_SIZE;
+        setHasMore2(hasMore);
+      }
+    }
+  }, [chatsFromAPI2, chatsLoading2, page2]);
+
+  // Helper function to normalize chat data (same as RTK Query transformResponse)
+  const normalizeChat = useCallback((chat) => {
+    // Handle MongoDB ObjectId format for enquiryId
+    let enquiryId = chat.EnquiryId || chat.enquiryId;
+    if (enquiryId?.$oid) {
+      enquiryId = enquiryId.$oid;
+    } else if (enquiryId?._id) {
+      enquiryId = enquiryId._id;
+    }
+    
+    // Handle MongoDB ObjectId format for chat ID
+    let chatId = chat._id;
+    if (chatId?.$oid) {
+      chatId = chatId.$oid;
+    } else if (chatId?._id) {
+      chatId = chatId._id;
+    } else {
+      chatId = chatId || chat.id;
+    }
+    
+    // Handle timestamp
+    let lastMessageTime = chat.LastMessageTime || chat.lastMessageTime || chat.updatedAt || chat.UpdatedAt;
+    if (lastMessageTime?.$date) {
+      lastMessageTime = lastMessageTime.$date;
+    } else if (lastMessageTime?.Timestamp) {
+      lastMessageTime = lastMessageTime.Timestamp;
+    }
+    
+    // Handle LastMessage
+    let lastMessageText = '';
+    let lastMessageSenderName = '';
+    let lastMessageSenderId = '';
+    const lastMessageObj = chat.LastMessage || chat.lastMessage;
+    if (lastMessageObj) {
+      if (typeof lastMessageObj === 'string') {
+        lastMessageText = lastMessageObj;
+      } else if (typeof lastMessageObj === 'object') {
+        lastMessageText = lastMessageObj.Message || lastMessageObj.message || lastMessageObj.text || lastMessageObj.Text || '';
+        if (lastMessageObj.Sender && typeof lastMessageObj.Sender === 'object') {
+          lastMessageSenderName = lastMessageObj.Sender.name || lastMessageObj.Sender.Name || '';
+          lastMessageSenderId = lastMessageObj.Sender._id || lastMessageObj.Sender.Id || lastMessageObj.Sender.id || '';
+        } else if (typeof lastMessageObj.Sender === 'string') {
+          lastMessageSenderName = lastMessageObj.Sender;
+        } else {
+          lastMessageSenderName = lastMessageObj.SenderName || lastMessageObj.senderName || lastMessageObj.sender || '';
+        }
+        lastMessageSenderId = lastMessageSenderId || lastMessageObj.SenderId || lastMessageObj.senderId || '';
+      }
+    } else {
+      lastMessageText = chat.message || '';
+    }
+    
+    // Handle LastSender
+    let lastSenderName = lastMessageSenderName || '';
+    let lastSenderId = chat.LastSenderId || chat.lastSenderId || lastMessageSenderId;
+    const lastSenderObj = chat.LastSender || chat.lastSender;
+    if (lastSenderObj && !lastSenderName) {
+      if (typeof lastSenderObj === 'string') {
+        lastSenderName = lastSenderObj;
+      } else if (typeof lastSenderObj === 'object') {
+        lastSenderId = lastSenderId || lastSenderObj.Id || lastSenderObj._id || lastSenderObj.id || lastSenderObj.SenderId || lastSenderObj.senderId;
+        lastSenderName = lastSenderObj.Name || lastSenderObj.name || lastSenderObj.SenderName || lastSenderObj.senderName || '';
+      }
+    }
+    
+    // Extract unread count
+    let unreadCount = 0;
+    if (chat.UnreadCount !== undefined && chat.UnreadCount !== null) {
+      unreadCount = Number(chat.UnreadCount) || 0;
+    } else if (chat.unreadCount !== undefined && chat.unreadCount !== null) {
+      unreadCount = Number(chat.unreadCount) || 0;
+    }
+    
+    return {
+      id: chatId,
+      _id: chatId,
+      enquiryId: enquiryId || chat.Enquiry?.id || chat.enquiry?.id,
+      enquiryTitle: chat.EnquiryName || chat.enquiryName || chat.EnquiryTitle || chat.enquiryTitle || chat.Enquiry?.Name || chat.Enquiry?.title || 'Untitled Chat',
+      clientName: chat.ClientName || chat.clientName || chat.Client?.Name || chat.client?.name || '',
+      lastMessage: lastMessageText,
+      lastMessageTime: lastMessageTime || new Date().toISOString(),
+      unreadCount: unreadCount,
+      _originalData: chat,
+      isGroup: chat.IsGroup || chat.isGroup || false,
+      participants: chat.Participants || chat.participants || [],
+      lastSender: lastSenderName,
+      lastSenderId: lastSenderId,
+      lastMessageSenderName: lastMessageSenderName,
+      lastMessageSenderId: lastMessageSenderId,
+      status: chat.Status || chat.status || 'active',
+      isClient: chat.IsClient || chat.isClient || false,
+      type: chat.Type || chat.type || null,
+      Type: chat.Type || chat.type || null,
+    };
+  }, []);
+
+  // Load more chats for type 1
+  const loadMoreChats1 = useCallback(async () => {
+    if (isLoadingMore1 || !hasMore1 || !chatType1) {
+      if (__DEV__) {
+        console.log('⏸️ [ChatsScreen] loadMoreChats1 skipped:', {
+          isLoadingMore1,
+          hasMore1,
+          chatType1,
+          page1,
+        });
+      }
+      return;
+    }
+
+    if (__DEV__) {
+      console.log('🔄 [ChatsScreen] Loading more chats (type 1):', {
+        currentPage: page1,
+        nextPage: page1 + 1,
+        currentCount: allChats1.length,
+        hasMore1,
+      });
+    }
+
+    setIsLoadingMore1(true);
+    try {
+      const nextPage = page1 + 1;
+      const token = await AsyncStorage.getItem('token');
+      const params = new URLSearchParams();
+      params.append('page', nextPage.toString());
+      params.append('limit', PAGE_SIZE.toString());
+      if (searchQuery) {
+        params.append('search', searchQuery);
+      }
+      params.append('type', chatType1);
+
+      const url = `${API_BASE_URL}/api/chats?${params.toString()}`;
+      if (__DEV__) {
+        console.log('📡 [ChatsScreen] Fetching:', url);
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      let rawChats = [];
+      
+      if (Array.isArray(data)) {
+        rawChats = data;
+      } else if (data.Data && Array.isArray(data.Data)) {
+        rawChats = data.Data;
+      } else if (data.chats && Array.isArray(data.chats)) {
+        rawChats = data.chats;
+      } else if (data.data && Array.isArray(data.data)) {
+        rawChats = data.data;
+      }
+
+      if (__DEV__) {
+        console.log('📥 [ChatsScreen] Received raw chats:', {
+          count: rawChats.length,
+          page: nextPage,
+        });
+      }
+
+      if (rawChats.length > 0) {
+        // Normalize chats using the same logic as RTK Query
+        const normalizedChats = rawChats.map(normalizeChat);
+        
+        if (__DEV__) {
+          console.log('📦 [ChatsScreen] Normalized chats (type 1):', {
+            rawCount: rawChats.length,
+            normalizedCount: normalizedChats.length,
+            sampleIds: normalizedChats.slice(0, 3).map(c => c.id || c._id),
+          });
+        }
+        
+        // Merge with existing chats, avoiding duplicates
+        setAllChats1(prev => {
+          const existingIds = new Set(prev.map(c => String(c.id || c._id || '')));
+          const uniqueNew = normalizedChats.filter(c => {
+            const chatId = String(c.id || c._id || '');
+            return chatId && chatId !== 'undefined' && chatId !== 'null' && !existingIds.has(chatId);
+          });
+          const merged = [...prev, ...uniqueNew];
+          
+          if (__DEV__) {
+            console.log('✅ [ChatsScreen] Merged chats (type 1):', {
+              previousCount: prev.length,
+              newCount: uniqueNew.length,
+              totalCount: merged.length,
+              hasMore: normalizedChats.length >= PAGE_SIZE,
+            });
+          }
+          
+          return merged;
+        });
+        setPage1(nextPage);
+        hasLoadedMore1Ref.current = true; // Mark that we've manually loaded more
+        // Update hasMore: true if we got a full page, false otherwise
+        const stillHasMore = normalizedChats.length >= PAGE_SIZE;
+        setHasMore1(stillHasMore);
+        
+        if (__DEV__) {
+          console.log('📊 [ChatsScreen] Updated pagination state (type 1):', {
+            newPage: nextPage,
+            hasMore: stillHasMore,
+            receivedCount: normalizedChats.length,
+            pageSize: PAGE_SIZE,
+          });
+        }
+      } else {
+        if (__DEV__) {
+          console.log('ℹ️ [ChatsScreen] No more chats to load (type 1) - empty response');
+        }
+        setHasMore1(false);
+      }
+    } catch (error) {
+      console.error('❌ [ChatsScreen] Error loading more chats (type 1):', error);
+      setHasMore1(false);
+    } finally {
+      setIsLoadingMore1(false);
+    }
+  }, [page1, hasMore1, isLoadingMore1, chatType1, searchQuery, allChats1.length, normalizeChat]);
+
+  // Load more chats for type 2
+  const loadMoreChats2 = useCallback(async () => {
+    if (isLoadingMore2 || !hasMore2 || !chatType2 || !isAdmin) {
+      if (__DEV__) {
+        console.log('⏸️ [ChatsScreen] loadMoreChats2 skipped:', {
+          isLoadingMore2,
+          hasMore2,
+          chatType2,
+          isAdmin,
+          page2,
+        });
+      }
+      return;
+    }
+
+    if (__DEV__) {
+      console.log('🔄 [ChatsScreen] Loading more chats (type 2):', {
+        currentPage: page2,
+        nextPage: page2 + 1,
+        currentCount: allChats2.length,
+        hasMore2,
+      });
+    }
+
+    setIsLoadingMore2(true);
+    try {
+      const nextPage = page2 + 1;
+      const token = await AsyncStorage.getItem('token');
+      const params = new URLSearchParams();
+      params.append('page', nextPage.toString());
+      params.append('limit', PAGE_SIZE.toString());
+      if (searchQuery) {
+        params.append('search', searchQuery);
+      }
+      params.append('type', chatType2);
+
+      const url = `${API_BASE_URL}/api/chats?${params.toString()}`;
+      if (__DEV__) {
+        console.log('📡 [ChatsScreen] Fetching:', url);
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      let rawChats = [];
+      
+      if (Array.isArray(data)) {
+        rawChats = data;
+      } else if (data.Data && Array.isArray(data.Data)) {
+        rawChats = data.Data;
+      } else if (data.chats && Array.isArray(data.chats)) {
+        rawChats = data.chats;
+      } else if (data.data && Array.isArray(data.data)) {
+        rawChats = data.data;
+      }
+
+      if (__DEV__) {
+        console.log('📥 [ChatsScreen] Received raw chats:', {
+          count: rawChats.length,
+          page: nextPage,
+        });
+      }
+
+      if (rawChats.length > 0) {
+        // Normalize chats using the same logic as RTK Query
+        const normalizedChats = rawChats.map(normalizeChat);
+        
+        if (__DEV__) {
+          console.log('📦 [ChatsScreen] Normalized chats (type 2):', {
+            rawCount: rawChats.length,
+            normalizedCount: normalizedChats.length,
+            sampleIds: normalizedChats.slice(0, 3).map(c => c.id || c._id),
+          });
+        }
+        
+        // Merge with existing chats, avoiding duplicates
+        setAllChats2(prev => {
+          const existingIds = new Set(prev.map(c => String(c.id || c._id || '')));
+          const uniqueNew = normalizedChats.filter(c => {
+            const chatId = String(c.id || c._id || '');
+            return chatId && chatId !== 'undefined' && chatId !== 'null' && !existingIds.has(chatId);
+          });
+          const merged = [...prev, ...uniqueNew];
+          
+          if (__DEV__) {
+            console.log('✅ [ChatsScreen] Merged chats (type 2):', {
+              previousCount: prev.length,
+              newCount: uniqueNew.length,
+              totalCount: merged.length,
+              hasMore: normalizedChats.length >= PAGE_SIZE,
+            });
+          }
+          
+          return merged;
+        });
+        setPage2(nextPage);
+        hasLoadedMore2Ref.current = true; // Mark that we've manually loaded more
+        // Update hasMore: true if we got a full page, false otherwise
+        const stillHasMore = normalizedChats.length >= PAGE_SIZE;
+        setHasMore2(stillHasMore);
+        
+        if (__DEV__) {
+          console.log('📊 [ChatsScreen] Updated pagination state (type 2):', {
+            newPage: nextPage,
+            hasMore: stillHasMore,
+            receivedCount: normalizedChats.length,
+            pageSize: PAGE_SIZE,
+          });
+        }
+      } else {
+        if (__DEV__) {
+          console.log('ℹ️ [ChatsScreen] No more chats to load (type 2) - empty response');
+        }
+        setHasMore2(false);
+      }
+    } catch (error) {
+      console.error('❌ [ChatsScreen] Error loading more chats (type 2):', error);
+      setHasMore2(false);
+    } finally {
+      setIsLoadingMore2(false);
+    }
+  }, [page2, hasMore2, isLoadingMore2, chatType2, searchQuery, isAdmin, allChats2.length, normalizeChat]);
 
   // Log when chat data changes
   useEffect(() => {
@@ -246,20 +716,21 @@ const ChatsScreen = ({ navigation }) => {
   }, []);
 
   // Merge both chat types for admins, and filter by type for non-admins
+  // Use accumulated chats (allChats1, allChats2) for pagination
   // Include forceUpdate in dependencies to trigger re-computation when cache updates
   const chatsFromAPI = useMemo(() => {
     console.log('🔄 [ChatsScreen] Computing chatsFromAPI', {
       timestamp: new Date().toISOString(),
       isAdmin,
       chatType2,
-      chatsFromAPI1Count: chatsFromAPI1?.length || 0,
-      chatsFromAPI2Count: chatsFromAPI2?.length || 0,
+      allChats1Count: allChats1?.length || 0,
+      allChats2Count: allChats2?.length || 0,
       forceUpdate,
     });
 
     if (isAdmin && chatType2) {
       // Merge both arrays and remove duplicates by chat ID
-      const allChats = [...(chatsFromAPI1 || []), ...(chatsFromAPI2 || [])];
+      const allChats = [...(allChats1 || []), ...(allChats2 || [])];
       const uniqueChats = Array.from(
         new Map(allChats.map(chat => [chat.id || chat._id, chat])).values()
       );
@@ -282,7 +753,7 @@ const ChatsScreen = ({ navigation }) => {
     }
     
     // For non-admins, filter chats by role
-    const chats = chatsFromAPI1 || [];
+    const chats = allChats1 || [];
     if (chats.length > 0 && roleId) {
       const filteredChats = filterChatsByRole(chats, roleId);
       // Enrich with sender names from cached users
@@ -336,7 +807,7 @@ const ChatsScreen = ({ navigation }) => {
       })),
     });
     return enrichedChats;
-  }, [chatsFromAPI1, chatsFromAPI2, isAdmin, chatType2, chatType1, roleId, filterChatsByRole, enrichChatsWithSenderNames, forceUpdate]);
+  }, [allChats1, allChats2, isAdmin, chatType2, chatType1, roleId, filterChatsByRole, enrichChatsWithSenderNames, forceUpdate]);
 
   // Combined loading and error states
   const chatsLoading = chatsLoading1 || (isAdmin && chatsLoading2);
@@ -729,7 +1200,7 @@ const ChatsScreen = ({ navigation }) => {
           // Update chatType1 query cache
           console.log('🔍 [ChatsScreen] Searching for chat in type1 cache', { chatId, chatType1 });
           dispatch(
-            api.util.updateQueryData('getChats', { page: 1, limit: 50, search: searchQuery, type: chatType1 }, (draft) => {
+            api.util.updateQueryData('getChats', { page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType1 }, (draft) => {
               if (!Array.isArray(draft)) {
                 console.warn('⚠️ [ChatsScreen] Draft is not an array (type1):', typeof draft);
                 return;
@@ -786,7 +1257,7 @@ const ChatsScreen = ({ navigation }) => {
           if (isAdmin && chatType2) {
             console.log('🔍 [ChatsScreen] Searching for chat in type2 cache', { chatId, chatType2 });
             dispatch(
-              api.util.updateQueryData('getChats', { page: 1, limit: 50, search: searchQuery, type: chatType2 }, (draft) => {
+              api.util.updateQueryData('getChats', { page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType2 }, (draft) => {
                 if (!Array.isArray(draft)) {
                   console.warn('⚠️ [ChatsScreen] Draft is not an array (type2):', typeof draft);
                   return;
@@ -1148,12 +1619,12 @@ const ChatsScreen = ({ navigation }) => {
 
         // Update both chat type queries
         console.log('🔄 [ChatsScreen] Updating type1 cache', { chatType1 });
-        const result1 = updateChatCache({ page: 1, limit: 50, search: searchQuery, type: chatType1 }, 'type1');
+        const result1 = updateChatCache({ page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType1 }, 'type1');
         foundInType1 = !!result1;
         
         if (isAdmin && chatType2) {
           console.log('🔄 [ChatsScreen] Updating type2 cache', { chatType2 });
-          const result2 = updateChatCache({ page: 1, limit: 50, search: searchQuery, type: chatType2 }, 'type2');
+          const result2 = updateChatCache({ page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType2 }, 'type2');
           foundInType2 = !!result2;
           chatFoundInCache = foundInType1 || foundInType2;
         } else {
@@ -1399,6 +1870,15 @@ const ChatsScreen = ({ navigation }) => {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    // Reset pagination state
+    setPage1(1);
+    setPage2(1);
+    setAllChats1([]);
+    setAllChats2([]);
+    setHasMore1(true);
+    setHasMore2(true);
+    hasLoadedMore1Ref.current = false; // Reset refs on refresh
+    hasLoadedMore2Ref.current = false;
     // Invalidate cache before refreshing
     dispatch(api.util.invalidateTags(['Chat']));
     await refetchChats();
@@ -1540,11 +2020,11 @@ const ChatsScreen = ({ navigation }) => {
 
           <View style={styles.chatContent}>
             <View style={styles.chatHeader}>
-              <Text style={styles.chatTitle}>
-                {chat.enquiryTitle || 'Untitled Chat'} - <Text style={{ fontSize: fonts.sm, fontFamily: fonts.regular }}>{(chat.Type || chat.type).split('-')[1]}</Text>
+              <Text style={styles.chatTitle} numberOfLines={1} ellipsizeMode="tail">
+                {chat.enquiryTitle || 'Untitled Chat'} - <Text style={{ fontSize: fonts.xs, fontFamily: fonts.regular }}>{(chat.Type || chat.type).split('-')[1]}</Text>
               </Text>
               <Text style={styles.chatTime}>
-                {chat.lastMessageTime ? formatDateTime(chat.lastMessageTime) : ''}
+                {chat.lastMessageTime ? formatShortTime(chat.lastMessageTime) : ''}
               </Text>
             </View>
 
@@ -1605,13 +2085,45 @@ const ChatsScreen = ({ navigation }) => {
         />
       </View>
 
-      <ScrollView
+      <FlatList
+        data={filteredChats.filter(chat => chat && chat.id)}
+        renderItem={({ item }) => renderChatItem(item)}
+        keyExtractor={(item) => String(item.id || item._id)}
         style={styles.scrollView}
+        contentContainerStyle={filteredChats.length === 0 ? styles.emptyContainer : styles.chatsList}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }>
-        
-        {filteredChats.length === 0 ? (
+        }
+        onEndReached={() => {
+          if (__DEV__) {
+            console.log('📜 [ChatsScreen] onEndReached triggered:', {
+              isAdmin,
+              hasMore1,
+              hasMore2,
+              isLoadingMore1,
+              isLoadingMore2,
+              currentCount1: allChats1.length,
+              currentCount2: allChats2.length,
+            });
+          }
+          // Load more when scrolling to bottom
+          if (isAdmin && chatType2) {
+            // For admins, load more from both types
+            if (hasMore1 && !isLoadingMore1) {
+              loadMoreChats1();
+            }
+            if (hasMore2 && !isLoadingMore2) {
+              loadMoreChats2();
+            }
+          } else {
+            // For non-admins, load more from type 1 only
+            if (hasMore1 && !isLoadingMore1) {
+              loadMoreChats1();
+            }
+          }
+        }}
+        onEndReachedThreshold={0.3}
+        ListEmptyComponent={
           <Card style={styles.emptyCard}>
             <Icon name="chat" size={40} color={colors.textLight} />
             <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.base }]}>
@@ -1621,16 +2133,16 @@ const ChatsScreen = ({ navigation }) => {
               {searchQuery ? 'Try adjusting your search' : 'Start a conversation from an enquiry'}
             </Text>
           </Card>
-        ) : (
-          <View style={styles.chatsList}>
-            {filteredChats
-              .filter(chat => chat && chat.id) // Filter out invalid chats
-              .map(renderChatItem)
-              .filter(item => item !== null) // Remove null items
-            }
-          </View>
-        )}
-      </ScrollView>
+        }
+        ListFooterComponent={
+          (isLoadingMore1 || isLoadingMore2) ? (
+            <View style={styles.loadingFooter}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={styles.loadingText}>Loading more chats...</Text>
+            </View>
+          ) : null
+        }
+      />
     </SafeAreaView>
   );
 };
@@ -1645,6 +2157,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  emptyContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingFooter: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 8,
+    fontSize: fonts.sm,
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   scrollView: {
     flex: 1,
@@ -1682,19 +2210,23 @@ const styles = StyleSheet.create({
   chatHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 4,
   },
   chatTitle: {
-    fontSize: 16, // standardized header size
-    fontFamily: fonts.bold,
+    fontSize: 14, // Smaller font size
+    fontFamily: fonts.semibold || fonts.bold,
     color: colors.textPrimary,
     flex: 1,
+    marginRight: 8,
+    paddingRight: 4,
   },
   chatTime: {
     color: colors.textLight,
-    fontSize: 13,
+    fontSize: 11, // Smaller font size
     fontFamily: fonts.regular,
+    marginTop: 2, // Align with title baseline
+    flexShrink: 0, // Don't shrink, take minimal space
   },
   chatFooter: {
     flexDirection: 'row',

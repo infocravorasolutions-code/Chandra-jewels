@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -11,6 +11,7 @@ import {
   TextInput,
   FlatList,
   Dimensions,
+  InteractionManager,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/cards/Cards';
@@ -790,6 +791,9 @@ const PricingScreen = ({ route, navigation }) => {
   // Modal state for editing pricing entry
   const [editingEntryIndex, setEditingEntryIndex] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [modalContentReady, setModalContentReady] = useState(false);
+  const modalTimeoutRef = useRef(null);
+  const isModalOpenRef = useRef(false);
   // Store original entry state when opening edit modal (for reverting on cancel)
   const [originalEntrySnapshot, setOriginalEntrySnapshot] = useState(null);
   // Modal state for adding new pricing entry
@@ -1787,12 +1791,26 @@ const PricingScreen = ({ route, navigation }) => {
             }
           }
           
-          // Handle DutiesAmount if it's separate from Client.Duties
+          // Handle DutiesAmount - check multiple possible locations in response
+          let dutiesAmountValue = null;
           if (response.DutiesAmount !== undefined && response.DutiesAmount !== null) {
+            dutiesAmountValue = response.DutiesAmount;
+          } else if (response.Client?.DutiesAmount !== undefined && response.Client?.DutiesAmount !== null) {
+            dutiesAmountValue = response.Client.DutiesAmount;
+          }
+          
+          if (dutiesAmountValue !== null) {
             // Update dutiesAmount in formData
-            updatedFormData.dutiesAmount = response.DutiesAmount.toString();
+            updatedFormData.dutiesAmount = parseFloat(dutiesAmountValue).toFixed(2);
             if (__DEV__) {
-              console.log('✅ Updated dutiesAmount:', updatedFormData.dutiesAmount, 'from', response.DutiesAmount);
+              console.log('✅ Updated dutiesAmount:', updatedFormData.dutiesAmount, 'from', dutiesAmountValue);
+            }
+          } else {
+            if (__DEV__) {
+              console.log('⚠️ DutiesAmount not found in response:', {
+                'response.DutiesAmount': response.DutiesAmount,
+                'response.Client?.DutiesAmount': response.Client?.DutiesAmount,
+              });
             }
           }
           
@@ -2162,14 +2180,21 @@ const PricingScreen = ({ route, navigation }) => {
         
         {/* Metal Rate and Quality Info for this pricing entry */}
         <View style={styles.pricingEntryInfo}>
-          {pricingMetalRate > 0 && (
+          <View style={styles.pricingEntryInfoRow}>
+            {pricingMetalRate > 0 && (
+              <>
+                <CustomText variant="body" style={styles.pricingEntryInfoText}>
+                  Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
+                </CustomText>
+                <CustomText variant="body" style={styles.pricingEntryInfoText}>
+                  {' • '}
+                </CustomText>
+              </>
+            )}
             <CustomText variant="body" style={styles.pricingEntryInfoText}>
-              Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
+              Metal Quality: {entryFormData.metalQuality || '10K'}
             </CustomText>
-          )}
-          <CustomText variant="body" style={styles.pricingEntryInfoText}>
-            Metal Quality: {entryFormData.metalQuality || '10K'}
-          </CustomText>
+          </View>
           <CustomText variant="body" style={styles.pricingEntryInfoText}>
             Duties Amount: ${(parseFloat(entryFormData.dutiesAmount) || 0).toFixed(2)}
           </CustomText>
@@ -2405,9 +2430,10 @@ const PricingScreen = ({ route, navigation }) => {
           </Modal>
           
           {entryStones.length > 0 ? (
-              <View style={styles.tableWrapper}>
-                {/* Table Header */}
-                    <View style={styles.tableHeader}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.tableScrollView}>
+                <View style={styles.tableWrapper}>
+                  {/* Table Header */}
+                      <View style={styles.tableHeader}>
                   <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
                       </View>
@@ -2423,7 +2449,7 @@ const PricingScreen = ({ route, navigation }) => {
                   <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexWeight]}>
                     <CustomText variant="caption" style={styles.tableHeaderText}>Wt</CustomText>
                       </View>
                   <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
@@ -2484,7 +2510,7 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexWeight]}>
                           <TextInput
                             style={styles.tableInput}
                             value={stone.Weight || '0'}
@@ -2557,7 +2583,8 @@ const PricingScreen = ({ route, navigation }) => {
                       </View>
                     ))}
                   </View>
-              </View>
+                </View>
+              </ScrollView>
             ) : (
               <CustomText variant="body" style={styles.noStonesText}>
                 No stones added yet. Click "Add Stone" to add stones.
@@ -2593,11 +2620,7 @@ const PricingScreen = ({ route, navigation }) => {
     const pricingMetalRate = pricingEntry?.Metal?.Rate || pricingEntry?.MetalRate || 0;
     
     return (
-      <Card key={index} style={styles.pricingEntryCard}>
-        <Heading level={4} style={styles.pricingEntryTitle}>
-          {getPricingEntryLabel(pricingEntry, index)}
-        </Heading>
-        
+      <View>
         {/* Metal Rate and Quality Info for this pricing entry */}
         <View style={styles.pricingEntryInfo}>
           {pricingMetalRate > 0 && (
@@ -2692,9 +2715,10 @@ const PricingScreen = ({ route, navigation }) => {
         {pricingStones.length > 0 && (
           <View style={styles.pricingEntryStonesContainer}>
             <Heading level={5} style={styles.pricingEntryStonesTitle}>Stones</Heading>
-            <View style={styles.tableWrapper}>
-                  {/* Table Header */}
-                  <View style={styles.tableHeader}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.tableScrollView}>
+              <View style={styles.tableWrapper}>
+                    {/* Table Header */}
+                    <View style={styles.tableHeader}>
                 <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
                     </View>
@@ -2710,7 +2734,7 @@ const PricingScreen = ({ route, navigation }) => {
                 <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexWeight]}>
                   <CustomText variant="caption" style={styles.tableHeaderText}>Wt</CustomText>
                     </View>
                 <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
@@ -2756,9 +2780,9 @@ const PricingScreen = ({ route, navigation }) => {
                             {stone.Sieve || '-'}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexWeight]}>
                       <CustomText variant="body" style={styles.tableCellText} numberOfLines={1}>
-                            {parseFloat(stone.Weight || 0).toFixed(3)}
+                            {parseFloat(stone.Weight || 0).toFixed(4)}
                           </CustomText>
                         </View>
                     <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
@@ -2772,7 +2796,7 @@ const PricingScreen = ({ route, navigation }) => {
                           </CustomText>
                         </View>
                     <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexPrice]}>
-                      <CustomText variant="body" style={styles.tableCellText} numberOfLines={1}>
+                      <CustomText variant="body" style={styles.tableCellText}>
                             ${parseFloat(stone.Price || 0).toFixed(2)}
                           </CustomText>
                         </View>
@@ -2784,10 +2808,11 @@ const PricingScreen = ({ route, navigation }) => {
                       </View>
                     ))}
                   </View>
-            </View>
+              </View>
+            </ScrollView>
           </View>
         )}
-      </Card>
+      </View>
     );
   };
 
@@ -2954,6 +2979,32 @@ const PricingScreen = ({ route, navigation }) => {
                         }
                         setEditingEntryIndex(index);
                         setShowEditModal(true);
+                        // Defer heavy rendering until after modal animation
+                        setModalContentReady(false);
+                        isModalOpenRef.current = true;
+                        // Clear any existing timeout
+                        if (modalTimeoutRef.current) {
+                          clearTimeout(modalTimeoutRef.current);
+                        }
+                        // Schedule content rendering after interactions complete
+                        InteractionManager.runAfterInteractions(() => {
+                          // Only set ready if modal is still open
+                          if (isModalOpenRef.current) {
+                            setModalContentReady(true);
+                          }
+                        });
+                        // Fallback: ensure content renders after 300ms even if interactions don't complete
+                        modalTimeoutRef.current = setTimeout(() => {
+                          if (isModalOpenRef.current) {
+                            setModalContentReady(prev => {
+                              // Only update if still false (interaction didn't complete yet)
+                              if (!prev) {
+                                return true;
+                              }
+                              return prev;
+                            });
+                          }
+                        }, 300);
                       }}
                       activeOpacity={0.8}
                     >
@@ -2999,8 +3050,15 @@ const PricingScreen = ({ route, navigation }) => {
             if (editingEntryIndex !== null) {
               restoreOriginalEntry(editingEntryIndex);
             }
+            // Clean up
+            isModalOpenRef.current = false;
+            if (modalTimeoutRef.current) {
+              clearTimeout(modalTimeoutRef.current);
+              modalTimeoutRef.current = null;
+            }
             setShowEditModal(false);
             setEditingEntryIndex(null);
+            setModalContentReady(false);
           }}
         >
           <View style={styles.modalContainer}>
@@ -3015,16 +3073,27 @@ const PricingScreen = ({ route, navigation }) => {
                   if (editingEntryIndex !== null) {
                     restoreOriginalEntry(editingEntryIndex);
                   }
+                  // Clean up
+                  isModalOpenRef.current = false;
+                  if (modalTimeoutRef.current) {
+                    clearTimeout(modalTimeoutRef.current);
+                    modalTimeoutRef.current = null;
+                  }
                   setShowEditModal(false);
                   setEditingEntryIndex(null);
+                  setModalContentReady(false);
                 }}
                 activeOpacity={0.8}
               >
                 <Icon name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
-              {editingEntryIndex !== null && pricingEntriesState[editingEntryIndex] && (
+            <ScrollView 
+              style={styles.modalContent} 
+              contentContainerStyle={styles.modalContentContainer}
+              removeClippedSubviews={true}
+            >
+              {modalContentReady && editingEntryIndex !== null && pricingEntriesState[editingEntryIndex] && (
                 renderEditablePricingEntry(
                   pricingEntriesState[editingEntryIndex],
                   editingEntryIndex,
@@ -3041,8 +3110,15 @@ const PricingScreen = ({ route, navigation }) => {
                     if (editingEntryIndex !== null) {
                       restoreOriginalEntry(editingEntryIndex);
                     }
+                    // Clean up
+                    isModalOpenRef.current = false;
+                    if (modalTimeoutRef.current) {
+                      clearTimeout(modalTimeoutRef.current);
+                      modalTimeoutRef.current = null;
+                    }
                     setShowEditModal(false);
                     setEditingEntryIndex(null);
+                    setModalContentReady(false);
                   }}
                   activeOpacity={0.7}
                 >
@@ -3060,23 +3136,30 @@ const PricingScreen = ({ route, navigation }) => {
                       // Clear snapshot after successful save
                       setOriginalEntrySnapshot(null);
                       // Close modal after successful save
-                      setShowEditModal(false);
-                      setEditingEntryIndex(null);
-                    } catch (error) {
-                      // Error is already handled in handleSave
-                      // Modal stays open so user can fix and retry
+                    // Clean up
+                    isModalOpenRef.current = false;
+                    if (modalTimeoutRef.current) {
+                      clearTimeout(modalTimeoutRef.current);
+                      modalTimeoutRef.current = null;
                     }
-                  }}
-                  disabled={isSaving}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.modalButtonText, 
-                    styles.saveModalButtonText
-                  ]} numberOfLines={1}>
-                    {isSaving ? 'Saving...' : 'Save Changes'}
-                  </Text>
-                </TouchableOpacity>
+                    setShowEditModal(false);
+                    setEditingEntryIndex(null);
+                    setModalContentReady(false);
+                  } catch (error) {
+                    // Error is already handled in handleSave
+                    // Modal stays open so user can fix and retry
+                  }
+                }}
+                disabled={isSaving}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.modalButtonText, 
+                  styles.saveModalButtonText
+                ]} numberOfLines={1}>
+                  {isSaving ? 'Saving...' : 'Save Changes'}
+                </Text>
+              </TouchableOpacity>
                 <TouchableOpacity
                   onPress={async () => {
                     console.log('🔘 CALCULATE BUTTON PRESSED IN UI (Add Modal)');
@@ -3461,12 +3544,16 @@ const styles = StyleSheet.create({
   stonesTableContainer: {
     marginTop: 12,
   },
+  tableScrollView: {
+    maxHeight: 400,
+  },
   tableWrapper: {
     backgroundColor: colors.background,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
+    minWidth: SCREEN_WIDTH - 32,
   },
   tableHeader: {
     flexDirection: 'row',
@@ -3529,6 +3616,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 12,
     flexShrink: 1,
+    flexWrap: 'nowrap',
   },
   tableInput: {
     borderWidth: 1,
@@ -3577,6 +3665,10 @@ const styles = StyleSheet.create({
   tableCellFlexSmall: {
     flex: 0.8,
     maxWidth: 55,
+  },
+  tableCellFlexWeight: {
+    flex: 1,
+    maxWidth: 65,
   },
   tableCellFlexMedium: {
     flex: 1,
@@ -4043,6 +4135,11 @@ const styles = StyleSheet.create({
     padding: 6,
     backgroundColor: colors.backgroundSecondary,
     borderRadius: 4,
+  },
+  pricingEntryInfoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
   pricingEntryInfoText: {
     color: colors.textSecondary,
