@@ -2181,19 +2181,19 @@ const PricingScreen = ({ route, navigation }) => {
         {/* Metal Rate and Quality Info for this pricing entry */}
         <View style={styles.pricingEntryInfo}>
           <View style={styles.pricingEntryInfoRow}>
-            {pricingMetalRate > 0 && (
+          {pricingMetalRate > 0 && (
               <>
-                <CustomText variant="body" style={styles.pricingEntryInfoText}>
-                  Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
-                </CustomText>
+            <CustomText variant="body" style={styles.pricingEntryInfoText}>
+              Metal Rate: ${pricingMetalRate.toFixed(2)} per gram
+            </CustomText>
                 <CustomText variant="body" style={styles.pricingEntryInfoText}>
                   {' • '}
                 </CustomText>
               </>
-            )}
-            <CustomText variant="body" style={styles.pricingEntryInfoText}>
-              Metal Quality: {entryFormData.metalQuality || '10K'}
-            </CustomText>
+          )}
+          <CustomText variant="body" style={styles.pricingEntryInfoText}>
+            Metal Quality: {entryFormData.metalQuality || '10K'}
+          </CustomText>
           </View>
           <CustomText variant="body" style={styles.pricingEntryInfoText}>
             Duties Amount: ${(parseFloat(entryFormData.dutiesAmount) || 0).toFixed(2)}
@@ -2431,9 +2431,9 @@ const PricingScreen = ({ route, navigation }) => {
           
           {entryStones.length > 0 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.tableScrollView}>
-                <View style={styles.tableWrapper}>
-                  {/* Table Header */}
-                      <View style={styles.tableHeader}>
+              <View style={styles.tableWrapper}>
+                {/* Table Header */}
+                    <View style={styles.tableHeader}>
                   <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
                         <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
                       </View>
@@ -2583,7 +2583,7 @@ const PricingScreen = ({ route, navigation }) => {
                       </View>
                     ))}
                   </View>
-                </View>
+              </View>
               </ScrollView>
             ) : (
               <CustomText variant="body" style={styles.noStonesText}>
@@ -2716,9 +2716,9 @@ const PricingScreen = ({ route, navigation }) => {
           <View style={styles.pricingEntryStonesContainer}>
             <Heading level={5} style={styles.pricingEntryStonesTitle}>Stones</Heading>
             <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.tableScrollView}>
-              <View style={styles.tableWrapper}>
-                    {/* Table Header */}
-                    <View style={styles.tableHeader}>
+            <View style={styles.tableWrapper}>
+                  {/* Table Header */}
+                  <View style={styles.tableHeader}>
                 <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
                       <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
                     </View>
@@ -2808,7 +2808,7 @@ const PricingScreen = ({ route, navigation }) => {
                       </View>
                     ))}
                   </View>
-              </View>
+            </View>
             </ScrollView>
           </View>
         )}
@@ -3142,24 +3142,24 @@ const PricingScreen = ({ route, navigation }) => {
                       clearTimeout(modalTimeoutRef.current);
                       modalTimeoutRef.current = null;
                     }
-                    setShowEditModal(false);
-                    setEditingEntryIndex(null);
+                      setShowEditModal(false);
+                      setEditingEntryIndex(null);
                     setModalContentReady(false);
-                  } catch (error) {
-                    // Error is already handled in handleSave
-                    // Modal stays open so user can fix and retry
-                  }
-                }}
-                disabled={isSaving}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  styles.modalButtonText, 
-                  styles.saveModalButtonText
-                ]} numberOfLines={1}>
-                  {isSaving ? 'Saving...' : 'Save Changes'}
-                </Text>
-              </TouchableOpacity>
+                    } catch (error) {
+                      // Error is already handled in handleSave
+                      // Modal stays open so user can fix and retry
+                    }
+                  }}
+                  disabled={isSaving}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.modalButtonText, 
+                    styles.saveModalButtonText
+                  ]} numberOfLines={1}>
+                    {isSaving ? 'Saving...' : 'Save Changes'}
+                  </Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   onPress={async () => {
                     console.log('🔘 CALCULATE BUTTON PRESSED IN UI (Add Modal)');

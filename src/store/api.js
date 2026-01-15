@@ -360,7 +360,16 @@ export const api = createApi({
         // Add filter parameters
         if (filters) {
           if (filters.status && filters.status !== 'all') {
-            queryString += `&status=${encodeURIComponent(filters.status)}`;
+            // Handle array of statuses for multi-select
+            if (Array.isArray(filters.status) && filters.status.length > 0) {
+              // Send multiple statuses as array in query
+              filters.status.forEach(status => {
+                queryString += `&status=${encodeURIComponent(status)}`;
+              });
+            } else if (typeof filters.status === 'string') {
+              // Legacy single status support
+              queryString += `&status=${encodeURIComponent(filters.status)}`;
+            }
           }
           if (filters.category && filters.category !== 'all') {
             queryString += `&category=${encodeURIComponent(filters.category)}`;
@@ -3379,15 +3388,15 @@ export const api = createApi({
                 if (lastMessageSenderName) {
                 
                 } else if (lastMessageSenderId) {
-                  console.log('[API] ❌ Have SenderId but no name from LastMessage:', {
-                    senderId: lastMessageSenderId,
-                    hasSender: !!lastMessageObj.Sender,
-                    senderType: typeof lastMessageObj.Sender,
-                    senderValue: lastMessageObj.Sender,
-                    hasSenderName: !!lastMessageObj.SenderName,
-                    senderNameValue: lastMessageObj.SenderName,
-                    lastMessageKeys: Object.keys(lastMessageObj),
-                  });
+                  // console.log('[API] ❌ Have SenderId but no name from LastMessage:', {
+                  //   senderId: lastMessageSenderId,
+                  //   hasSender: !!lastMessageObj.Sender,
+                  //   senderType: typeof lastMessageObj.Sender,
+                  //   senderValue: lastMessageObj.Sender,
+                  //   hasSenderName: !!lastMessageObj.SenderName,
+                  //   senderNameValue: lastMessageObj.SenderName,
+                  //   lastMessageKeys: Object.keys(lastMessageObj),
+                  // });
                 }
               }
             }
@@ -3956,10 +3965,31 @@ export const api = createApi({
 
           // Create FormData
           const formData = new FormData();
+          // Determine default type based on file extension or provided type
+          let defaultType = 'image/jpeg';
+          let defaultName = `file_${Date.now()}.jpg`;
+          if (file.type?.startsWith('audio/')) {
+            defaultType = file.type || 'audio/mp3';
+            defaultName = file.name || `audio_${Date.now()}.mp3`;
+          } else if (file.type?.startsWith('video/')) {
+            defaultType = file.type || 'video/mp4';
+            defaultName = file.name || `video_${Date.now()}.mp4`;
+          } else if (file.name) {
+            // Try to infer from filename
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            if (['mp3', 'm4a', 'wav', 'aac', 'ogg'].includes(ext)) {
+              defaultType = `audio/${ext === 'm4a' ? 'm4a' : ext === 'ogg' ? 'ogg' : 'mp3'}`;
+              defaultName = file.name;
+            } else if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) {
+              defaultType = 'video/mp4';
+              defaultName = file.name;
+            }
+          }
+          
           formData.append('file', {
             uri: file.uri,
-            type: file.type || 'image/jpeg',
-            name: file.name || `file_${Date.now()}.jpg`,
+            type: file.type || defaultType,
+            name: file.name || defaultName,
           });
 
           const endpoint = '/api/message/upload';

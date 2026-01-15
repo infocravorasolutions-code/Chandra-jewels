@@ -43,14 +43,18 @@ const DesignViewerScreen = ({ route, navigation }) => {
   const [imageDataUri, setImageDataUri] = useState(null);
   const [imageLoadingError, setImageLoadingError] = useState(false);
   
-  // Log imageDataUri state changes
+  // Memory cache for images - prevents re-fetching and multiple renders
+  const imageCacheRef = useRef(new Map()); // URL -> dataUri cache
+  const fetchingRef = useRef(false); // Track if currently fetching
+  const currentFetchUrlRef = useRef(null); // Track current fetch URL
+  
+  // Log imageDataUri state changes (only in dev mode, and only on significant changes)
   useEffect(() => {
-    console.log(`🎨 [DesignViewer] 📊 imageDataUri state changed for image #${currentImageIndex}:`, {
-      hasImageDataUri: !!imageDataUri,
-      imageDataUriLength: imageDataUri?.length || 0,
-      imageLoadingError,
-    });
-  }, [imageDataUri, imageLoadingError, currentImageIndex]);
+    if (__DEV__ && imageDataUri) {
+      // Only log when imageDataUri is actually set (not on every state change)
+      console.log(`🎨 [DesignViewer] Image loaded for #${currentImageIndex}`);
+    }
+  }, [imageDataUri, currentImageIndex]);
   const [useFetchDirectly, setUseFetchDirectly] = useState(Platform.OS === 'android');
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingImage, setIsDownloadingImage] = useState(false);
@@ -104,75 +108,82 @@ const DesignViewerScreen = ({ route, navigation }) => {
   }, [isDesigner, selectedDesign]);
 
   // Fetch image with authentication as fallback (for Android compatibility)
-  const fetchImageWithAuth = async () => {
-    console.log(`🎨 [DesignViewer] fetchImageWithAuth called:`, {
-      currentImageIndex,
-      currentImageUrl: currentImageUrl ? (currentImageUrl.substring(0, 80) + '...') : 'none',
-      hasImageDataUri: !!imageDataUri,
-      imageDataUriLength: imageDataUri?.length || 0,
-    });
+  const fetchImageWithAuth = useCallback(async (imageUrl) => {
+    const urlToFetch = imageUrl || currentImageUrl;
     
-    // Only skip if we don't have a URL - allow fetch even if imageDataUri exists
-    // (it will be overwritten with the new image data)
-    if (!currentImageUrl) {
-      console.log(`🎨 [DesignViewer] ⏭️ Skipping fetch: No currentImageUrl`);
+    // Guard: Skip if no URL
+    if (!urlToFetch) {
       return;
     }
     
+    // Guard: Skip if already fetching this URL
+    if (fetchingRef.current && currentFetchUrlRef.current === urlToFetch) {
+      return;
+    }
+    
+    // Guard: Check memory cache first (fastest)
+    if (imageCacheRef.current.has(urlToFetch)) {
+      const cachedDataUri = imageCacheRef.current.get(urlToFetch);
+      setImageDataUri(cachedDataUri);
+      setImageLoadingError(false);
+      return;
+    }
+    
+    // Set fetching flag
+    fetchingRef.current = true;
+    currentFetchUrlRef.current = urlToFetch;
+    
     try {
-      // Check cache first (same as reference images)
-      const cachedDataUri = await getCachedImage(currentImageUrl);
-      if (cachedDataUri) {
-        console.log(`🎨 [DesignViewer] 💾 Cache HIT for image #${currentImageIndex}`);
-        setImageDataUri(cachedDataUri);
-        setImageLoadingError(false);
-        return;
-      } else {
-        console.log(`🎨 [DesignViewer] 💾 Cache MISS for image #${currentImageIndex}`);
-      }
+      // Note: Cache check removed here - already checked in effect
+      // This prevents redundant AsyncStorage reads
 
       const token = await AsyncStorage.getItem('token');
       if (!token) {
-        console.log(`🎨 [DesignViewer] ❌ No token found`);
+        fetchingRef.current = false;
+        currentFetchUrlRef.current = null;
         return;
       }
       
-      console.log(`🎨 [DesignViewer] 🚀 Starting fetch for image #${currentImageIndex}`);
-
-      
-      const response = await fetch(currentImageUrl, {
+      const response = await fetch(urlToFetch, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
-
-      console.log(`🎨 [DesignViewer] 📡 Response status for image #${currentImageIndex}:`, response.status, response.statusText);
       
       if (response.ok) {
         const contentType = response.headers.get('content-type') || '';
-        console.log(`🎨 [DesignViewer] 📦 Content-Type for image #${currentImageIndex}:`, contentType);
         
         // Check if response is JSON (API returns a URL object)
         if (contentType.includes('application/json')) {
-          console.log(`🎨 [DesignViewer] 📄 Response is JSON for image #${currentImageIndex}, extracting image URL`);
           const jsonData = await response.json();
           
           // Extract the actual image URL from JSON (could be 'url', 'imageUrl', 'src', etc.)
           const actualImageUrl = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
           
           if (!actualImageUrl) {
-            setImageLoadingError(true);
+            if (currentFetchUrlRef.current === urlToFetch) {
+              setImageLoadingError(true);
+            }
+            fetchingRef.current = false;
+            currentFetchUrlRef.current = null;
             return;
           }
           
           // Check cache for actual image URL as well
           const cachedActualImageUri = await getCachedImage(actualImageUrl);
           if (cachedActualImageUri) {
-            setImageDataUri(cachedActualImageUri);
-            setImageLoadingError(false);
+            // Store in memory cache
+            imageCacheRef.current.set(actualImageUrl, cachedActualImageUri);
+            imageCacheRef.current.set(urlToFetch, cachedActualImageUri);
+            if (currentFetchUrlRef.current === urlToFetch) {
+              setImageDataUri(cachedActualImageUri);
+              setImageLoadingError(false);
+            }
             // Also cache the original URL pointing to the data URI
-            await cacheImage(currentImageUrl, cachedActualImageUri);
+            await cacheImage(urlToFetch, cachedActualImageUri);
+            fetchingRef.current = false;
+            currentFetchUrlRef.current = null;
             return;
           }
           
@@ -186,7 +197,11 @@ const DesignViewerScreen = ({ route, navigation }) => {
           });
           
           if (!imageResponse.ok) {
-            setImageLoadingError(true);
+            if (currentFetchUrlRef.current === urlToFetch) {
+              setImageLoadingError(true);
+            }
+            fetchingRef.current = false;
+            currentFetchUrlRef.current = null;
             return;
           }
           
@@ -217,20 +232,19 @@ const DesignViewerScreen = ({ route, navigation }) => {
           const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
           const dataUri = `data:${imageContentType};base64,${base64}`;
           
-          // Cache the image (both URLs)
+          // Cache the image (both URLs) - memory cache + AsyncStorage
+          imageCacheRef.current.set(actualImageUrl, dataUri);
+          imageCacheRef.current.set(urlToFetch, dataUri);
           await cacheImage(actualImageUrl, dataUri);
-          await cacheImage(currentImageUrl, dataUri);
+          await cacheImage(urlToFetch, dataUri);
           
-          console.log(`🎨 [DesignViewer] ✅ Image #${currentImageIndex} loaded (JSON path):`, {
-            contentType: imageContentType,
-            dataUriLength: dataUri.length,
-          });
-          setImageDataUri(dataUri);
-          setImageLoadingError(false);
-          console.log(`🎨 [DesignViewer] 🎯 State updated for image #${currentImageIndex} - imageDataUri set`);
+          // Only update if this is still the current URL
+          if (currentFetchUrlRef.current === urlToFetch) {
+            setImageDataUri(dataUri);
+            setImageLoadingError(false);
+          }
         } else {
           // Direct image response
-          console.log(`🎨 [DesignViewer] 📷 Response is direct image for image #${currentImageIndex}`);
           
           const arrayBuffer = await response.arrayBuffer();
           
@@ -259,26 +273,36 @@ const DesignViewerScreen = ({ route, navigation }) => {
           const imageContentType = contentType || 'image/jpeg';
           const dataUri = `data:${imageContentType};base64,${base64}`;
           
-          // Cache the image
-          await cacheImage(currentImageUrl, dataUri);
+          // Cache the image - memory cache + AsyncStorage
+          imageCacheRef.current.set(urlToFetch, dataUri);
+          await cacheImage(urlToFetch, dataUri);
           
-          console.log(`🎨 [DesignViewer] ✅ Image #${currentImageIndex} loaded (direct):`, {
-            contentType: imageContentType,
-            dataUriLength: dataUri.length,
-          });
-          setImageDataUri(dataUri);
-          setImageLoadingError(false);
-          console.log(`🎨 [DesignViewer] 🎯 State updated for image #${currentImageIndex} - imageDataUri set`);
+          // Only update if this is still the current URL
+          if (currentFetchUrlRef.current === urlToFetch) {
+            setImageDataUri(dataUri);
+            setImageLoadingError(false);
+          }
         }
       } else {
-        console.log(`🎨 [DesignViewer] ❌ Response not OK for image #${currentImageIndex}:`, response.status, response.statusText);
-        setImageLoadingError(true);
+        if (currentFetchUrlRef.current === urlToFetch) {
+          setImageLoadingError(true);
+        }
       }
     } catch (error) {
-      console.log(`🎨 [DesignViewer] ❌ Fetch error for image #${currentImageIndex}:`, error.message);
-      setImageLoadingError(true);
+      if (__DEV__) {
+        console.error(`[DesignViewer] Fetch error:`, error.message);
+      }
+      if (currentFetchUrlRef.current === urlToFetch) {
+        setImageLoadingError(true);
+      }
+    } finally {
+      // Reset fetching flag only if this was the current fetch
+      if (currentFetchUrlRef.current === urlToFetch) {
+        fetchingRef.current = false;
+        currentFetchUrlRef.current = null;
+      }
     }
-  };
+  }, [currentImageIndex, currentImageUrl, imageDataUri]);
 
 
   // Get enquiry ID for refetching
@@ -507,19 +531,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
 
   // Initialize comment with current image description or filename and reset image data URI
   useEffect(() => {
-    console.log(`🎨 [DesignViewer] 📊 Images/Index changed:`, {
-      imagesLength: images.length,
-      currentImageIndex,
-      isValidIndex: currentImageIndex < images.length,
-    });
-    
     if (images.length > 0 && currentImageIndex < images.length) {
       const currentImage = images[currentImageIndex];
-      console.log(`🎨 [DesignViewer] 🖼️ Current image #${currentImageIndex}:`, {
-        type: typeof currentImage,
-        isObject: typeof currentImage === 'object' && currentImage !== null,
-        keys: typeof currentImage === 'object' && currentImage !== null ? Object.keys(currentImage).slice(0, 5) : [],
-      });
       let imageName = '';
       
       if (typeof currentImage === 'object' && currentImage !== null) {
@@ -540,12 +553,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
       // Don't reset imageDataUri immediately - let the cache check useEffect handle it
       // This prevents blinking by keeping the previous image visible while loading the new one
       setImageLoadingError(false);
-      console.log(`🎨 [DesignViewer] 🔄 Reset imageLoadingError for image #${currentImageIndex}`);
-    } else {
-      console.log(`🎨 [DesignViewer] ⚠️ Invalid image index:`, {
-        imagesLength: images.length,
-        currentImageIndex,
-      });
     }
   }, [currentImageIndex, images]);
 
@@ -2035,12 +2042,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
   }
 
   const currentImageUrl = getCurrentImageUrl();
-  console.log(`🎨 [DesignViewer] 🔗 Generated currentImageUrl for image #${currentImageIndex}:`, {
-    currentImageUrl: currentImageUrl ? (currentImageUrl.substring(0, 80) + '...') : 'null',
-    imagesLength: images.length,
-    currentImageIndex,
-  });
-  
   const showNavigation = images.length > 1;
   
   // Check if current media is a video
@@ -2048,83 +2049,50 @@ const DesignViewerScreen = ({ route, navigation }) => {
   const currentImageKey = typeof currentMedia === 'object' && currentMedia !== null
     ? (currentMedia.Key || currentMedia.key || '')
     : (typeof currentMedia === 'string' ? currentMedia.split('/').pop() || currentMedia : '');
-  
-  console.log(`🎨 [DesignViewer] 📊 Current media info:`, {
-    currentImageIndex,
-    currentImageKey: currentImageKey || 'none',
-    isVideo: isCurrentVideo,
-  });
   const currentImageUri = typeof currentMedia === 'object' && currentMedia !== null
     ? (currentMedia.Url || currentMedia.url || currentMedia.URI || currentMedia.uri || '')
     : (typeof currentMedia === 'string' && (currentMedia.startsWith('http') || currentMedia.startsWith('https')) ? currentMedia : '');
   const isCurrentVideo = isVideoFile(currentImageKey, currentImageUri, currentMedia);
 
-  // Reset data URI when image changes, but check cache first
-  // Reset imageDataUri immediately when image index changes (before cache check)
+  // Single unified effect: Check cache and fetch when image changes
+  // This replaces the previous 3 effects to prevent duplicate calls
   useEffect(() => {
-    console.log(`🎨 [DesignViewer] 🔄 Image index changed to #${currentImageIndex}, resetting imageDataUri immediately`);
-    // Reset immediately to prevent stale data from previous image blocking fetch
-    setImageDataUri(null);
-    setImageLoadingError(false);
-  }, [currentImageIndex]);
+    if (!currentImageUrl) {
+      setImageDataUri(null);
+      setImageLoadingError(false);
+      return;
+    }
 
-  // Check cache and fetch when image URL changes
-  useEffect(() => {
-    console.log(`🎨 [DesignViewer] 🔄 Image URL changed effect triggered:`, {
-      currentImageIndex,
-      currentImageUrl: currentImageUrl ? (currentImageUrl.substring(0, 60) + '...') : 'null',
-    });
-    
-      if (!currentImageUrl) {
-      console.log(`🎨 [DesignViewer] ⚠️ No currentImageUrl`);
+    const loadImage = async () => {
+      // 1. Check memory cache first (fastest, synchronous)
+      if (imageCacheRef.current.has(currentImageUrl)) {
+        const cachedDataUri = imageCacheRef.current.get(currentImageUrl);
+        setImageDataUri(cachedDataUri);
+        setImageLoadingError(false);
         return;
       }
 
-    const checkCacheAndSetImage = async () => {
-      // Check cache first
+      // 2. Check AsyncStorage cache (async)
       const cachedDataUri = await getCachedImage(currentImageUrl);
       if (cachedDataUri) {
-        console.log(`🎨 [DesignViewer] 💾 Cache HIT for image #${currentImageIndex}`);
+        // Store in memory cache for faster access next time
+        imageCacheRef.current.set(currentImageUrl, cachedDataUri);
         setImageDataUri(cachedDataUri);
         setImageLoadingError(false);
-      } else {
-        console.log(`🎨 [DesignViewer] 💾 Cache MISS for image #${currentImageIndex}`);
-        // Cache miss - trigger fetch if on Android
-        if (useFetchDirectly) {
-          console.log(`🎨 [DesignViewer] 🚀 Triggering fetchImageWithAuth for image #${currentImageIndex} (cache miss)`);
-          fetchImageWithAuth();
-        }
+        return;
       }
+
+      // 3. Cache miss - fetch image
+      // On Android or if fetch directly is enabled, use fetch
+      if (useFetchDirectly) {
+        fetchImageWithAuth(currentImageUrl);
+      }
+      // On iOS, OptimizedImage component will handle loading with headers
+      // Don't reset imageDataUri here - keep previous image visible until new one loads
     };
 
-    checkCacheAndSetImage();
-  }, [currentImageIndex, currentImageUrl, useFetchDirectly]);
-
-  // Log when URL is generated and trigger fetch if needed (fallback trigger)
-  useEffect(() => {
-    console.log(`🎨 [DesignViewer] 🔄 Fetch trigger effect:`, {
-      currentImageIndex,
-      currentImageUrl: currentImageUrl ? (currentImageUrl.substring(0, 60) + '...') : 'null',
-      useFetchDirectly,
-      hasImageDataUri: !!imageDataUri,
-      shouldFetch: currentImageUrl && useFetchDirectly && !imageDataUri,
-    });
-    
-    // On Android, skip Image component and use fetch directly to avoid 401 errors
-    // Only fetch if we don't already have the image data
-    // This is a fallback in case the cache check effect didn't trigger the fetch
-    if (currentImageUrl && useFetchDirectly && !imageDataUri) {
-      console.log(`🎨 [DesignViewer] 🚀 Triggering fetchImageWithAuth for image #${currentImageIndex} (fallback trigger)`);
-      fetchImageWithAuth();
-    } else {
-      console.log(`🎨 [DesignViewer] ⏭️ Not fetching:`, {
-        hasCurrentImageUrl: !!currentImageUrl,
-        useFetchDirectly,
-        hasImageDataUri: !!imageDataUri,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentImageIndex, currentImageUrl, useFetchDirectly, imageDataUri]);
+    loadImage();
+  }, [currentImageIndex, currentImageUrl, useFetchDirectly, fetchImageWithAuth]);
 
   return (
     <View style={styles.container}>
@@ -2148,8 +2116,45 @@ const DesignViewerScreen = ({ route, navigation }) => {
                   />
                 ) : (
               <>
-                {/* Try Image component with headers first (iOS only, Android uses fetch directly) */}
-                {!imageDataUri && !useFetchDirectly && (
+                {/* Single conditional render - prevents double rendering */}
+                {imageDataUri ? (
+                  // Render with cached data URI (fastest, works on all platforms)
+                  <View style={styles.imageWrapper}>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => setIsFullScreen(true)}
+                      style={styles.imageTouchable}
+                    >
+                      <OptimizedImage
+                        source={{ uri: imageDataUri }}
+                        style={styles.image}
+                        resizeMode="contain"
+                        showLoader={false}
+                        cacheEnabled={false}
+                        onLoad={() => {
+                          setImageLoadingError(false);
+                        }}
+                        onError={(error) => {
+                          const errorObj = error.nativeEvent?.error || {};
+                          if (__DEV__) {
+                            console.error('❌ Data URI image load ERROR:', errorObj);
+                          }
+                          setImageLoadingError(true);
+                        }}
+                      />
+                    </TouchableOpacity>
+                    {/* Share button - enabled for all users including clients */}
+                    <TouchableOpacity
+                      style={styles.shareImageButton}
+                      onPress={handleShare}
+                      disabled={isSharing}
+                      activeOpacity={0.8}
+                    >
+                      <Icon name="share" size={24} color={colors.textWhite} />
+                    </TouchableOpacity>
+                  </View>
+                ) : !useFetchDirectly ? (
+                  // iOS: Try OptimizedImage with headers (will fallback to fetch on error)
                   <View style={styles.imageWrapper}>
                     <TouchableOpacity
                       activeOpacity={0.9}
@@ -2165,9 +2170,6 @@ const DesignViewerScreen = ({ route, navigation }) => {
                         resizeMode="contain"
                         showLoader={false}
                         cacheEnabled={true}
-                        onLoadStart={() => {
-                          setImageLoadingError(false);
-                        }}
                         onLoad={() => {
                           setImageLoadingError(false);
                         }}
@@ -2184,14 +2186,12 @@ const DesignViewerScreen = ({ route, navigation }) => {
                           // If 401, trigger fetch fallback immediately
                           if (is401) {
                             setImageLoadingError(true);
-                            fetchImageWithAuth();
+                            fetchImageWithAuth(currentImageUrl);
                           }
-                        }}
-                        onLoadEnd={() => {
                         }}
                       />
                     </TouchableOpacity>
-                    {/* Share button - enabled for all users including clients */}
+                    {/* Share button */}
                     <TouchableOpacity
                       style={styles.shareImageButton}
                       onPress={handleShare}
@@ -2201,72 +2201,8 @@ const DesignViewerScreen = ({ route, navigation }) => {
                       <Icon name="share" size={24} color={colors.textWhite} />
                     </TouchableOpacity>
                   </View>
-                )}
-                
-                {/* Use data URI (fetched image) - for both Android (direct) and iOS (fallback) */}
-                {(() => {
-                  if (imageDataUri) {
-                    console.log(`🎨 [DesignViewer] 🎨 Rendering IMAGE with dataUri for image #${currentImageIndex}:`, {
-                      hasImageDataUri: !!imageDataUri,
-                      imageDataUriLength: imageDataUri?.length || 0,
-                    });
-                  }
-                  return null;
-                })()}
-                {imageDataUri && (
-                  <View style={styles.imageWrapper}>
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={() => setIsFullScreen(true)}
-                      style={styles.imageTouchable}
-                    >
-                      <OptimizedImage
-                        source={{ uri: imageDataUri }}
-                        style={styles.image}
-                        resizeMode="contain"
-                        showLoader={false}
-                        cacheEnabled={true}
-                        onLoadStart={() => {
-                          // Image loading started
-                        }}
-                        onLoad={() => {
-                          setImageLoadingError(false);
-                        }}
-                        onError={(error) => {
-                          const errorObj = error.nativeEvent?.error || {};
-                          if (__DEV__) {
-                            console.error('❌ Data URI image load ERROR:', errorObj);
-                          }
-                          setImageLoadingError(true);
-                        }}
-                        onLoadEnd={() => {
-                        }}
-                      />
-                    </TouchableOpacity>
-                    {/* Share button - enabled for all users including clients */}
-                    <TouchableOpacity
-                      style={styles.shareImageButton}
-                      onPress={handleShare}
-                      disabled={isSharing}
-                      activeOpacity={0.8}
-                    >
-                      <Icon name="share" size={24} color={colors.textWhite} />
-                    </TouchableOpacity>
-                  </View>
-                )}
-                
-                {/* Show loading/error state */}
-                {(() => {
-                  if ((useFetchDirectly && !imageDataUri) || (imageLoadingError && !imageDataUri)) {
-                    console.log(`🎨 [DesignViewer] 🎨 Rendering LOADING/ERROR state for image #${currentImageIndex}:`, {
-                      useFetchDirectly,
-                      hasImageDataUri: !!imageDataUri,
-                      imageLoadingError,
-                    });
-                  }
-                  return null;
-                })()}
-                {((useFetchDirectly && !imageDataUri) || (imageLoadingError && !imageDataUri)) && (
+                ) : (
+                  // Android: Show loading placeholder while fetching
                   <View style={styles.imagePlaceholder}>
                     {imageLoadingError ? (
                       <>
@@ -2279,7 +2215,7 @@ const DesignViewerScreen = ({ route, navigation }) => {
                       <AnimatedLogoLoader size={60} />
                     )}
                   </View>
-                    )}
+                )}
                   </>
                 )}
               </>

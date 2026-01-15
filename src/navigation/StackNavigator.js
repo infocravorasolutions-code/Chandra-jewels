@@ -75,6 +75,7 @@ const StackNavigator = ({ isAuthenticated, showOnboarding, onOnboardingComplete 
             component={AddEnquiryStep2Screen}
             options={{
               title: 'Add Enquiry - Step 2',
+              headerLeft: () => null, // Remove back button
             }}
           />
           <Stack.Screen

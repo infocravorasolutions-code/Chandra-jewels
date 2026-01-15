@@ -1159,53 +1159,57 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* Row 12: Special Remarks (full width textarea) */}
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Input
-              label="Special Remarks"
-              placeholder="Special Remarks"
-              value={formData.specialRemarks}
-              onChangeText={(value) => handleInputChange('specialRemarks', value)}
-              multiline
-              numberOfLines={4}
-            />
+        {/* Row 12: Special Remarks (full width textarea) - Hidden for clients */}
+        {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
+          <View style={styles.formRow}>
+            <View style={[styles.formField, styles.fullWidthField]}>
+              <Input
+                label="Special Remarks"
+                placeholder="Special Remarks"
+                value={formData.specialRemarks}
+                onChangeText={(value) => handleInputChange('specialRemarks', value)}
+                multiline
+                numberOfLines={4}
+              />
+            </View>
           </View>
-        </View>
+        )}
 
-        {/* Row 13: Approved Date (full width) */}
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Text style={styles.label}>Approved Date</Text>
-            <TouchableOpacity
-              style={styles.dateInputButton}
-              onPress={() => {
-                if (formData.approvedDate) {
-                  try {
-                    setTempApprovedDate(new Date(formData.approvedDate));
-                  } catch (e) {
+        {/* Row 13: Approved Date (full width) - Hidden for clients */}
+        {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
+          <View style={styles.formRow}>
+            <View style={[styles.formField, styles.fullWidthField]}>
+              <Text style={styles.label}>Approved Date</Text>
+              <TouchableOpacity
+                style={styles.dateInputButton}
+                onPress={() => {
+                  if (formData.approvedDate) {
+                    try {
+                      setTempApprovedDate(new Date(formData.approvedDate));
+                    } catch (e) {
+                      setTempApprovedDate(new Date());
+                    }
+                  } else {
                     setTempApprovedDate(new Date());
                   }
-                } else {
-                  setTempApprovedDate(new Date());
-                }
-                setShowApprovedDatePicker(true);
-              }}
-              activeOpacity={0.7}>
-              <Text style={[
-                styles.dateInputText,
-                !formData.approvedDate && styles.dateInputPlaceholder,
-              ]}>
-                {formData.approvedDate || 'Select Approved Date'}
-              </Text>
-              <IconComponent 
-                name="calendar-today" 
-                size={20} 
-                color={colors.primary} 
-              />
-            </TouchableOpacity>
+                  setShowApprovedDatePicker(true);
+                }}
+                activeOpacity={0.7}>
+                <Text style={[
+                  styles.dateInputText,
+                  !formData.approvedDate && styles.dateInputPlaceholder,
+                ]}>
+                  {formData.approvedDate || 'Select Approved Date'}
+                </Text>
+                <IconComponent 
+                  name="calendar-today" 
+                  size={20} 
+                  color={colors.primary} 
+                />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Date Picker Modal */}
         {showDatePicker && Platform.OS === 'ios' && (
@@ -1267,8 +1271,8 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
           />
         )}
 
-        {/* Approved Date Picker Modal */}
-        {showApprovedDatePicker && Platform.OS === 'ios' && (
+        {/* Approved Date Picker Modal - Hidden for clients */}
+        {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && showApprovedDatePicker && Platform.OS === 'ios' && (
           <Modal
             transparent={true}
             animationType="slide"
@@ -1312,7 +1316,7 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
             </TouchableOpacity>
           </Modal>
         )}
-        {showApprovedDatePicker && Platform.OS === 'android' && (
+        {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && showApprovedDatePicker && Platform.OS === 'android' && (
           <DateTimePicker
             value={tempApprovedDate}
             mode="date"

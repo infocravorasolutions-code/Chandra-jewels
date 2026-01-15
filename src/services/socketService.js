@@ -14,6 +14,8 @@ class SocketService {
       newMessage: [],
       messagesRead: [],
       userTyping: [],
+      messageEdited: [],
+      messageDeleted: [],
       error: [],
       connect: [],
       disconnect: [],
@@ -298,6 +300,36 @@ class SocketService {
         });
       });
 
+      this.socket.on('messageEdited', (message) => {
+        if (__DEV__) {
+          console.log('✏️ [SocketService] Message edited:', message);
+        }
+        this.listeners.messageEdited.forEach(callback => {
+          try {
+            callback(message);
+          } catch (error) {
+            if (__DEV__) {
+              console.error('❌ [SocketService] Error in messageEdited callback:', error);
+            }
+          }
+        });
+      });
+
+      this.socket.on('messageDeleted', (data) => {
+        if (__DEV__) {
+          console.log('🗑️ [SocketService] Message deleted:', data);
+        }
+        this.listeners.messageDeleted.forEach(callback => {
+          try {
+            callback(data);
+          } catch (error) {
+            if (__DEV__) {
+              console.error('❌ [SocketService] Error in messageDeleted callback:', error);
+            }
+          }
+        });
+      });
+
       this.socket.on('error', (error) => {
         // Only log if it's a real error, not a "Failed to send message" when message actually worked
         const errorMessage = error?.message || error?.toString() || '';
@@ -400,12 +432,13 @@ class SocketService {
    * @param {string} data.chatId - Chat ID (enquiryId)
    * @param {string} data.userId - User ID
    * @param {string} data.message - Message text
-   * @param {string} data.messageType - 'text' | 'image' | 'video' | 'file'
+   * @param {string} data.messageType - 'text' | 'image' | 'video' | 'file' | 'audio'
    * @param {string} [data.parentMessageId] - Parent message ID for replies
    * @param {string} [data.mediaKey] - Media key from upload
    * @param {string} [data.mediaName] - Media file name
    * @param {string} [data.mediaUrl] - Media URL
    * @param {number} [data.mediaSize] - Media file size
+   * @param {string} [data.audioDuration] - Audio duration in MM:SS format
    */
   sendMessage(data) {
     if (!this.socket?.connected) {
@@ -473,6 +506,79 @@ class SocketService {
     }
 
     this.socket.emit('markMessagesRead', { chatId, userId, messageIds });
+    return true;
+  }
+
+  /**
+   * Edit a message
+   * @param {string} messageId - Message ID
+   * @param {string} userId - User ID
+   * @param {string} newMessage - New message text
+   * Note: Backend API expects { messageId, userId, newMessage } - no chatId needed
+   */
+  editMessage(messageId, userId, newMessage) {
+    if (!this.socket?.connected) {
+      if (__DEV__) {
+        console.error('❌ [SocketService] Cannot edit message: Socket not connected');
+      }
+      return false;
+    }
+
+    if (__DEV__) {
+      console.log('✏️ [SocketService] Editing message via WebSocket', {
+        messageId,
+        userId,
+        newMessageLength: newMessage?.length,
+        newMessage: newMessage,
+      });
+    }
+
+    // Send edit message event - backend expects: { messageId, userId, newMessage }
+    this.socket.emit('editMessage', { 
+      messageId, 
+      userId, 
+      newMessage 
+    });
+    
+    if (__DEV__) {
+      console.log('✅ [SocketService] Edit message event emitted successfully', {
+        messageId,
+        userId,
+        newMessage: newMessage.substring(0, 50) + '...',
+      });
+    }
+    
+    return true;
+  }
+
+  /**
+   * Delete a message (soft delete)
+   * @param {string} messageId - Message ID
+   * @param {string} userId - User ID
+   * Note: Backend API expects { messageId, userId } - no chatId needed
+   */
+  deleteMessage(messageId, userId) {
+    if (!this.socket?.connected) {
+      if (__DEV__) {
+        console.error('❌ [SocketService] Cannot delete message: Socket not connected');
+      }
+      return false;
+    }
+
+    if (__DEV__) {
+      console.log('🗑️ [SocketService] Deleting message via WebSocket', {
+        messageId,
+        userId,
+      });
+    }
+
+    // Send delete message event - backend expects: { messageId, userId }
+    this.socket.emit('deleteMessage', { messageId, userId });
+    
+    if (__DEV__) {
+      console.log('✅ [SocketService] Delete message event emitted successfully');
+    }
+    
     return true;
   }
 

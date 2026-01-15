@@ -710,56 +710,60 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* Row 8: Special Remarks (full width textarea) */}
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Input
-              label="Special Remarks"
-              placeholder="Special Remarks"
-              value={formData.specialRemarks}
-              onChangeText={(value) => handleInputChange('specialRemarks', value)}
-              multiline
-              numberOfLines={4}
-            />
+        {/* Row 8: Special Remarks (full width textarea) - Hidden for clients */}
+        {!isClient && (
+          <View style={styles.formRow}>
+            <View style={[styles.formField, styles.fullWidthField]}>
+              <Input
+                label="Special Remarks"
+                placeholder="Special Remarks"
+                value={formData.specialRemarks}
+                onChangeText={(value) => handleInputChange('specialRemarks', value)}
+                multiline
+                numberOfLines={4}
+              />
+            </View>
           </View>
-        </View>
+        )}
 
-        {/* Row 9: Approved Date (full width) */}
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Text style={styles.dropdownLabel}>Approved Date</Text>
-            <TouchableOpacity
-              style={[styles.dropdown, { minHeight: 44 }]}
-              onPress={() => {
-                if (formData.approvedDate) {
-                  try {
-                    setTempApprovedDate(new Date(formData.approvedDate));
-                  } catch (e) {
+        {/* Row 9: Approved Date (full width) - Hidden for clients */}
+        {!isClient && (
+          <View style={styles.formRow}>
+            <View style={[styles.formField, styles.fullWidthField]}>
+              <Text style={styles.dropdownLabel}>Approved Date</Text>
+              <TouchableOpacity
+                style={[styles.dropdown, { minHeight: 44 }]}
+                onPress={() => {
+                  if (formData.approvedDate) {
+                    try {
+                      setTempApprovedDate(new Date(formData.approvedDate));
+                    } catch (e) {
+                      setTempApprovedDate(new Date());
+                    }
+                  } else {
                     setTempApprovedDate(new Date());
                   }
-                } else {
-                  setTempApprovedDate(new Date());
-                }
-                setShowApprovedDatePicker(true);
-              }}
-              activeOpacity={0.7}>
-              <Text style={[
-                styles.dropdownText,
-                !formData.approvedDate && styles.dropdownPlaceholder,
-              ]}>
-                {formData.approvedDate || 'Select Approved Date'}
-              </Text>
-              <IconComponent 
-                name="calendar-today" 
-                size={20} 
-                color={colors.primary} 
-              />
-            </TouchableOpacity>
+                  setShowApprovedDatePicker(true);
+                }}
+                activeOpacity={0.7}>
+                <Text style={[
+                  styles.dropdownText,
+                  !formData.approvedDate && styles.dropdownPlaceholder,
+                ]}>
+                  {formData.approvedDate || 'Select Approved Date'}
+                </Text>
+                <IconComponent 
+                  name="calendar-today" 
+                  size={20} 
+                  color={colors.primary} 
+                />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
-        {/* Date Picker Modal for Approved Date */}
-        {showApprovedDatePicker && Platform.OS === 'ios' && (
+        {/* Date Picker Modal for Approved Date - Hidden for clients */}
+        {!isClient && showApprovedDatePicker && Platform.OS === 'ios' && (
           <Modal
             transparent={true}
             animationType="slide"
@@ -803,7 +807,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
             </TouchableOpacity>
           </Modal>
         )}
-        {showApprovedDatePicker && Platform.OS === 'android' && (
+        {!isClient && showApprovedDatePicker && Platform.OS === 'android' && (
           <DateTimePicker
             value={tempApprovedDate}
             mode="date"

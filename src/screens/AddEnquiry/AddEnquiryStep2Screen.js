@@ -13,6 +13,7 @@ import {
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import Video from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import IconComponent from '../../components/common/Icon';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -31,6 +32,17 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   // Fetch and cache users for name resolution
   useUsers();
   
+  // Handle system back button (Android) and swipe back gesture (iOS) to navigate to Enquiries list
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      // Prevent default behavior of going back to previous screen
+      e.preventDefault();
+      // Navigate directly to Enquiries list
+      navigation.navigate('MainTabs', { screen: 'Enquiries' });
+    });
+
+    return unsubscribe;
+  }, [navigation]);
   
   // Redux mutations
   const [uploadReferenceImages, { isLoading: isUploading }] = useUploadReferenceImagesMutation();
@@ -560,11 +572,38 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
       }
     };
 
+    const handleOpenChat = () => {
+      if (enquiryId) {
+        navigation.navigate('ChatGroups', {
+          enquiryId: enquiryId,
+          enquiry: enquiryToEdit,
+        });
+      } else if (formData.clientId) {
+        // If enquiry not created yet, we can still navigate but chat might not exist
+        navigation.navigate('ChatGroups', {
+          clientId: formData.clientId,
+        });
+      } else {
+        Alert.alert('Info', 'Please complete the enquiry first to access chat');
+      }
+    };
+
     return (
       <View style={styles.summaryCard}>
-        <Text style={styles.sectionTitle}>
-          Enquiry Summary
-        </Text>
+        <View style={styles.summaryHeader}>
+          <Text style={styles.sectionTitle}>
+            Enquiry Summary
+          </Text>
+          {(enquiryId || formData.clientId) && (
+            <TouchableOpacity
+              style={styles.chatButton}
+              onPress={handleOpenChat}
+              activeOpacity={0.7}
+            >
+              <IconComponent name="chat" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
         
         {formData.title && (
           <View style={styles.summaryItem}>
@@ -623,7 +662,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Budget</Text>
             <Text style={styles.summaryValue}>
-              {formData.budget ? `₹${parseFloat(formData.budget).toLocaleString('en-IN')}` : 'Not specified'}
+              {formData.budget ? `$${parseFloat(formData.budget).toLocaleString('en-US')}` : 'Not specified'}
             </Text>
           </View>
         )}
@@ -697,14 +736,14 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           </View>
         )}
 
-        {formData.specialRemarks && (
+        {formData.specialRemarks && user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Special Remarks</Text>
             <Text style={styles.descriptionText}>{formData.specialRemarks}</Text>
           </View>
         )}
 
-        {formData.approvedDate && (
+        {formData.approvedDate && user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Approved Date</Text>
             <Text style={styles.summaryValue}>{formatDate(formData.approvedDate)}</Text>
@@ -895,6 +934,19 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: colors.backgroundSecondary,
     borderRadius: 8,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  chatButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
   summaryItem: {
     marginBottom: 10,

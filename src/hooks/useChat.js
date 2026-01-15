@@ -415,13 +415,102 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         setMessages(prevMessages => {
           const messageMap = new Map();
           
+          // Log prevMessages for debugging
+          if (__DEV__) {
+            const optimisticAudio = prevMessages.filter(m => {
+              const id = m._id || m.id;
+              return id && String(id).startsWith('temp-') && (m.messageType === 'audio' || m.MessageType === 'audio');
+            });
+            if (optimisticAudio.length > 0) {
+              console.log('🎵 [useChat] prevMessages contains optimistic audio:', {
+                count: optimisticAudio.length,
+                messages: optimisticAudio.map(m => ({
+                  id: m._id || m.id,
+                  mediaKey: m.mediaKey || m.MediaKey,
+                  status: m.status,
+                })),
+              });
+            }
+          }
+          
           // Add existing messages first to preserve their status
+          // CRITICAL: Preserve locally edited messages - don't let API overwrite them
           prevMessages.forEach(msg => {
             const id = msg._id || msg.id;
             if (id) {
+              // If message was edited locally (has IsEdited flag and was updated recently),
+              // mark it to preserve during merge
+              if (msg.IsEdited || msg.isEdited) {
+                // Store timestamp of when it was edited (if available)
+                msg._locallyEdited = true;
+                msg._editTimestamp = Date.now();
+              }
               messageMap.set(id, msg);
             }
           });
+          
+          // Merge ReadBy arrays - preserve object structure with timestamps
+          // Handle both formats: array of objects [{userId, readAt}] or array of IDs ['id1', 'id2']
+          const mergeReadBy = (existing, api) => {
+            const mergedMap = new Map();
+            
+            // Process existing ReadBy
+            existing.forEach(item => {
+              if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+                // Object format: { userId: '123', readAt: '...' }
+                const userId = String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim();
+                if (userId) {
+                  mergedMap.set(userId, item); // Preserve full object
+                }
+              } else {
+                // ID format: '123' or 123
+                const userId = String(item).trim();
+                if (userId) {
+                  // Convert to object format if not already
+                  mergedMap.set(userId, { userId, readAt: null });
+                }
+              }
+            });
+            
+            // Process API ReadBy (prefer API data as it's more up-to-date)
+            api.forEach(item => {
+              if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+                // Object format: { userId: '123', readAt: '...' }
+                const userId = String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim();
+                if (userId) {
+                  mergedMap.set(userId, item); // Overwrite with API data (newer)
+                }
+              } else {
+                // ID format: '123' or 123
+                const userId = String(item).trim();
+                if (userId) {
+                  // Only add if not already present (preserve existing object with timestamp)
+                  if (!mergedMap.has(userId)) {
+                    mergedMap.set(userId, { userId, readAt: null });
+                  }
+                }
+              }
+            });
+            
+            return Array.from(mergedMap.values());
+          };
+          
+          // Log all API messages to check for audio
+          if (__DEV__) {
+            const audioMessages = apiMessages.filter(m => m.MessageType === 'audio' || m.messageType === 'audio');
+            if (audioMessages.length > 0) {
+              console.log('🎵 [useChat] API returned audio messages:', {
+                count: audioMessages.length,
+                messages: audioMessages.map(m => ({
+                  id: m._id || m.id,
+                  mediaKey: m.MediaKey || m.mediaKey,
+                  audioDuration: m.audioDuration || m.AudioDuration,
+                })),
+              });
+            } else {
+              console.log('🎵 [useChat] ⚠️ API returned NO audio messages (total messages:', apiMessages.length, ')');
+            }
+          }
           
           // Update with API messages (but preserve status if message already exists)
           apiMessages.forEach(msg => {
@@ -429,57 +518,79 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             if (id && !String(id).startsWith('temp-')) {
               const existingMsg = messageMap.get(id);
               
+              // Also check for optimistic messages with matching mediaKey (for media messages)
+              if (!existingMsg) {
+                const msgMediaKey = msg.MediaKey || msg.mediaKey;
+                if (msgMediaKey) {
+                  // Find optimistic message with matching mediaKey
+                  for (const [mapId, mapMsg] of messageMap.entries()) {
+                    if (String(mapId).startsWith('temp-')) {
+                      const mapMediaKey = mapMsg.mediaKey || mapMsg.MediaKey;
+                      const mapSenderId = mapMsg.SenderId || mapMsg.senderId;
+                      const msgSenderId = msg.SenderId || msg.senderId;
+                      
+                      if (__DEV__ && (msg.MessageType === 'audio' || msg.messageType === 'audio')) {
+                        console.log('🎵 [useChat] Checking optimistic match:', {
+                          apiMediaKey: msgMediaKey,
+                          optimisticMediaKey: mapMediaKey,
+                          apiSenderId: msgSenderId,
+                          optimisticSenderId: mapSenderId,
+                          matches: mapMediaKey && String(mapMediaKey) === String(msgMediaKey) &&
+                                   String(mapSenderId) === String(msgSenderId),
+                        });
+                      }
+                      
+                      if (mapMediaKey && String(mapMediaKey) === String(msgMediaKey) &&
+                          String(mapSenderId) === String(msgSenderId)) {
+                        // Found matching optimistic message - use it as existingMsg
+                        const optimisticMsg = mapMsg;
+                        messageMap.delete(mapId); // Remove optimistic from map
+                        
+                        // Merge with API message
+                        const mergedReadBy = mergeReadBy(optimisticMsg.ReadBy || optimisticMsg.readBy || [], msg.ReadBy || msg.readBy || []);
+                        const calculatedStatus = optimisticMsg.status || 'sent';
+                        
+                        messageMap.set(id, {
+                          ...msg, // API data (newer)
+                          ...optimisticMsg, // Preserve optimistic updates
+                          ReadBy: mergedReadBy,
+                          readBy: mergedReadBy,
+                          status: calculatedStatus,
+                          audioDuration: msg.audioDuration || msg.AudioDuration || optimisticMsg.audioDuration || optimisticMsg.AudioDuration,
+                        });
+                        
+                        if (__DEV__ && (msg.MessageType === 'audio' || msg.messageType === 'audio')) {
+                          console.log('🎵 [useChat] ✅ Replaced optimistic audio message with API message:', {
+                            optimisticId: mapId,
+                            realId: id,
+                            mediaKey: msgMediaKey,
+                            audioDuration: msg.audioDuration || msg.AudioDuration,
+                          });
+                        }
+                        
+                        return; // Skip normal processing
+                      }
+                    }
+                  }
+                }
+              }
+              
               if (existingMsg) {
                 // Message already exists - merge carefully to preserve status
+                // CRITICAL: If message was locally edited, preserve the edited text even if API returns old data
+                // Extended timeout to 5 minutes to handle cases where backend takes time to persist
+                const isLocallyEdited = existingMsg._locallyEdited || 
+                                       (existingMsg.IsEdited && existingMsg._editTimestamp && 
+                                        (Date.now() - existingMsg._editTimestamp) < 300000); // Edited within last 5 minutes
+                
+                // Also check if message was locally deleted
+                const isLocallyDeleted = existingMsg._locallyDeleted || 
+                                        (existingMsg.IsDeleted && existingMsg._deleteTimestamp && 
+                                         (Date.now() - existingMsg._deleteTimestamp) < 300000); // Deleted within last 5 minutes
+                
                 // Only update ReadBy if API has newer/more complete data
                 const existingReadBy = existingMsg.ReadBy || existingMsg.readBy || [];
                 const apiReadBy = msg.ReadBy || msg.readBy || [];
-                
-                // Merge ReadBy arrays - preserve object structure with timestamps
-                // Handle both formats: array of objects [{userId, readAt}] or array of IDs ['id1', 'id2']
-                const mergeReadBy = (existing, api) => {
-                  const mergedMap = new Map();
-                  
-                  // Process existing ReadBy
-                  existing.forEach(item => {
-                    if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-                      // Object format: { userId: '123', readAt: '...' }
-                      const userId = String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim();
-                      if (userId) {
-                        mergedMap.set(userId, item); // Preserve full object
-                      }
-                    } else {
-                      // ID format: '123' or 123
-                      const userId = String(item).trim();
-                      if (userId) {
-                        // Convert to object format if not already
-                        mergedMap.set(userId, { userId, readAt: null });
-                      }
-                    }
-                  });
-                  
-                  // Process API ReadBy (prefer API data as it's more up-to-date)
-                  api.forEach(item => {
-                    if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-                      // Object format: { userId: '123', readAt: '...' }
-                      const userId = String(item.userId || item.user_id || item.id || item.UserId || item.Id || '').trim();
-                      if (userId) {
-                        mergedMap.set(userId, item); // Overwrite with API data (newer)
-                      }
-                    } else {
-                      // ID format: '123' or 123
-                      const userId = String(item).trim();
-                      if (userId) {
-                        // Only add if not already present (preserve existing object with timestamp)
-                        if (!mergedMap.has(userId)) {
-                          mergedMap.set(userId, { userId, readAt: null });
-                        }
-                      }
-                    }
-                  });
-                  
-                  return Array.from(mergedMap.values());
-                };
                 
                 const mergedReadBy = mergeReadBy(existingReadBy, apiReadBy);
                 
@@ -519,9 +630,37 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                 const existingReplyTo = existingMsg.ReplyTo || existingMsg.replyTo || existingMsg.ParentMessageId || existingMsg.parentMessageId;
                 const finalReplyTo = apiReplyTo || existingReplyTo;
                 
+                // If locally edited, preserve the edited message text and IsEdited flag
+                const preservedMessage = isLocallyEdited ? {
+                  Message: existingMsg.Message || existingMsg.message || existingMsg.text || '',
+                  message: existingMsg.Message || existingMsg.message || existingMsg.text || '',
+                  text: existingMsg.Message || existingMsg.message || existingMsg.text || '',
+                  IsEdited: true,
+                  isEdited: true,
+                } : {};
+                
+                // If locally deleted, preserve the deleted state
+                const preservedDelete = isLocallyDeleted ? {
+                  IsDeleted: true,
+                  isDeleted: true,
+                  Message: '',
+                  message: '',
+                  text: '',
+                  MediaUrl: null,
+                  mediaUrl: null,
+                  MediaKey: null,
+                  mediaKey: null,
+                  MediaName: null,
+                  mediaName: null,
+                  Media: null,
+                  media: null,
+                } : {};
+                
                 messageMap.set(id, {
                   ...msg, // API data (newer)
                   ...existingMsg, // Preserve optimistic updates
+                  ...preservedMessage, // Override with locally edited text if applicable
+                  ...preservedDelete, // Override with locally deleted state if applicable
                   ReadBy: mergedReadBy,
                   readBy: mergedReadBy,
                   status: calculatedStatus, // Use calculated status
@@ -530,10 +669,53 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                   replyTo: finalReplyTo,
                   ParentMessageId: finalReplyTo,
                   parentMessageId: finalReplyTo,
+                  // Preserve audioDuration from either source
+                  audioDuration: msg.audioDuration || msg.AudioDuration || existingMsg.audioDuration || existingMsg.AudioDuration,
+                  // Preserve edit/delete timestamps
+                  _editTimestamp: existingMsg._editTimestamp,
+                  _locallyEdited: isLocallyEdited,
+                  _deleteTimestamp: existingMsg._deleteTimestamp,
+                  _locallyDeleted: isLocallyDeleted,
                 });
+                
+                if (__DEV__) {
+                  if (isLocallyEdited) {
+                    console.log('✏️ [useChat] Preserved locally edited message text:', {
+                      messageId: id,
+                      editedText: preservedMessage.Message?.substring(0, 50),
+                      apiText: msg.Message?.substring(0, 50),
+                      timeSinceEdit: existingMsg._editTimestamp ? Math.round((Date.now() - existingMsg._editTimestamp) / 1000) : 'unknown',
+                    });
+                  }
+                  if (isLocallyDeleted) {
+                    console.log('🗑️ [useChat] Preserved locally deleted message state:', {
+                      messageId: id,
+                      timeSinceDelete: existingMsg._deleteTimestamp ? Math.round((Date.now() - existingMsg._deleteTimestamp) / 1000) : 'unknown',
+                    });
+                  }
+                }
               } else {
                 // New message from API - add it
-                messageMap.set(id, msg);
+                // Log audio messages for debugging
+                if (msg.MessageType === 'audio' || msg.messageType === 'audio') {
+                  if (__DEV__) {
+                    console.log('🎵 [useChat] Audio message from API:', {
+                      id: msg._id || msg.id,
+                      messageType: msg.MessageType || msg.messageType,
+                      mediaKey: msg.MediaKey || msg.mediaKey,
+                      mediaUrl: msg.MediaUrl || msg.mediaUrl,
+                      mediaName: msg.MediaName || msg.mediaName,
+                      audioDuration: msg.audioDuration || msg.AudioDuration,
+                      senderId: msg.SenderId || msg.senderId,
+                      timestamp: msg.Timestamp || msg.timestamp,
+                    });
+                  }
+                }
+                messageMap.set(id, {
+                  ...msg,
+                  // Ensure audioDuration is included
+                  audioDuration: msg.audioDuration || msg.AudioDuration,
+                });
               }
             }
           });
@@ -542,7 +724,42 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           prevMessages.forEach(msg => {
             const id = msg._id || msg.id;
             if (id && String(id).startsWith('temp-')) {
-              messageMap.set(id, msg); // Keep optimistic
+              // Check if this optimistic message was already replaced
+              const wasReplaced = Array.from(messageMap.values()).some(m => {
+                const mId = m._id || m.id;
+                // If we have a real message with matching mediaKey, the optimistic was replaced
+                if (!String(mId).startsWith('temp-')) {
+                  const msgMediaKey = msg.mediaKey || msg.MediaKey;
+                  const mMediaKey = m.mediaKey || m.MediaKey;
+                  if (msgMediaKey && mMediaKey && String(msgMediaKey) === String(mMediaKey)) {
+                    const msgSenderId = msg.SenderId || msg.senderId;
+                    const mSenderId = m.SenderId || m.senderId;
+                    if (String(msgSenderId) === String(mSenderId)) {
+                      return true; // Was replaced
+                    }
+                  }
+                }
+                return false;
+              });
+              
+              if (!wasReplaced) {
+                messageMap.set(id, msg); // Keep optimistic if not replaced
+                
+                // Log audio optimistic messages being kept
+                if (__DEV__ && (msg.messageType === 'audio' || msg.MessageType === 'audio')) {
+                  console.log('🎵 [useChat] Keeping optimistic audio message (not in API yet):', {
+                    optimisticId: id,
+                    mediaKey: msg.mediaKey || msg.MediaKey,
+                    audioDuration: msg.audioDuration || msg.AudioDuration,
+                    status: msg.status,
+                  });
+                }
+              } else if (__DEV__ && (msg.messageType === 'audio' || msg.MessageType === 'audio')) {
+                console.log('🎵 [useChat] Optimistic audio message was already replaced:', {
+                  optimisticId: id,
+                  mediaKey: msg.mediaKey || msg.MediaKey,
+                });
+              }
             }
           });
           
@@ -673,13 +890,22 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     setupSocket();
 
     const handleNewMessage = (message) => {
-      
-      
       const messageChatId = String(message.ChatId || message.chatId || message.EnquiryId || message.enquiryId || '').trim();
       const currentChatId = String(chatIdForQuery || '').trim();
       
-      if (messageChatId !== currentChatId) {
+      // Log audio messages received via WebSocket
+      if (__DEV__ && (message.MessageType === 'audio' || message.messageType === 'audio')) {
+        console.log('🎵 [useChat] WebSocket received audio message:', {
+          messageId: message._id || message.id,
+          chatId: messageChatId,
+          currentChatId: currentChatId,
+          matches: messageChatId === currentChatId,
+          mediaKey: message.MediaKey || message.mediaKey,
+          audioDuration: message.audioDuration || message.AudioDuration,
+        });
+      }
       
+      if (messageChatId !== currentChatId) {
         return;
       }
 
@@ -755,10 +981,29 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           ChatId: messageChatId,
           chatId: messageChatId,
         status: statusValue,
+        // Include audio duration if present
+        ...(message.audioDuration && { audioDuration: message.audioDuration }),
+        ...(message.AudioDuration && { audioDuration: message.AudioDuration }),
         };
 
+        // Log audio messages for debugging
+        if (normalizedMessage.messageType === 'audio') {
+          if (__DEV__) {
+            console.log('🎵 [useChat] Audio message received:', {
+              id: normalizedMessage.id,
+              messageType: normalizedMessage.messageType,
+              mediaKey: normalizedMessage.mediaKey,
+              mediaUrl: normalizedMessage.mediaUrl,
+              mediaName: normalizedMessage.mediaName,
+              audioDuration: normalizedMessage.audioDuration || message.audioDuration || message.AudioDuration,
+              senderId: normalizedMessage.senderId,
+              timestamp: normalizedMessage.timestamp,
+            });
+          }
+        }
+
         // Infer media info if missing but looks like a media filename
-        if ((normalizedMessage.messageType === 'image' || normalizedMessage.messageType === 'video' || normalizedMessage.messageType === 'file') &&
+        if ((normalizedMessage.messageType === 'image' || normalizedMessage.messageType === 'video' || normalizedMessage.messageType === 'file' || normalizedMessage.messageType === 'audio') &&
             (!normalizedMessage.mediaKey || !normalizedMessage.mediaUrl)) {
           const inferred = inferMediaFromName(
             normalizedMessage.mediaName ||
@@ -821,11 +1066,43 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         
         // Check for optimistic message to replace
           // Match by message content, sender, and if it's a reply, also match by replyTo
+          // For media messages (image, video, audio, file), also match by mediaKey
           const optimisticIndex = prev.findIndex(msg => {
             const msgId = msg._id || msg.id;
             if (!String(msgId).startsWith('temp-')) return false;
-            if (msg.Message !== normalizedMessage.Message) return false;
+            
+            // Check sender matches
             if (String(msg.SenderId) !== String(normalizedMessage.SenderId)) return false;
+            
+            // For media messages, match by mediaKey instead of Message text
+            const isMediaMessage = (msg.messageType === 'image' || msg.messageType === 'video' || 
+                                   msg.messageType === 'audio' || msg.messageType === 'file' ||
+                                   normalizedMessage.messageType === 'image' || normalizedMessage.messageType === 'video' ||
+                                   normalizedMessage.messageType === 'audio' || normalizedMessage.messageType === 'file');
+            
+            if (isMediaMessage) {
+              // Match by mediaKey for media messages
+              const msgMediaKey = msg.mediaKey || msg.MediaKey;
+              const normMediaKey = normalizedMessage.mediaKey || normalizedMessage.MediaKey;
+              
+              if (__DEV__ && normalizedMessage.messageType === 'audio') {
+                console.log('🎵 [useChat] WebSocket: Checking optimistic match for audio:', {
+                  optimisticMediaKey: msgMediaKey,
+                  wsMediaKey: normMediaKey,
+                  optimisticId: msgId,
+                  matches: msgMediaKey && normMediaKey && String(msgMediaKey) === String(normMediaKey),
+                });
+              }
+              
+              if (msgMediaKey && normMediaKey && String(msgMediaKey) === String(normMediaKey)) {
+                // MediaKey matches - this is the same message
+                return true;
+              }
+              // If mediaKey doesn't match, fall through to Message text check
+            }
+            
+            // For text messages or if mediaKey didn't match, check Message text
+            if (msg.Message !== normalizedMessage.Message) return false;
             
             // If both have replyTo, they must match (handle various formats)
             const msgReplyTo = msg.ReplyTo || msg.replyTo || msg.ParentMessageId || msg.parentMessageId;
@@ -882,7 +1159,22 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
               replyTo: backendReplyTo,
               ParentMessageId: backendReplyTo,
               parentMessageId: backendReplyTo,
+              // Preserve audioDuration
+              audioDuration: normalizedMessage.audioDuration || prev[optimisticIndex].audioDuration,
             };
+            
+            // Log audio message replacement
+            if (replacedMessage.messageType === 'audio') {
+              if (__DEV__) {
+                console.log('🎵 [useChat] ✅ WebSocket: Replaced optimistic audio message with real one:', {
+                  optimisticId: prev[optimisticIndex]._id || prev[optimisticIndex].id,
+                  realId: replacedMessage._id || replacedMessage.id,
+                  audioDuration: replacedMessage.audioDuration,
+                  mediaKey: replacedMessage.mediaKey,
+                  mediaUrl: replacedMessage.mediaUrl,
+                });
+              }
+            }
             
             if (__DEV__) {
               console.log('✅ [Reply] Replaced optimistic message with real one:', {
@@ -901,6 +1193,19 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             });
           }
           
+        // Log audio message addition
+        if (normalizedMessage.messageType === 'audio') {
+          if (__DEV__) {
+            console.log('🎵 [useChat] Adding new audio message to chat:', {
+              messageId: normalizedMessage._id || normalizedMessage.id,
+              audioDuration: normalizedMessage.audioDuration,
+              mediaKey: normalizedMessage.mediaKey,
+              mediaUrl: normalizedMessage.mediaUrl,
+              mediaName: normalizedMessage.mediaName,
+            });
+          }
+        }
+        
         // Add new message (from WebSocket)
         const updated = [...prev, normalizedMessage];
           return updated.sort((a, b) => {
@@ -1121,10 +1426,180 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       } 
     };
 
+    // Handle message edited event
+    // Backend sends: { _id, ChatId, Message, IsEdited }
+    const handleMessageEdited = (payload) => {
+      if (__DEV__) {
+        console.log('✏️ [useChat] messageEdited event received:', payload);
+      }
+      
+      // Backend payload structure: { _id, ChatId, Message, IsEdited }
+      const messageChatId = payload.ChatId || payload.chatId;
+      const currentChatId = String(chatIdForQuery || '').trim();
+      
+      if (__DEV__) {
+        console.log('✏️ [useChat] Checking if edited message belongs to current chat:', {
+          messageChatId,
+          currentChatId,
+          matches: String(messageChatId).trim() === currentChatId,
+          payloadKeys: Object.keys(payload),
+        });
+      }
+      
+      // Check if edited message belongs to current chat
+      if (String(messageChatId).trim() === currentChatId) {
+        const editedMessageId = payload._id || payload.id;
+        const newMessageText = payload.Message || payload.message || payload.text || '';
+        
+        if (editedMessageId && newMessageText) {
+          if (__DEV__) {
+            console.log('✏️ [useChat] Updating edited message in local state:', {
+              messageId: editedMessageId,
+              newText: newMessageText,
+              isEdited: payload.IsEdited,
+              currentMessagesCount: messagesRef.current.length,
+            });
+          }
+          
+          // Update message in local state
+          setMessages(prev => {
+            const updated = prev.map(msg => {
+              const msgId = String(msg._id || msg.id || '').trim();
+              const editId = String(editedMessageId).trim();
+              
+              if (msgId === editId) {
+                if (__DEV__) {
+                  console.log('✅ [useChat] Found and updating message:', msgId, 'with text:', newMessageText);
+                }
+                return {
+                  ...msg,
+                  Message: newMessageText,
+                  message: newMessageText,
+                  text: newMessageText,
+                  IsEdited: true,
+                  isEdited: true,
+                  _locallyEdited: true,
+                  _editTimestamp: Date.now(),
+                };
+              }
+              return msg;
+            });
+            
+            // Verify update
+            const wasUpdated = updated.some(msg => {
+              const msgId = String(msg._id || msg.id || '').trim();
+              const editId = String(editedMessageId).trim();
+              return msgId === editId && (msg.IsEdited || msg.isEdited) && msg.Message === newMessageText;
+            });
+            
+            if (__DEV__) {
+              console.log('✏️ [useChat] Message update result:', {
+                wasUpdated,
+                messageFound: prev.some(msg => String(msg._id || msg.id || '').trim() === String(editedMessageId).trim()),
+                updatedMessageText: updated.find(msg => String(msg._id || msg.id || '').trim() === String(editedMessageId).trim())?.Message,
+              });
+            }
+            
+            return updated;
+          });
+        } else {
+          if (__DEV__) {
+            console.warn('⚠️ [useChat] Cannot update message - missing ID or text:', {
+              editedMessageId,
+              hasNewText: !!newMessageText,
+              payload,
+            });
+          }
+        }
+      } else {
+        if (__DEV__) {
+          console.log('ℹ️ [useChat] Edited message belongs to different chat, ignoring');
+        }
+      }
+    };
+
+    // Handle message deleted event
+    // Backend sends: { _id, ChatId, IsDeleted }
+    const handleMessageDeleted = (payload) => {
+      if (__DEV__) {
+        console.log('🗑️ [useChat] messageDeleted event received:', payload);
+      }
+      
+      // Backend payload structure: { _id, ChatId, IsDeleted }
+      const messageChatId = payload.ChatId || payload.chatId;
+      const deletedMessageId = payload._id || payload.id;
+      const currentChatId = String(chatIdForQuery || '').trim();
+      
+      // Check if deleted message belongs to current chat
+      if (String(messageChatId).trim() === currentChatId && deletedMessageId) {
+        if (__DEV__) {
+          console.log('🗑️ [useChat] Updating deleted message in local state:', {
+            messageId: deletedMessageId,
+            chatId: messageChatId,
+          });
+        }
+        
+        // Update message in local state (soft delete)
+        setMessages(prev => {
+          const updated = prev.map(msg => {
+            const msgId = String(msg._id || msg.id || '').trim();
+            const delId = String(deletedMessageId).trim();
+            
+            if (msgId === delId) {
+              if (__DEV__) {
+                console.log('✅ [useChat] Found and marking message as deleted:', msgId);
+              }
+              return {
+                ...msg,
+                IsDeleted: true,
+                isDeleted: true,
+                Message: '',
+                message: '',
+                text: '',
+                MediaUrl: null,
+                mediaUrl: null,
+                MediaKey: null,
+                mediaKey: null,
+                MediaName: null,
+                mediaName: null,
+                Media: null,
+                media: null,
+                _locallyDeleted: true,
+                _deleteTimestamp: Date.now(),
+              };
+            }
+            return msg;
+          });
+          
+          // Verify update
+          const wasUpdated = updated.some(msg => {
+            const msgId = String(msg._id || msg.id || '').trim();
+            const delId = String(deletedMessageId).trim();
+            return msgId === delId && (msg.IsDeleted || msg.isDeleted);
+          });
+          
+          if (__DEV__) {
+            console.log('🗑️ [useChat] Delete update result:', {
+              wasUpdated,
+              messageFound: prev.some(msg => String(msg._id || msg.id || '').trim() === String(deletedMessageId).trim()),
+            });
+          }
+          
+          return updated;
+        });
+      } else {
+        if (__DEV__) {
+          console.log('ℹ️ [useChat] Deleted message belongs to different chat, ignoring');
+        }
+      }
+    };
+
     // Register event listeners
     socketService.on('newMessage', handleNewMessage);
     socketService.on('messagesRead', handleMessagesRead);
     socketService.on('userTyping', handleUserTyping);
+    socketService.on('messageEdited', handleMessageEdited);
+    socketService.on('messageDeleted', handleMessageDeleted);
     
     // Mark messages as read when chat is opened and messages are loaded
     // Use ref to access latest messages without adding to dependencies
@@ -1171,6 +1646,8 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       socketService.off('newMessage', handleNewMessage);
       socketService.off('messagesRead', handleMessagesRead);
       socketService.off('userTyping', handleUserTyping);
+      socketService.off('messageEdited', handleMessageEdited);
+      socketService.off('messageDeleted', handleMessageDeleted);
       
       if (chatIdForQuery && user) {
         socketService.leaveChat(chatIdForQuery, user.id);
@@ -1378,6 +1855,9 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       return false;
     }
 
+    // Define tempMediaId outside try block so it's accessible in catch
+    const tempMediaId = `temp-media-${Date.now()}-${Math.random()}`;
+
     try {
       if (__DEV__) {
         console.log('[sendMedia] start', {
@@ -1402,6 +1882,8 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           messageType = 'image';
         } else if (file.type?.startsWith('video/')) {
           messageType = 'video';
+        } else if (file.type?.startsWith('audio/')) {
+          messageType = 'audio';
         }
       }
 
@@ -1422,8 +1904,10 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         }
       }
 
+      // Extract audio duration if present
+      const audioDuration = file.audioDuration || null;
+      
       // Create optimistic media message so UI shows thumbnail immediately
-      const tempMediaId = `temp-media-${Date.now()}-${Math.random()}`;
       const optimisticMediaMessage = {
         _id: tempMediaId,
         id: tempMediaId,
@@ -1449,6 +1933,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         ChatId: chatIdForQuery,
         chatId: chatIdForQuery,
         status: 'sending',
+        ...(audioDuration && { audioDuration }),
       };
       setMessages(prev => [...prev, optimisticMediaMessage]);
 
@@ -1461,6 +1946,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           mediaUrl: finalMediaUrl,
           mediaKey,
           mediaSize: uploadResult.size || file.size || 0,
+          audioDuration: audioDuration || null,
         });
         if (!mediaKey && !mediaUrl) {
           console.log('[sendMedia] WARN: mediaKey and mediaUrl are missing; backend returned:', uploadResult);
@@ -1477,7 +1963,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         }
       }
 
-      const sent = socketService.sendMessage({
+      const messageData = {
         chatId: chatIdForQuery,
         userId: user.id,
         message: mediaName,
@@ -1487,7 +1973,17 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         mediaName: mediaName,
         mediaKey: mediaKey,
         mediaSize: uploadResult.size || file.size || 0,
-      });
+        ...(audioDuration && { audioDuration }),
+      };
+      
+      if (__DEV__ && messageType === 'audio') {
+        console.log('🎵 [sendMedia] Sending audio message via WebSocket:', {
+          ...messageData,
+          hasAudioDuration: !!audioDuration,
+        });
+      }
+      
+      const sent = socketService.sendMessage(messageData);
 
       if (__DEV__) {
         console.log('[sendMedia] socket send result', sent);
@@ -1502,7 +1998,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           return msg;
         }));
 
-        // Refetch after delay to ensure message appears
+        // Refetch after delay to ensure message appears (same for all media types including audio)
         setTimeout(() => {
           try {
             const refetchFn = refetchMessagesRef.current;
@@ -1513,8 +2009,8 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             if (__DEV__) {
               console.log('[sendMedia] refetch error', error);
             }
-      }
-      }, 1500);
+          }
+        }, 1500);
       } else {
         // Mark optimistic message as failed
         setMessages(prev => prev.map(msg => {
@@ -1537,10 +2033,11 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         }
         return msg;
       }));
-      alert.error(
-        'Error',
-        error.message || 'Failed to send media. Please try again.'
-      );
+      
+      if (__DEV__) {
+        console.error('[sendMedia] Failed to send media:', error.message || error);
+      }
+      
       return false;
     }
   }, [chatIdForQuery, user, uploadChatMedia]);
@@ -1822,6 +2319,34 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     }
   }, [messages.length, chatIdForQuery, apiMessages?.length, messagesLoading]);
 
+  // Function to update a message in local state (for optimistic updates)
+  const updateMessage = useCallback((messageId, updates) => {
+    setMessages(prev => prev.map(msg => {
+      const msgId = String(msg._id || msg.id || '').trim();
+      const updateId = String(messageId).trim();
+      
+      if (msgId === updateId) {
+        // If updating with IsEdited flag, mark as locally edited
+        const isEditUpdate = updates.IsEdited || updates.isEdited;
+        const editTimestamp = isEditUpdate ? Date.now() : (msg._editTimestamp || null);
+        
+        // If updating with IsDeleted flag, mark as locally deleted
+        const isDeleteUpdate = updates.IsDeleted || updates.isDeleted;
+        const deleteTimestamp = isDeleteUpdate ? Date.now() : (msg._deleteTimestamp || null);
+        
+        return {
+          ...msg,
+          ...updates,
+          _locallyEdited: isEditUpdate ? true : (msg._locallyEdited || false),
+          _editTimestamp: editTimestamp,
+          _locallyDeleted: isDeleteUpdate ? true : (msg._locallyDeleted || false),
+          _deleteTimestamp: deleteTimestamp,
+        };
+      }
+      return msg;
+    }));
+  }, []);
+
   return {
     chat,
     messages,
@@ -1840,5 +2365,6 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     refetchChat: fetchChat,
     refetchMessages,
     loadMoreMessages,
+    updateMessage,
   };
 };

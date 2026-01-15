@@ -357,17 +357,17 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
           <View style={styles.summaryRow}>
             <BodyText style={styles.summaryLabel}>Budget:</BodyText>
             <BodyText style={styles.summaryValue}>
-              {formData.budget ? `₹${parseFloat(formData.budget).toLocaleString('en-IN')}` : 'Not specified'}
+              {formData.budget ? `$${parseFloat(formData.budget).toLocaleString('en-US')}` : 'Not specified'}
             </BodyText>
           </View>
         )}
-        {formData.specialRemarks && (
+        {formData.specialRemarks && user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
           <View style={styles.summaryRow}>
             <BodyText style={styles.summaryLabel}>Special Remarks:</BodyText>
             <BodyText style={styles.summaryValue}>{formData.specialRemarks}</BodyText>
           </View>
         )}
-        {formData.approvedDate && (
+        {formData.approvedDate && user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
           <View style={styles.summaryRow}>
             <BodyText style={styles.summaryLabel}>Approved Date:</BodyText>
             <BodyText style={styles.summaryValue}>

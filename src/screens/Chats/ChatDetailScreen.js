@@ -16,6 +16,8 @@ import {
   Linking,
   Modal,
   PermissionsAndroid,
+  PanResponder,
+  Animated,
 } from 'react-native';
 import Video from 'react-native-video';
 import ImageZoom from 'react-native-image-pan-zoom';
@@ -24,7 +26,8 @@ import { WebView } from 'react-native-webview';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
-import { useGetClientsQuery, useGetEnquiryByIdQuery } from '../../store/api';
+import { useGetClientsQuery, useGetEnquiryByIdQuery, useGetChatsQuery, api } from '../../store/api';
+import { useDispatch } from 'react-redux';
 import { useChat } from '../../hooks/useChat';
 import { useAlert } from '../../context/AlertContext';
 import socketService from '../../services/socketService';
@@ -39,6 +42,7 @@ import DocumentPicker from 'react-native-document-picker';
 import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import { FILE_BASE_URL, API_BASE_URL } from '../../config/apiConfig';
 import secureStorage from '../../utils/secureStorage';
 import { getUserName } from '../../utils/userUtils';
@@ -61,6 +65,7 @@ try {
 
 const ChatDetailScreen = ({ route, navigation }) => {
   // Hooks must be called unconditionally at the top level
+  const dispatch = useDispatch();
   const authResult = useAuth();
   const user = authResult?.user;
   const alert = useAlert();
@@ -176,6 +181,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
     hasMore = false,
     isLoadingMore = false,
     nextCursor = null,
+    updateMessage = () => {},
   } = chatHookResult || {};
   
   // Use routeChat if it has an _id and hook hasn't loaded yet, otherwise use hookChat
@@ -258,6 +264,141 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }, [chat?._id, messages, messagesLoading, user])
   );
 
+  // Socket listeners for message edit/delete events and error handling
+  useEffect(() => {
+    if (!user || !chat?._id) return;
+
+    const handleMessageEdited = (editedMessage) => {
+      if (__DEV__) {
+        console.log('✏️ [ChatDetailScreen] messageEdited event received:', editedMessage);
+      }
+      
+      // Backend sends: { _id, ChatId, Message, IsEdited }
+      const messageChatId = editedMessage.ChatId || editedMessage.chatId;
+      const currentChatId = chat?._id || chat?.id;
+      
+      if (String(messageChatId).trim() === String(currentChatId).trim()) {
+        // Clear loading state
+        setIsEditing(false);
+        
+        // Remove from pending operations
+        const messageId = editedMessage._id || editedMessage.id;
+        if (messageId) {
+          setPendingOperations(prev => {
+            const next = new Map(prev);
+            next.delete(`edit_${messageId}`);
+            return next;
+          });
+        }
+        
+        // Trigger refetch to get updated messages
+        if (__DEV__) {
+          console.log('✏️ [ChatDetailScreen] Message edited in current chat, refetching messages');
+        }
+        setTimeout(() => {
+          if (refetchMessages && typeof refetchMessages === 'function') {
+            try {
+              refetchMessages();
+            } catch (error) {
+              if (__DEV__) {
+                console.warn('⚠️ [ChatDetailScreen] Cannot refetch messages - query not started:', error.message);
+              }
+            }
+          }
+        }, 300);
+      }
+    };
+
+    const handleMessageDeleted = (deletedData) => {
+      // Backend sends: { _id, ChatId, IsDeleted }
+      const messageChatId = deletedData.ChatId || deletedData.chatId;
+      const currentChatId = chat?._id || chat?.id;
+      
+      if (String(messageChatId).trim() === String(currentChatId).trim()) {
+        // Clear loading state
+        setIsDeleting(false);
+        
+        // Remove from pending operations
+        const messageId = deletedData._id || deletedData.id;
+        if (messageId) {
+          setPendingOperations(prev => {
+            const next = new Map(prev);
+            next.delete(`delete_${messageId}`);
+            return next;
+          });
+        }
+        
+        // Trigger refetch to get updated messages
+        if (__DEV__) {
+          console.log('🗑️ [ChatDetailScreen] Message deleted, refetching messages');
+        }
+        setTimeout(() => {
+          if (refetchMessages && typeof refetchMessages === 'function') {
+            try {
+              refetchMessages();
+            } catch (error) {
+              if (__DEV__) {
+                console.warn('⚠️ [ChatDetailScreen] Cannot refetch messages - query not started:', error.message);
+              }
+            }
+          }
+        }, 300);
+      }
+    };
+
+    // Handle socket errors for edit/delete operations
+    const handleSocketError = (error) => {
+      const errorMessage = error?.message || error?.toString() || '';
+      
+      // Check if it's an edit/delete related error
+      if (errorMessage.includes('edit') || errorMessage.includes('delete') || 
+          errorMessage.includes('Message not found') || 
+          errorMessage.includes('cannot edit') || 
+          errorMessage.includes('cannot delete') ||
+          errorMessage.includes('already deleted')) {
+        
+        if (__DEV__) {
+          console.error('❌ [ChatDetailScreen] Socket error for edit/delete:', errorMessage);
+        }
+        
+        // Clear loading states
+        setIsEditing(false);
+        setIsDeleting(false);
+        
+        // Show user-friendly error message
+        let userMessage = 'Operation failed. Please try again.';
+        if (errorMessage.includes('Message not found')) {
+          userMessage = 'Message not found. It may have been deleted.';
+        } else if (errorMessage.includes('cannot edit') || errorMessage.includes('You cannot edit')) {
+          userMessage = 'You can only edit your own messages.';
+        } else if (errorMessage.includes('cannot delete') || errorMessage.includes('You cannot delete')) {
+          userMessage = 'You can only delete your own messages.';
+        } else if (errorMessage.includes('already deleted')) {
+          userMessage = 'This message has already been deleted.';
+        } else if (errorMessage.includes('Failed to edit')) {
+          userMessage = 'Failed to edit message. Please try again.';
+        } else if (errorMessage.includes('Failed to delete')) {
+          userMessage = 'Failed to delete message. Please try again.';
+        }
+        
+        alert.error('Error', userMessage);
+        
+        // Clear pending operations
+        setPendingOperations(new Map());
+      }
+    };
+
+    const unsubscribeEdited = socketService.on('messageEdited', handleMessageEdited);
+    const unsubscribeDeleted = socketService.on('messageDeleted', handleMessageDeleted);
+    const unsubscribeError = socketService.on('error', handleSocketError);
+
+    return () => {
+      if (unsubscribeEdited) unsubscribeEdited();
+      if (unsubscribeDeleted) unsubscribeDeleted();
+      if (unsubscribeError) unsubscribeError();
+    };
+  }, [user, chat?._id, chat?.id, refetchMessages, alert]);
+
   const [newMessage, setNewMessage] = useState('');
   const [textInputHeight, setTextInputHeight] = useState(36); // Initial height for single line
   const [showMediaModal, setShowMediaModal] = useState(false);
@@ -273,6 +414,37 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [recordingPath, setRecordingPath] = useState(null);
+  const recordingTimerRef = useRef(null);
+  const audioRecorderPlayerRef = useRef(new AudioRecorderPlayer());
+  // WhatsApp-like recording UX state
+  const [showRecordingOverlay, setShowRecordingOverlay] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [swipeY, setSwipeY] = useState(0);
+  const [shouldCancel, setShouldCancel] = useState(false);
+  const recordingStartTimeRef = useRef(null);
+  const panResponderRef = useRef(null);
+  const waveformAnim = useRef(new Animated.Value(0)).current;
+  const micButtonPulseAnim = useRef(new Animated.Value(1)).current;
+  // Audio playback state
+  const [playingAudioId, setPlayingAudioId] = useState(null);
+  const [audioProgress, setAudioProgress] = useState({});
+  const [audioDuration, setAudioDuration] = useState({});
+  // Message action menu state
+  const [showMessageMenu, setShowMessageMenu] = useState(false);
+  const [menuMessage, setMenuMessage] = useState(null);
+  // Forward message state
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [forwardingMessage, setForwardingMessage] = useState(null);
+  // Edit message state
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editMessageText, setEditMessageText] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [pendingOperations, setPendingOperations] = useState(new Map()); // Track pending operations to prevent duplicates
   const scrollViewRef = useRef(null);
   const textInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -300,6 +472,31 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   // Fetch all users to enable name lookup by ID
   const { users: usersList } = useUsers();
+
+  // Fetch chats for forwarding (exclude current chat)
+  // Fetch both admin-client and admin-designer chats
+  const { data: availableChats1 = [] } = useGetChatsQuery(
+    { page: 1, limit: 100, search: '', type: 'admin-client' },
+    { skip: !showForwardModal || !user }
+  );
+  
+  const { data: availableChats2 = [] } = useGetChatsQuery(
+    { page: 1, limit: 100, search: '', type: 'admin-designer' },
+    { skip: !showForwardModal || !user }
+  );
+  
+  // Combine and filter out current chat from available chats
+  const forwardableChats = useMemo(() => {
+    const currentChatId = chat?._id || chat?.id;
+    const allChats = [...(availableChats1 || []), ...(availableChats2 || [])];
+    // Remove duplicates and current chat
+    const uniqueChats = Array.from(
+      new Map(allChats.map(c => [c._id || c.id, c])).values()
+    );
+    return uniqueChats.filter(
+      (c) => (c._id || c.id) !== currentChatId
+    );
+  }, [availableChats1, availableChats2, chat]);
 
   // Store users list in ref for typing user lookup
   useEffect(() => {
@@ -1073,6 +1270,863 @@ const ChatDetailScreen = ({ route, navigation }) => {
     setShowMediaModal(false);
   };
 
+  // Voice recording functions
+  const requestAudioPermission = useCallback(async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone Permission',
+            message: 'Allow access to your microphone to record voice notes.',
+            buttonPositive: 'OK',
+            buttonNegative: 'Cancel',
+          }
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (err) {
+        if (__DEV__) {
+          console.log('Audio permission request error', err);
+        }
+        return false;
+      }
+    }
+    return true; // iOS permissions are handled automatically
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    const hasPermission = await requestAudioPermission();
+    if (!hasPermission) {
+      alert.error('Permission Denied', 'Microphone permission is required to record voice notes.');
+      return;
+    }
+
+    try {
+      const audioRecorderPlayer = audioRecorderPlayerRef.current;
+      const path = Platform.select({
+        ios: 'voice_note.m4a',
+        android: `${RNFS.CachesDirectoryPath}/voice_note_${Date.now()}.mp3`,
+      });
+
+      const uri = await audioRecorderPlayer.startRecorder(path);
+      audioRecorderPlayer.addRecordBackListener((e) => {
+        const timeInSeconds = Math.floor(e.currentPosition / 1000);
+        setRecordingTime(timeInSeconds);
+      });
+
+      setRecordingPath(uri);
+      setIsRecording(true);
+      setRecordingTime(0);
+      setShouldCancel(false);
+      setSwipeY(0);
+      setIsLocked(false);
+      recordingStartTimeRef.current = Date.now();
+
+      // Start waveform animation with staggered effect
+      const waveformAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(waveformAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(waveformAnim, {
+            toValue: 0,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      waveformAnimation.start();
+      
+      // Store animation reference
+      recordingTimerRef.current = { waveformAnimation };
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error starting recording:', error);
+      }
+      alert.error('Error', 'Failed to start recording. Please try again.');
+    }
+  }, [requestAudioPermission, alert, waveformAnim, isLocked]);
+
+  const stopRecording = useCallback(async (shouldSend = false) => {
+    try {
+      const audioRecorderPlayer = audioRecorderPlayerRef.current;
+      const result = await audioRecorderPlayer.stopRecorder();
+      audioRecorderPlayer.removeRecordBackListener();
+
+      // Stop waveform animation
+      waveformAnim.stopAnimation();
+      // Stop mic button pulse animation
+      micButtonPulseAnim.stopAnimation();
+      if (recordingTimerRef.current?.waveformAnimation) {
+        recordingTimerRef.current.waveformAnimation.stop();
+      }
+
+      setIsRecording(false);
+      setIsLocked(false);
+      setSwipeY(0);
+      setShouldCancel(false);
+      const finalTime = recordingTime;
+
+      if (shouldSend && recordingPath && finalTime > 0) {
+        // Send voice note
+        const minutes = Math.floor(finalTime / 60);
+        const seconds = finalTime % 60;
+        const durationString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        
+        const audioFile = {
+          uri: recordingPath,
+          type: Platform.OS === 'ios' ? 'audio/m4a' : 'audio/mp3',
+          name: `voice_note_${Date.now()}.${Platform.OS === 'ios' ? 'm4a' : 'mp3'}`,
+          messageType: 'audio',
+          audioDuration: durationString,
+        };
+
+        const sent = await sendMedia(audioFile);
+        if (!sent) {
+          alert.error('Error', 'Failed to send voice note. Please try again.');
+        }
+      } else if (recordingPath) {
+        // Delete recording if cancelled
+        try {
+          if (Platform.OS === 'android' && await RNFS.exists(recordingPath)) {
+            await RNFS.unlink(recordingPath);
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.log('Error deleting recording:', error);
+          }
+        }
+      }
+
+      setRecordingPath(null);
+      setRecordingTime(0);
+      recordingStartTimeRef.current = null;
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error stopping recording:', error);
+      }
+      setIsRecording(false);
+      setIsLocked(false);
+      setRecordingPath(null);
+      setRecordingTime(0);
+    }
+  }, [recordingPath, recordingTime, sendMedia, alert, waveformAnim]);
+
+  // PanResponder for WhatsApp-like mic button interaction
+  useEffect(() => {
+    panResponderRef.current = PanResponder.create({
+      onStartShouldSetPanResponder: () => !isRecording && !isLocked,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Only respond to vertical movement when recording
+        return isRecording && !isLocked && Math.abs(gestureState.dy) > 10;
+      },
+      onPanResponderGrant: (evt) => {
+        if (!isRecording && !isLocked) {
+          startRecording();
+        }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        if (isRecording && !isLocked) {
+          const dy = gestureState.dy;
+          setSwipeY(dy);
+          // Show cancel if swiped up more than 50px
+          setShouldCancel(dy < -50);
+        }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        if (isRecording && !isLocked) {
+          if (shouldCancel || gestureState.dy < -50) {
+            // Swiped up to cancel
+            stopRecording(false);
+          } else {
+            // Released normally - send if recording for more than 0.5 seconds
+            if (recordingTime >= 0.5) {
+        stopRecording(true);
+      } else {
+        stopRecording(false);
+      }
+          }
+        }
+        setSwipeY(0);
+        setShouldCancel(false);
+      },
+    });
+  }, [isRecording, isLocked, recordingTime, startRecording, stopRecording, shouldCancel]);
+
+  const handleMicPress = useCallback(() => {
+    if (isRecording && isLocked) {
+      // If locked, tap to stop and send
+      stopRecording(true);
+    } else if (!isRecording && !isLocked) {
+      // Start recording on press (for accessibility)
+      startRecording();
+    }
+  }, [isRecording, isLocked, stopRecording, startRecording]);
+
+  // Message action menu functions
+  const handleMessageLongPress = useCallback((message) => {
+    setMenuMessage(message);
+    setShowMessageMenu(true);
+  }, []);
+
+  const handleCloseMessageMenu = useCallback(() => {
+    setShowMessageMenu(false);
+    setMenuMessage(null);
+  }, []);
+
+  const handleReplyFromMenu = useCallback(() => {
+    if (menuMessage) {
+      handleReplyToMessage(menuMessage);
+    }
+    handleCloseMessageMenu();
+  }, [menuMessage, handleReplyToMessage, handleCloseMessageMenu]);
+
+  const handleForwardFromMenu = useCallback(() => {
+    if (menuMessage) {
+      setForwardingMessage(menuMessage);
+      setShowForwardModal(true);
+    }
+    handleCloseMessageMenu();
+  }, [menuMessage, handleCloseMessageMenu]);
+
+  const handleReadReceiptsFromMenu = useCallback(() => {
+    if (menuMessage) {
+      handleShowReadReceipts(menuMessage);
+    }
+    handleCloseMessageMenu();
+  }, [menuMessage, handleCloseMessageMenu]);
+
+  const handleCopyFromMenu = useCallback(() => {
+    if (!menuMessage) {
+      handleCloseMessageMenu();
+      return;
+    }
+
+    try {
+      // Get message text from various possible fields
+      let messageText = 
+        menuMessage.text || 
+        menuMessage.Message || 
+        menuMessage.message || 
+        '';
+      
+      // Remove "Forwarded: " prefix if present (for backward compatibility)
+      if (messageText.startsWith('Forwarded: ')) {
+        messageText = messageText.replace(/^Forwarded: /, '');
+      }
+
+      // Check if it's a media message
+      const messageType = menuMessage.messageType || menuMessage.MessageType || 'text';
+      const isMediaMessage = ['image', 'video', 'file', 'audio'].includes(messageType);
+
+      let textToCopy = '';
+      if (messageText.trim()) {
+        textToCopy = messageText.trim();
+      } else if (isMediaMessage) {
+        // For media messages without text, copy media name
+        const mediaName = 
+          menuMessage.mediaName || 
+          menuMessage.MediaName || 
+          'Media';
+        
+        if (mediaName && mediaName !== 'Media') {
+          textToCopy = mediaName;
+        } else {
+          textToCopy = messageType.charAt(0).toUpperCase() + messageType.slice(1);
+        }
+      } else {
+        // Empty message
+        alert.warning('Nothing to copy', 'This message has no text content');
+        handleCloseMessageMenu();
+        return;
+      }
+
+      // Try using clipboard API
+      if (Platform.OS === 'ios' || Platform.OS === 'android') {
+        try {
+          const Clipboard = require('@react-native-clipboard/clipboard').default;
+          Clipboard.setString(textToCopy);
+          alert.success('Copied', 'Message copied to clipboard');
+        } catch (clipboardError) {
+          // Fallback: Try using React Native's built-in Clipboard if available
+          if (__DEV__) {
+            console.warn('Clipboard package not available, trying fallback:', clipboardError);
+          }
+          // Fallback to showing text in alert for manual copy
+          alert.info('Copy Message', textToCopy, [
+            { text: 'OK' }
+          ]);
+        }
+      } else {
+        // Web/other platforms - show in alert
+        alert.info('Copy Message', textToCopy, [
+          { text: 'OK' }
+        ]);
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error copying message:', error);
+      }
+      alert.error('Error', 'Failed to copy message');
+    }
+    
+    handleCloseMessageMenu();
+  }, [menuMessage, alert, handleCloseMessageMenu]);
+
+  const handleEditFromMenu = useCallback(() => {
+    if (!menuMessage || !user) {
+      handleCloseMessageMenu();
+      return;
+    }
+
+    // Check if user is the sender
+    const senderId = menuMessage.SenderId || menuMessage.senderId;
+    if (String(senderId).trim() !== String(user.id).trim()) {
+      alert.error('Error', 'You can only edit your own messages');
+      handleCloseMessageMenu();
+      return;
+    }
+
+    // Check if message is already deleted
+    if (menuMessage.IsDeleted || menuMessage.isDeleted) {
+      alert.error('Error', 'Cannot edit deleted message');
+      handleCloseMessageMenu();
+      return;
+    }
+
+    // Get current message text
+    const currentText = menuMessage.text || menuMessage.Message || menuMessage.message || '';
+    
+    // Remove "Forwarded: " prefix if present
+    const textToEdit = currentText.startsWith('Forwarded: ') 
+      ? currentText.replace(/^Forwarded: /, '') 
+      : currentText;
+
+    setEditingMessage(menuMessage);
+    setEditMessageText(textToEdit);
+    handleCloseMessageMenu();
+  }, [menuMessage, user, alert, handleCloseMessageMenu]);
+
+  const handleDeleteFromMenu = useCallback(() => {
+    if (!menuMessage || !user) {
+      handleCloseMessageMenu();
+      return;
+    }
+
+    // Validation: Check if user is the sender
+    const senderId = menuMessage.SenderId || menuMessage.senderId;
+    if (String(senderId).trim() !== String(user.id).trim()) {
+      alert.error('Permission Denied', 'You can only delete your own messages');
+      handleCloseMessageMenu();
+      return;
+    }
+
+    // Validation: Check if message is already deleted
+    if (menuMessage.IsDeleted || menuMessage.isDeleted) {
+      alert.warning('Already Deleted', 'This message has already been deleted');
+      handleCloseMessageMenu();
+      return;
+    }
+
+    // Validation: Check if already deleting
+    const messageId = menuMessage._id || menuMessage.id;
+    if (messageId && pendingOperations.has(`delete_${messageId}`)) {
+      alert.warning('In Progress', 'Delete operation is already in progress');
+      handleCloseMessageMenu();
+      return;
+    }
+
+    // Show confirmation dialog
+    alert.show('error', 'Delete Message', 'Are you sure you want to delete this message? This action cannot be undone.', [
+      { 
+        text: 'Cancel', 
+        style: 'cancel',
+        onPress: () => handleCloseMessageMenu()
+      },
+      { 
+        text: 'Delete', 
+        style: 'destructive',
+        onPress: async () => {
+          handleCloseMessageMenu();
+          
+          if (!messageId) {
+            alert.error('Error', 'Invalid message. Cannot delete.');
+            return;
+          }
+
+          // Check if already in progress
+          if (pendingOperations.has(`delete_${messageId}`)) {
+            return;
+          }
+
+          // Mark as pending
+          setPendingOperations(prev => {
+            const next = new Map(prev);
+            next.set(`delete_${messageId}`, { type: 'delete', messageId, timestamp: Date.now() });
+            return next;
+          });
+
+          setIsDeleting(true);
+
+          // Optimistic update: Mark message as deleted immediately
+          updateMessage(messageId, {
+            IsDeleted: true,
+            isDeleted: true,
+            Message: '',
+            message: '',
+            text: '',
+            MediaUrl: null,
+            mediaUrl: null,
+            MediaKey: null,
+            mediaKey: null,
+            MediaName: null,
+            mediaName: null,
+            Media: null,
+            media: null,
+            _locallyDeleted: true,
+            _deleteTimestamp: Date.now(),
+          });
+
+          try {
+            // Ensure socket is connected with retry
+            let retries = 0;
+            const maxRetries = 3;
+            let connected = socketService.isConnected();
+
+            while (!connected && retries < maxRetries) {
+              if (__DEV__) {
+                console.log(`🔄 [ChatDetailScreen] Attempting to connect socket (retry ${retries + 1}/${maxRetries})`);
+              }
+              await socketService.connect(user.id);
+              await new Promise(resolve => setTimeout(resolve, 500));
+              connected = socketService.isConnected();
+              retries++;
+            }
+
+            if (!connected) {
+              throw new Error('Failed to connect to server after multiple attempts');
+            }
+
+            // Delete message via socket - backend expects { messageId, userId }
+            const sent = socketService.deleteMessage(messageId, user.id);
+            
+            if (sent) {
+              // Success - socket event will confirm and update UI
+              // Show success message after a short delay
+              setTimeout(() => {
+                alert.success('Deleted', 'Message deleted successfully');
+              }, 500);
+              
+              // Invalidate RTK Query cache to force fresh fetch
+              // getChatMessages uses 'Chat' tag with chatId, so invalidate that specific chat
+              if (chatId) {
+                dispatch(api.util.invalidateTags([{ type: 'Chat', id: chatId }]));
+                if (__DEV__) {
+                  console.log('🗑️ [ChatDetailScreen] Invalidated cache for chat:', chatId);
+                }
+              }
+              
+              // Refetch after delay to ensure persistence
+              // Increased delay to 5 seconds to ensure backend has fully persisted
+              setTimeout(() => {
+                if (__DEV__) {
+                  console.log('🔄 [ChatDetailScreen] Refetching messages after delete to ensure persistence');
+                }
+                // Only refetch if query is available
+                if (refetchMessages && typeof refetchMessages === 'function') {
+                  try {
+                    refetchMessages();
+                  } catch (error) {
+                    if (__DEV__) {
+                      console.warn('⚠️ [ChatDetailScreen] Cannot refetch messages - query not started:', error.message);
+                    }
+                  }
+                }
+              }, 5000);
+            } else {
+              throw new Error('Failed to send delete request');
+            }
+          } catch (error) {
+            if (__DEV__) {
+              console.error('❌ [ChatDetailScreen] Error deleting message:', error);
+            }
+
+            // Revert optimistic update
+            const originalMessage = messages.find(msg => 
+              String(msg._id || msg.id || '').trim() === String(messageId).trim()
+            );
+            
+            if (originalMessage) {
+              updateMessage(messageId, {
+                IsDeleted: originalMessage.IsDeleted || false,
+                isDeleted: originalMessage.isDeleted || false,
+                Message: originalMessage.Message || originalMessage.message || originalMessage.text || '',
+                message: originalMessage.Message || originalMessage.message || originalMessage.text || '',
+                text: originalMessage.Message || originalMessage.message || originalMessage.text || '',
+                MediaUrl: originalMessage.MediaUrl || originalMessage.mediaUrl || null,
+                mediaUrl: originalMessage.MediaUrl || originalMessage.mediaUrl || null,
+                MediaKey: originalMessage.MediaKey || originalMessage.mediaKey || null,
+                mediaKey: originalMessage.MediaKey || originalMessage.mediaKey || null,
+                MediaName: originalMessage.MediaName || originalMessage.mediaName || null,
+                mediaName: originalMessage.MediaName || originalMessage.mediaName || null,
+                Media: originalMessage.Media || originalMessage.media || null,
+                media: originalMessage.Media || originalMessage.media || null,
+              });
+            }
+
+            // Show error message
+            let errorMessage = 'Failed to delete message. ';
+            if (error.message?.includes('connect')) {
+              errorMessage += 'Please check your internet connection and try again.';
+            } else {
+              errorMessage += 'Please try again.';
+            }
+            
+            alert.error('Error', errorMessage);
+          } finally {
+            setIsDeleting(false);
+            // Remove from pending operations after a delay
+            setTimeout(() => {
+              setPendingOperations(prev => {
+                const next = new Map(prev);
+                next.delete(`delete_${messageId}`);
+                return next;
+              });
+            }, 1000);
+          }
+        }
+      }
+    ]);
+  }, [menuMessage, user, chat, alert, handleCloseMessageMenu, pendingOperations, updateMessage, messages, refetchMessages]);
+
+  const handleSaveEdit = useCallback(async () => {
+    // Validation: Check required fields
+    if (!editingMessage || !user) {
+      alert.error('Error', 'Invalid state. Please try again.');
+      setEditingMessage(null);
+      setEditMessageText('');
+      return;
+    }
+
+    // Validation: Check message text is not empty
+    if (!editMessageText.trim()) {
+      alert.warning('Invalid Input', 'Please enter a message to save');
+      return;
+    }
+
+    // Validation: Check message length (optional - adjust max length as needed)
+    const MAX_MESSAGE_LENGTH = 10000; // Adjust based on your requirements
+    if (editMessageText.trim().length > MAX_MESSAGE_LENGTH) {
+      alert.warning('Message Too Long', `Message cannot exceed ${MAX_MESSAGE_LENGTH} characters`);
+      return;
+    }
+
+    // Validation: Check if user is the sender
+    const senderId = editingMessage.SenderId || editingMessage.senderId;
+    if (String(senderId).trim() !== String(user.id).trim()) {
+      alert.error('Permission Denied', 'You can only edit your own messages');
+      setEditingMessage(null);
+      setEditMessageText('');
+      return;
+    }
+
+    // Validation: Check if message is already deleted
+    if (editingMessage.IsDeleted || editingMessage.isDeleted) {
+      alert.error('Cannot Edit', 'Cannot edit a deleted message');
+      setEditingMessage(null);
+      setEditMessageText('');
+      return;
+    }
+
+    // Check if message text actually changed
+    const originalText = editingMessage.text || editingMessage.Message || editingMessage.message || '';
+    const cleanedOriginal = originalText.startsWith('Forwarded: ') 
+      ? originalText.replace(/^Forwarded: /, '') 
+      : originalText;
+    
+    if (editMessageText.trim() === cleanedOriginal.trim()) {
+      // No changes, just close the modal
+      setEditingMessage(null);
+      setEditMessageText('');
+      return;
+    }
+
+    const chatId = chat?._id || chat?.id;
+    const messageId = editingMessage._id || editingMessage.id;
+    const messageIdToUpdate = messageId;
+    
+    // Validation: Check required IDs
+    if (!chatId || !messageId) {
+      alert.error('Error', 'Invalid chat or message');
+      setEditingMessage(null);
+      setEditMessageText('');
+      return;
+    }
+
+    // Validation: Check if already editing
+    if (pendingOperations.has(`edit_${messageId}`)) {
+      alert.warning('In Progress', 'Edit operation is already in progress');
+      return;
+    }
+
+    // Mark as pending
+    setPendingOperations(prev => {
+      const next = new Map(prev);
+      next.set(`edit_${messageId}`, { type: 'edit', messageId, timestamp: Date.now() });
+      return next;
+    });
+
+    setIsEditing(true);
+
+    // Store original message for rollback
+    const originalMessage = { ...editingMessage };
+
+    // Optimistic update: Update message immediately in local state
+    updateMessage(messageIdToUpdate, {
+      Message: editMessageText.trim(),
+      message: editMessageText.trim(),
+      text: editMessageText.trim(),
+      IsEdited: true,
+      isEdited: true,
+    });
+
+    if (__DEV__) {
+      console.log('✅ [ChatDetailScreen] Optimistically updated message in UI');
+    }
+
+    try {
+      // Ensure socket is connected with retry mechanism
+      let retries = 0;
+      const maxRetries = 3;
+      let connected = socketService.isConnected();
+
+      while (!connected && retries < maxRetries) {
+        if (__DEV__) {
+          console.log(`🔄 [ChatDetailScreen] Attempting to connect socket (retry ${retries + 1}/${maxRetries})`);
+        }
+        await socketService.connect(user.id);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        connected = socketService.isConnected();
+        retries++;
+      }
+
+      if (!connected) {
+        throw new Error('Failed to connect to server after multiple attempts');
+      }
+
+      if (__DEV__) {
+        console.log('✏️ [ChatDetailScreen] Attempting to edit message:', {
+          chatId,
+          messageId,
+          userId: user.id,
+          newText: editMessageText.trim().substring(0, 50) + '...',
+          originalText: cleanedOriginal.substring(0, 50) + '...',
+        });
+      }
+
+      // Edit message via socket - backend expects { messageId, userId, newMessage }
+      const sent = socketService.editMessage(messageId, user.id, editMessageText.trim());
+      
+      if (sent) {
+        if (__DEV__) {
+          console.log('✅ [ChatDetailScreen] Edit message sent successfully');
+        }
+        
+        // Close modal immediately for better UX
+        setEditingMessage(null);
+        setEditMessageText('');
+        
+        // Show success message after a short delay
+        setTimeout(() => {
+          alert.success('Message Edited', 'Your message has been updated');
+        }, 500);
+        
+        // Invalidate RTK Query cache to force fresh fetch
+        // This ensures we get the latest data from backend, not cached data
+        // getChatMessages uses 'Chat' tag with chatId, so invalidate that specific chat
+        if (chatId) {
+          dispatch(api.util.invalidateTags([{ type: 'Chat', id: chatId }]));
+          if (__DEV__) {
+            console.log('🗑️ [ChatDetailScreen] Invalidated cache for chat:', chatId);
+          }
+        }
+        
+        // Trigger refetch after delay to ensure backend processed it
+        // The socket event listener in useChat will also update the message
+        // But we refetch to ensure persistence even if socket event is missed
+        // Increased delay to 5 seconds to ensure backend has fully persisted
+        setTimeout(() => {
+          if (__DEV__) {
+            console.log('🔄 [ChatDetailScreen] Refetching messages after edit to ensure persistence');
+          }
+          // Force refetch with cache bypass - only if query is available
+          if (refetchMessages && typeof refetchMessages === 'function') {
+            try {
+              refetchMessages();
+            } catch (error) {
+              if (__DEV__) {
+                console.warn('⚠️ [ChatDetailScreen] Cannot refetch messages - query not started:', error.message);
+              }
+            }
+          }
+        }, 5000);
+      } else {
+        throw new Error('Failed to send edit request');
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.error('❌ [ChatDetailScreen] Error editing message:', error);
+      }
+
+      // Revert optimistic update on error
+      updateMessage(messageIdToUpdate, {
+        Message: originalMessage.Message || originalMessage.message || originalMessage.text || cleanedOriginal,
+        message: originalMessage.Message || originalMessage.message || originalMessage.text || cleanedOriginal,
+        text: originalMessage.Message || originalMessage.message || originalMessage.text || cleanedOriginal,
+        IsEdited: originalMessage.IsEdited || originalMessage.isEdited || false,
+        isEdited: originalMessage.IsEdited || originalMessage.isEdited || false,
+      });
+
+      // Show error message
+      let errorMessage = 'Failed to edit message. ';
+      if (error.message?.includes('connect')) {
+        errorMessage += 'Please check your internet connection and try again.';
+      } else if (error.message?.includes('Permission') || error.message?.includes('cannot edit')) {
+        errorMessage = 'You can only edit your own messages.';
+      } else if (error.message?.includes('not found')) {
+        errorMessage = 'Message not found. It may have been deleted.';
+      } else {
+        errorMessage += 'Please try again.';
+      }
+      
+      alert.error('Error', errorMessage);
+    } finally {
+      setIsEditing(false);
+      // Remove from pending operations after a delay
+      setTimeout(() => {
+        setPendingOperations(prev => {
+          const next = new Map(prev);
+          next.delete(`edit_${messageId}`);
+          return next;
+        });
+      }, 1000);
+    }
+  }, [editingMessage, editMessageText, user, chat, alert, refetchMessages, updateMessage, pendingOperations]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessage(null);
+    setEditMessageText('');
+  }, []);
+
+  // Forward message functions
+  const handleForwardMessage = useCallback(async (targetChat) => {
+    if (!forwardingMessage || !targetChat || !user) {
+      return;
+    }
+
+    try {
+      const targetChatId = targetChat._id || targetChat.id;
+      if (!targetChatId) {
+        alert.error('Error', 'Invalid chat selected.');
+        return;
+      }
+
+      const messageText = forwardingMessage.text || forwardingMessage.Message || forwardingMessage.message || '';
+      const messageType = forwardingMessage.messageType || forwardingMessage.MessageType || 'text';
+      const mediaKey = forwardingMessage.mediaKey || forwardingMessage.MediaKey;
+      const mediaUrl = forwardingMessage.mediaUrl || forwardingMessage.MediaUrl;
+      const mediaName = forwardingMessage.mediaName || forwardingMessage.MediaName || 'Media';
+
+      // Ensure socket is connected
+      if (!socketService.isConnected()) {
+        await socketService.connect(user.id);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Join target chat room
+      socketService.joinChat(targetChatId, user.id);
+
+      // Get target chat display name
+      const targetChatName = 
+        targetChat.enquiryTitle || 
+        targetChat.EnquiryName || 
+        targetChat.enquiryName ||
+        targetChat.clientName || 
+        targetChat.ClientName || 
+        targetChat._originalData?.EnquiryName ||
+        targetChat._originalData?.enquiryTitle ||
+        targetChat._originalData?.ClientName ||
+        targetChat._originalData?.clientName ||
+        'chat';
+
+      // Get forwarder information (current user who is forwarding)
+      const forwarderName = user.name || user.email || user.Name || user.Email || 'Unknown';
+      const forwarderId = user.id;
+
+      // Forward message via socket
+      if (messageType === 'image' || messageType === 'video' || messageType === 'file' || messageType === 'audio') {
+        // Forward media message - send original media name without "Forwarded:" prefix
+        const sent = socketService.sendMessage({
+          chatId: targetChatId,
+          userId: user.id,
+          message: mediaName, // Original media name, no prefix
+          messageType: messageType,
+          mediaUrl: mediaUrl,
+          mediaName: mediaName,
+          mediaKey: mediaKey,
+          isForwarded: true,
+          forwardedBy: forwarderId,
+          forwardedByName: forwarderName,
+          forwardedFrom: {
+            senderId: forwardingMessage.senderId || forwardingMessage.SenderId,
+            senderName: forwardingMessage.senderName || forwardingMessage.SenderName,
+            originalChatId: chat?._id || chat?.id,
+            originalTimestamp: forwardingMessage.timestamp || forwardingMessage.Timestamp
+          }
+        });
+
+        if (sent) {
+          alert.success('Forwarded', `Message forwarded to ${targetChatName}`);
+        } else {
+          alert.error('Error', 'Failed to forward message. Please try again.');
+        }
+      } else {
+        // Forward text message - send original message text without "Forwarded:" prefix
+        const sent = socketService.sendMessage({
+          chatId: targetChatId,
+          userId: user.id,
+          message: messageText, // Original message text, no prefix
+          messageType: 'text',
+          isForwarded: true,
+          forwardedBy: forwarderId,
+          forwardedByName: forwarderName,
+          forwardedFrom: {
+            senderId: forwardingMessage.senderId || forwardingMessage.SenderId,
+            senderName: forwardingMessage.senderName || forwardingMessage.SenderName,
+            originalChatId: chat?._id || chat?.id,
+            originalTimestamp: forwardingMessage.timestamp || forwardingMessage.Timestamp
+          }
+        });
+
+        if (sent) {
+          alert.success('Forwarded', `Message forwarded to ${targetChatName}`);
+        } else {
+          alert.error('Error', 'Failed to forward message. Please try again.');
+        }
+      }
+
+      setShowForwardModal(false);
+      setForwardingMessage(null);
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Error forwarding message:', error);
+      }
+      alert.error('Error', 'Failed to forward message. Please try again.');
+    }
+  }, [forwardingMessage, user, alert]);
+
   const handleShowReadReceipts = (message) => {
     // Removed excessive logging for performance
     setSelectedMessage(message);
@@ -1773,6 +2827,21 @@ const ChatDetailScreen = ({ route, navigation }) => {
       return null;
     }
     
+    // Debug logging for audio messages
+    if (__DEV__ && (message.messageType === 'audio' || message.MessageType === 'audio')) {
+      const mediaKey = message.mediaKey || message.MediaKey;
+      const mediaUrl = message.mediaUrl || message.MediaUrl;
+      console.log('🎵 [ChatDetailScreen] Rendering audio message:', {
+        messageId: message.id || message._id,
+        messageType: message.messageType || message.MessageType,
+        mediaKey: mediaKey,
+        mediaUrl: mediaUrl,
+        audioDuration: message.audioDuration || message.AudioDuration,
+        hasMediaKey: !!mediaKey,
+        hasMediaUrl: !!mediaUrl,
+      });
+    }
+    
     const myMessage = isMyMessage(message);
     const previousMessage = index > 0 ? enrichedMessages[index - 1] : null;
       // In group chats, show sender name above message bubble (WhatsApp style)
@@ -1940,7 +3009,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     message={message}
                     myMessage={myMessage}
                     onSwipeRight={() => handleReplyToMessage(message)}
-                    onLongPress={() => handleShowReadReceipts(message)}
+                    onLongPress={() => handleMessageLongPress(message)}
                   >
           <View style={[
             styles.messageBubble,
@@ -1951,6 +3020,34 @@ const ChatDetailScreen = ({ route, navigation }) => {
             isHighlighted && styles.highlightedMessageBubble, // Add highlight to bubble
             repliedMessage && styles.messageBubbleWithReply, // Ensure enough width for reply preview text
           ]}>
+            {/* Forwarded Indicator - WhatsApp Style */}
+            {message && (message.isForwarded || message.IsForwarded) && (
+              <View style={[
+                styles.forwardedIndicator,
+                myMessage ? styles.forwardedIndicatorMy : styles.forwardedIndicatorOther,
+              ]}>
+                <Icon 
+                  name="forward" 
+                  size={14} 
+                  color={myMessage ? colors.textWhite : colors.textLight} 
+                  style={styles.forwardedIndicatorIcon}
+                />
+                <Text style={[
+                  styles.forwardedIndicatorText,
+                  myMessage ? styles.forwardedIndicatorTextMy : styles.forwardedIndicatorTextOther,
+                ]}>
+                  Forwarded
+                </Text>
+                {message && (message.forwardedByName || message.ForwardedByName) && (
+                  <Text style={[
+                    styles.forwardedByNameText,
+                    myMessage ? styles.forwardedByNameTextMy : styles.forwardedByNameTextOther,
+                  ]}>
+                    {' • '}{message.forwardedByName || message.ForwardedByName}
+                  </Text>
+                )}
+              </View>
+            )}
             {/* Reply Preview */}
             {repliedMessage && (
               <TouchableOpacity
@@ -2040,7 +3137,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     myMessage ? styles.myMessageText : styles.otherMessageText,
                     styles.imageCaption,
                   ]}>
-                    {message.text}
+                    {(() => {
+                      // Remove "Forwarded: " prefix if message is marked as forwarded
+                      const msgText = message.text || '';
+                      if ((message.isForwarded || message.IsForwarded) && msgText.startsWith('Forwarded: ')) {
+                        return msgText.replace(/^Forwarded: /, '');
+                      }
+                      return msgText;
+                    })()}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -2090,6 +3194,150 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   </Text>
                 </View>
               </TouchableOpacity>
+            ) : (message.messageType === 'audio' || message.MessageType === 'audio') && mediaKey ? (
+              <View style={[
+                styles.voiceNoteContainer,
+                myMessage && styles.voiceNoteContainerMy
+              ]}>
+                {/* Profile picture for group chats */}
+                {showSenderName && !myMessage && (() => {
+                  const senderId = message.SenderId || message.senderId;
+                  const senderProfile = getSenderProfileData(senderId);
+                  const senderImage = senderProfile.image;
+                  const senderName = message?.senderName || message?.SenderName || senderProfile.name || 'Unknown';
+                  const firstLetter = senderName && senderName !== 'Unknown' ? senderName.charAt(0).toUpperCase() : '?';
+                  
+                  return (
+                    <View style={styles.voiceNoteAvatar}>
+                      {senderImage ? (
+                        <Image source={{ uri: senderImage }} style={styles.voiceNoteAvatarImage} />
+                      ) : (
+                        <View style={[styles.voiceNoteAvatarPlaceholder, { backgroundColor: colors.primary }]}>
+                          <Text style={styles.voiceNoteAvatarText}>{firstLetter}</Text>
+                        </View>
+                      )}
+                      <View style={styles.voiceNoteMicIcon}>
+                        <Icon name="mic" size={12} color={myMessage ? colors.textWhite : colors.primary} />
+                      </View>
+                    </View>
+                  );
+                })()}
+                
+                {/* Play button */}
+                <TouchableOpacity 
+                  style={[
+                    styles.voiceNotePlayButton,
+                    myMessage ? styles.voiceNotePlayButtonMy : styles.voiceNotePlayButtonOther
+                  ]}
+                  onPress={async () => {
+                    const messageId = message.id || message._id;
+                    const audioUrl = mediaUrl || getMediaUrl(mediaKey);
+                    const audioRecorderPlayer = audioRecorderPlayerRef.current;
+                    
+                    if (playingAudioId === messageId) {
+                      // Pause
+                      await audioRecorderPlayer.pausePlayer();
+                      setPlayingAudioId(null);
+                    } else {
+                      // Stop any currently playing audio
+                      if (playingAudioId) {
+                        await audioRecorderPlayer.stopPlayer();
+                      }
+                      
+                      // Start playing this audio
+                      setPlayingAudioId(messageId);
+                      await audioRecorderPlayer.startPlayer(audioUrl);
+                      
+                      // Set up playback listener
+                      audioRecorderPlayer.addPlayBackListener((e) => {
+                        const currentPosition = Math.floor(e.currentPosition / 1000);
+                        const duration = Math.floor(e.duration / 1000);
+                        setAudioProgress(prev => ({ ...prev, [messageId]: currentPosition }));
+                        setAudioDuration(prev => ({ ...prev, [messageId]: duration }));
+                        
+                        // Auto-stop when finished
+                        if (e.currentPosition >= e.duration) {
+                          setPlayingAudioId(null);
+                          audioRecorderPlayer.stopPlayer();
+                          audioRecorderPlayer.removePlayBackListener();
+                        }
+                      });
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Icon 
+                    name={playingAudioId === (message.id || message._id) ? "pause" : "play-arrow"} 
+                    size={20} 
+                    color={myMessage ? colors.textWhite : colors.primary} 
+                  />
+                </TouchableOpacity>
+                
+                {/* Waveform and progress */}
+                <View style={styles.voiceNoteWaveformContainer}>
+                  {/* Waveform bars */}
+                  <View style={styles.voiceNoteWaveform}>
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((index) => {
+                      const messageId = message.id || message._id;
+                      const isPlaying = playingAudioId === messageId;
+                      
+                      // Parse duration from message or use playback duration
+                      let duration = 0;
+                      if (audioDuration[messageId]) {
+                        duration = audioDuration[messageId];
+                      } else if (message.audioDuration) {
+                        const parts = message.audioDuration.split(':');
+                        if (parts.length === 2) {
+                          duration = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+                        }
+                      }
+                      if (duration === 0) duration = 1; // Prevent division by zero
+                      
+                      const progress = audioProgress[messageId] || 0;
+                      const progressPercent = progress / duration;
+                      const barIndex = index - 1;
+                      const totalBars = 12;
+                      const barProgress = progressPercent * totalBars;
+                      
+                      // Height varies by position (waveform pattern)
+                      const heights = [6, 10, 8, 12, 6, 14, 8, 10, 6, 12, 8, 10];
+                      const baseHeight = heights[index - 1] || 8;
+                      
+                      // Bar is active if it's before the progress point
+                      const isActive = isPlaying && barIndex < barProgress;
+                      
+                      return (
+                        <View
+                          key={index}
+                          style={[
+                            styles.voiceNoteWaveformBar,
+                            myMessage ? styles.voiceNoteWaveformBarMy : styles.voiceNoteWaveformBarOther,
+                            isActive && styles.voiceNoteWaveformBarActive,
+                            { height: baseHeight }
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
+                  
+                  {/* Duration and progress */}
+                  <View style={styles.voiceNoteInfo}>
+                  <Text style={[
+                      styles.voiceNoteDuration,
+                      myMessage ? styles.voiceNoteDurationMy : styles.voiceNoteDurationOther
+                    ]}>
+                      {(() => {
+                        const messageId = message.id || message._id;
+                        if (playingAudioId === messageId && audioProgress[messageId] !== undefined) {
+                          const seconds = audioProgress[messageId];
+                          return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
+                        }
+                        return message.audioDuration || '0:00';
+                      })()}
+                  </Text>
+                  </View>
+                </View>
+              </View>
             ) : (
               <Text style={[
                 styles.messageText,
@@ -2132,7 +3380,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
               message={message}
               myMessage={myMessage}
               onSwipeRight={() => handleReplyToMessage(message)}
-              onLongPress={() => handleShowReadReceipts(message)}
+              onLongPress={() => handleMessageLongPress(message)}
             >
             <View style={[
               styles.messageBubble,
@@ -2223,15 +3471,22 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     style={styles.messageImage}
                     resizeMode="cover"
                   />
-                  {message.text && (
-                    <Text style={[
-                      styles.messageText,
-                      myMessage ? styles.myMessageText : styles.otherMessageText,
-                      styles.imageCaption,
-                    ]}>
-                      {message.text}
-                    </Text>
-                  )}
+                {message.text && (
+                  <Text style={[
+                    styles.messageText,
+                    myMessage ? styles.myMessageText : styles.otherMessageText,
+                    styles.imageCaption,
+                  ]}>
+                    {(() => {
+                      // Remove "Forwarded: " prefix if message is marked as forwarded
+                      const msgText = message.text || '';
+                      if ((message.isForwarded || message.IsForwarded) && msgText.startsWith('Forwarded: ')) {
+                        return msgText.replace(/^Forwarded: /, '');
+                      }
+                      return msgText;
+                    })()}
+                  </Text>
+                )}
                 </TouchableOpacity>
               ) : isVideo && mediaKey ? (
                 <TouchableOpacity 
@@ -2254,7 +3509,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
                       myMessage ? styles.myMessageText : styles.otherMessageText,
                       styles.videoCaption,
                     ]}>
-                      {message.text}
+                      {(() => {
+                        // Remove "Forwarded: " prefix if message is marked as forwarded
+                        const msgText = message.text || '';
+                        if ((message.isForwarded || message.IsForwarded) && msgText.startsWith('Forwarded: ')) {
+                          return msgText.replace(/^Forwarded: /, '');
+                        }
+                        return msgText;
+                      })()}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -2263,30 +3525,184 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   onPress={() => handleFilePress(mediaKey, mediaName)}
                   style={styles.fileMessageContainer}
                   activeOpacity={0.8}>
-                  <Icon name="insert-drive-file" size={24} color={myMessage ? colors.textWhite : colors.primary} />
-                  <View style={styles.fileMessageInfo}>
-                    <Text style={[
-                      styles.fileMessageName,
-                      myMessage ? styles.myMessageText : styles.otherMessageText,
-                    ]} numberOfLines={1}>
-                      {mediaName || 'File'}
-                    </Text>
-                    <Text style={[
-                      styles.fileMessageSize,
-                      myMessage ? styles.myMessageTime : styles.otherMessageTime,
-                    ]}>
-                      Tap to download
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ) : (
-                <Text style={[
-                  styles.messageText,
-                  myMessage ? styles.myMessageText : styles.otherMessageText,
-                  repliedMessage && styles.messageTextWithReply,
+                    <Icon name="insert-drive-file" size={24} color={myMessage ? colors.textWhite : colors.primary} />
+                    <View style={styles.fileMessageInfo}>
+                      <Text style={[
+                        styles.fileMessageName,
+                        myMessage ? styles.myMessageText : styles.otherMessageText,
+                      ]} numberOfLines={1}>
+                        {mediaName || 'File'}
+                      </Text>
+                      <Text style={[
+                        styles.fileMessageSize,
+                        myMessage ? styles.myMessageTime : styles.otherMessageTime,
+                      ]}>
+                        Tap to download
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+              ) : (message.messageType === 'audio' || message.MessageType === 'audio') && mediaKey ? (
+                <View style={[
+                  styles.voiceNoteContainer,
+                  myMessage && styles.voiceNoteContainerMy
                 ]}>
-                  {message.text || message.Message || message.message || ''}
-                </Text>
+                  {/* Profile picture for group chats */}
+                  {showSenderName && !myMessage && (() => {
+                    const senderId = message.SenderId || message.senderId;
+                    const senderProfile = getSenderProfileData(senderId);
+                    const senderImage = senderProfile.image;
+                    const senderName = message?.senderName || message?.SenderName || senderProfile.name || 'Unknown';
+                    const firstLetter = senderName && senderName !== 'Unknown' ? senderName.charAt(0).toUpperCase() : '?';
+                    
+                    return (
+                      <View style={styles.voiceNoteAvatar}>
+                        {senderImage ? (
+                          <Image source={{ uri: senderImage }} style={styles.voiceNoteAvatarImage} />
+                        ) : (
+                          <View style={[styles.voiceNoteAvatarPlaceholder, { backgroundColor: colors.primary }]}>
+                            <Text style={styles.voiceNoteAvatarText}>{firstLetter}</Text>
+                          </View>
+                        )}
+                        <View style={styles.voiceNoteMicIcon}>
+                          <Icon name="mic" size={12} color={myMessage ? colors.textWhite : colors.primary} />
+                        </View>
+                      </View>
+                    );
+                  })()}
+                  
+                  {/* Play button */}
+                  <TouchableOpacity 
+                    style={[
+                      styles.voiceNotePlayButton,
+                      myMessage ? styles.voiceNotePlayButtonMy : styles.voiceNotePlayButtonOther
+                    ]}
+                    onPress={async () => {
+                      const messageId = message.id || message._id;
+                      const audioUrl = mediaUrl || getMediaUrl(mediaKey);
+                      const audioRecorderPlayer = audioRecorderPlayerRef.current;
+                      
+                      if (playingAudioId === messageId) {
+                        await audioRecorderPlayer.pausePlayer();
+                        setPlayingAudioId(null);
+                      } else {
+                        if (playingAudioId) {
+                          await audioRecorderPlayer.stopPlayer();
+                        }
+                        setPlayingAudioId(messageId);
+                        await audioRecorderPlayer.startPlayer(audioUrl);
+                        audioRecorderPlayer.addPlayBackListener((e) => {
+                          const currentPosition = Math.floor(e.currentPosition / 1000);
+                          const duration = Math.floor(e.duration / 1000);
+                          setAudioProgress(prev => ({ ...prev, [messageId]: currentPosition }));
+                          setAudioDuration(prev => ({ ...prev, [messageId]: duration }));
+                          if (e.currentPosition >= e.duration) {
+                            setPlayingAudioId(null);
+                            audioRecorderPlayer.stopPlayer();
+                            audioRecorderPlayer.removePlayBackListener();
+                          }
+                        });
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Icon 
+                      name={playingAudioId === (message.id || message._id) ? "pause" : "play-arrow"} 
+                      size={20} 
+                      color={myMessage ? colors.textWhite : colors.primary} 
+                    />
+                  </TouchableOpacity>
+                  
+                  {/* Waveform and progress */}
+                  <View style={styles.voiceNoteWaveformContainer}>
+                    <View style={styles.voiceNoteWaveform}>
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((index) => {
+                        const messageId = message.id || message._id;
+                        const isPlaying = playingAudioId === messageId;
+                        
+                        // Parse duration from message or use playback duration
+                        let duration = 0;
+                        if (audioDuration[messageId]) {
+                          duration = audioDuration[messageId];
+                        } else if (message.audioDuration) {
+                          const parts = message.audioDuration.split(':');
+                          if (parts.length === 2) {
+                            duration = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+                          }
+                        }
+                        if (duration === 0) duration = 1; // Prevent division by zero
+                        
+                        const progress = audioProgress[messageId] || 0;
+                        const progressPercent = progress / duration;
+                        const barIndex = index - 1;
+                        const totalBars = 12;
+                        const barProgress = progressPercent * totalBars;
+                        
+                        // Height varies by position (waveform pattern)
+                        const heights = [6, 10, 8, 12, 6, 14, 8, 10, 6, 12, 8, 10];
+                        const baseHeight = heights[index - 1] || 8;
+                        
+                        // Bar is active if it's before the progress point
+                        const isActive = isPlaying && barIndex < barProgress;
+                        
+                        return (
+                          <View
+                            key={index}
+                            style={[
+                              styles.voiceNoteWaveformBar,
+                              myMessage ? styles.voiceNoteWaveformBarMy : styles.voiceNoteWaveformBarOther,
+                              isActive && styles.voiceNoteWaveformBarActive,
+                              { height: baseHeight }
+                            ]}
+                          />
+                        );
+                      })}
+                    </View>
+                    <View style={styles.voiceNoteInfo}>
+                    <Text style={[
+                        styles.voiceNoteDuration,
+                        myMessage ? styles.voiceNoteDurationMy : styles.voiceNoteDurationOther
+                      ]}>
+                        {(() => {
+                          const messageId = message.id || message._id;
+                          if (playingAudioId === messageId && audioProgress[messageId] !== undefined) {
+                            const seconds = audioProgress[messageId];
+                            return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
+                          }
+                          return message.audioDuration || '0:00';
+                        })()}
+                    </Text>
+                    </View>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  {(message.IsDeleted || message.isDeleted) ? (
+                    <Text style={[
+                      styles.messageText,
+                      styles.messageDeletedText,
+                      myMessage ? styles.myMessageText : styles.otherMessageText,
+                      repliedMessage && styles.messageTextWithReply,
+                    ]}>
+                      This message was deleted
+                    </Text>
+                  ) : (
+                    <Text style={[
+                      styles.messageText,
+                      myMessage ? styles.myMessageText : styles.otherMessageText,
+                      repliedMessage && styles.messageTextWithReply,
+                    ]}>
+                      {(() => {
+                        // Get message text and remove "Forwarded: " prefix if present
+                        const msgText = message.text || message.Message || message.message || '';
+                        // Remove "Forwarded: " prefix if message is marked as forwarded
+                        if ((message.isForwarded || message.IsForwarded) && msgText.startsWith('Forwarded: ')) {
+                          return msgText.replace(/^Forwarded: /, '');
+                        }
+                        return msgText;
+                      })()}
+                    </Text>
+                  )}
+                </>
               )}
               
               <View style={styles.messageFooter}>
@@ -2296,6 +3712,16 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 ]}>
                   {formatMessageTime(message.timestamp || message.Timestamp)}
                 </Text>
+                
+                {/* Edited indicator */}
+                {(message.IsEdited || message.isEdited) && (
+                  <Text style={[
+                    styles.messageEditedText,
+                    myMessage ? styles.messageEditedTextMy : styles.messageEditedTextOther,
+                  ]}>
+                    Edited
+                  </Text>
+                )}
                 
                 {myMessage ? (
                   <View style={styles.messageStatusContainer}>
@@ -2514,6 +3940,100 @@ const ChatDetailScreen = ({ route, navigation }) => {
               </View>
             )}
             
+            {/* Recording bar - shown when recording */}
+            {isRecording ? (
+              <View style={styles.recordingBar}>
+                <Text style={styles.recordingBarTimer}>
+                  {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                </Text>
+                <View style={styles.recordingBarCenter}>
+                  {shouldCancel ? (
+                    <Text style={styles.recordingBarCancelText}>
+                      Release to cancel
+                    </Text>
+                  ) : isLocked ? (
+                    <Text style={styles.recordingBarSendText}>
+                      Tap mic to send
+                    </Text>
+                  ) : (
+                    <View style={styles.recordingBarSlideContainer}>
+                      <Icon name="chevron-left" size={16} color={colors.textSecondary} />
+                      <Text style={styles.recordingBarSlideText}>
+                        Slide to cancel
+                      </Text>
+                      <Text style={styles.recordingBarReleaseHint}>
+                        {' • Release to send'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                {/* Lock button appears after 1 second */}
+                {recordingTime >= 1 && !isLocked && (
+                  <TouchableOpacity
+                    style={styles.recordingBarLockButton}
+                    onPress={() => {
+                      setIsLocked(true);
+                      // Start pulse animation when locked
+                      Animated.loop(
+                        Animated.sequence([
+                          Animated.timing(micButtonPulseAnim, {
+                            toValue: 1.1,
+                            duration: 800,
+                            useNativeDriver: true,
+                          }),
+                          Animated.timing(micButtonPulseAnim, {
+                            toValue: 1,
+                            duration: 800,
+                            useNativeDriver: true,
+                          }),
+                        ])
+                      ).start();
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Icon name="lock" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+                {isLocked ? (
+                  <Animated.View
+                    style={[
+                      styles.recordingBarMicButton,
+                      styles.recordingBarMicButtonLocked,
+                      {
+                        transform: [{ scale: micButtonPulseAnim }],
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity 
+                      onPress={handleMicPress}
+                      activeOpacity={0.7}
+                    >
+                      <Icon 
+                        name="send" 
+                        size={24} 
+                        color={colors.textWhite} 
+                      />
+                    </TouchableOpacity>
+                  </Animated.View>
+                ) : (
+                  <View
+                    {...(panResponderRef.current?.panHandlers || {})}
+                    style={styles.recordingBarMicButton}
+                  >
+                    <TouchableOpacity 
+                      onPress={handleMicPress}
+                      activeOpacity={0.7}
+                    >
+                      <Icon 
+                        name="mic" 
+                        size={24} 
+                        color={colors.textWhite} 
+                      />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            ) : (
             <View style={styles.inputWrapper}>
               <TouchableOpacity 
                 style={styles.attachButton}
@@ -2575,13 +4095,49 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   <Icon name="send" size={20} color={colors.textWhite} />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity style={styles.micButton}>
-                  <Icon name="mic" size={20} color={colors.textSecondary} />
+                  <View
+                    {...(panResponderRef.current?.panHandlers || {})}
+                    style={styles.micButton}
+                  >
+                <TouchableOpacity 
+                  onPress={handleMicPress}
+                      activeOpacity={0.7}
+                >
+                  <Icon 
+                        name="mic" 
+                    size={20} 
+                        color={colors.textSecondary} 
+                  />
                 </TouchableOpacity>
-              )}
-            </View>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
+
+      {/* Lock overlay - shown when locked for hands-free recording */}
+      {isRecording && isLocked && (
+        <Modal
+          visible={isLocked}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => stopRecording(true)}
+        >
+                  <TouchableOpacity 
+            style={styles.lockOverlay}
+            activeOpacity={1}
+                    onPress={() => stopRecording(true)}
+                  >
+            <View style={styles.lockOverlayContent}>
+              <View style={styles.lockOverlayLockIcon}>
+                <Icon name="lock" size={24} color={colors.textWhite} />
+                </View>
+              <Text style={styles.lockOverlayText}>Tap to stop and send</Text>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
       {/* Custom Media Selection Modal */}
       <Modal
@@ -2717,6 +4273,25 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 {/* Message Preview */}
                 {selectedMessage && (
                   <View style={styles.readReceiptMessagePreview}>
+                    {/* Forwarded indicator - WhatsApp style */}
+                    {(selectedMessage.isForwarded || selectedMessage.IsForwarded) && (
+                      <View style={styles.readReceiptForwardedBy}>
+                        <Icon 
+                          name="forward" 
+                          size={14} 
+                          color={colors.textLight} 
+                          style={styles.readReceiptForwardedByIcon}
+                        />
+                        <Text style={styles.readReceiptForwardedByText}>
+                          Forwarded
+                        </Text>
+                        {(selectedMessage.forwardedByName || selectedMessage.ForwardedByName) && (
+                          <Text style={styles.readReceiptForwardedByNameText}>
+                            {' • '}{selectedMessage.forwardedByName || selectedMessage.ForwardedByName}
+                          </Text>
+                        )}
+                      </View>
+                    )}
                     <Text style={styles.readReceiptMessageText} numberOfLines={2}>
                       {selectedMessage.text || selectedMessage.Message || selectedMessage.message || 'Message'}
                     </Text>
@@ -2935,6 +4510,235 @@ const ChatDetailScreen = ({ route, navigation }) => {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Message Action Menu Modal */}
+      <Modal
+        visible={showMessageMenu}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseMessageMenu}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={handleCloseMessageMenu}
+        >
+          <View style={styles.messageMenuContainer}>
+            <TouchableOpacity 
+              activeOpacity={1} 
+              onPress={(e) => e.stopPropagation()}
+              style={styles.messageMenuContent}
+            >
+              <TouchableOpacity
+                style={styles.messageMenuOption}
+                onPress={handleReplyFromMenu}
+              >
+                <Icon name="reply" size={24} color={colors.textPrimary} />
+                <Text style={styles.messageMenuOptionText}>Reply</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.messageMenuOption}
+                onPress={handleCopyFromMenu}
+              >
+                <Icon name="content-copy" size={24} color={colors.textPrimary} />
+                <Text style={styles.messageMenuOptionText}>Copy</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.messageMenuOption}
+                onPress={handleForwardFromMenu}
+              >
+                <Icon name="forward" size={24} color={colors.textPrimary} />
+                <Text style={styles.messageMenuOptionText}>Forward</Text>
+              </TouchableOpacity>
+              
+              {/* Edit and Delete options - only for user's own messages */}
+              {menuMessage && user && (() => {
+                const senderId = menuMessage.SenderId || menuMessage.senderId;
+                const isMyMessage = String(senderId).trim() === String(user.id).trim();
+                const isDeleted = menuMessage.IsDeleted || menuMessage.isDeleted;
+                
+                if (!isMyMessage || isDeleted) return null;
+                
+                return (
+                  <>
+                    <TouchableOpacity
+                      style={styles.messageMenuOption}
+                      onPress={handleEditFromMenu}
+                    >
+                      <Icon name="edit" size={24} color={colors.textPrimary} />
+                      <Text style={styles.messageMenuOptionText}>Edit</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.messageMenuOption}
+                      onPress={handleDeleteFromMenu}
+                    >
+                      <Icon name="delete" size={24} color={colors.error} />
+                      <Text style={[styles.messageMenuOptionText, { color: colors.error }]}>Delete</Text>
+                    </TouchableOpacity>
+                  </>
+                );
+              })()}
+              
+              <TouchableOpacity
+                style={styles.messageMenuOption}
+                onPress={handleReadReceiptsFromMenu}
+              >
+                <Icon name="info" size={24} color={colors.textPrimary} />
+                <Text style={styles.messageMenuOptionText}>Read Receipts</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.messageMenuOption, styles.messageMenuCancel]}
+                onPress={handleCloseMessageMenu}
+              >
+                <Text style={styles.messageMenuCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Edit Message Modal */}
+      <Modal
+        visible={!!editingMessage}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleCancelEdit}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.editMessageModalContainer}>
+            <View style={styles.editMessageModalHeader}>
+              <Text style={styles.editMessageModalTitle}>Edit Message</Text>
+              <TouchableOpacity
+                onPress={handleCancelEdit}
+                style={styles.modalCloseButton}
+              >
+                <Icon name="close" size={24} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            
+            <TextInput
+              style={styles.editMessageInput}
+              value={editMessageText}
+              onChangeText={setEditMessageText}
+              placeholder="Edit your message..."
+              multiline
+              autoFocus
+              placeholderTextColor={colors.textLight}
+            />
+            
+            <View style={styles.editMessageModalActions}>
+              <TouchableOpacity
+                style={[styles.editMessageButton, styles.editMessageCancelButton]}
+                onPress={handleCancelEdit}
+                disabled={isEditing}
+              >
+                <Text style={[styles.editMessageCancelText, isEditing && { opacity: 0.5 }]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.editMessageButton, 
+                  styles.editMessageSaveButton,
+                  (isEditing || !editMessageText.trim()) && styles.editMessageSaveButtonDisabled
+                ]}
+                onPress={handleSaveEdit}
+                disabled={isEditing || !editMessageText.trim()}
+              >
+                {isEditing ? (
+                  <View style={styles.editMessageLoadingContainer}>
+                    <Text style={styles.editMessageSaveText}>Saving...</Text>
+                  </View>
+                ) : (
+                  <Text style={[styles.editMessageSaveText, !editMessageText.trim() && { opacity: 0.5 }]}>
+                    Save
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Forward Message Modal */}
+      <Modal
+        visible={showForwardModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowForwardModal(false);
+          setForwardingMessage(null);
+        }}
+      >
+        <View style={styles.forwardModalContainer}>
+          <View style={styles.forwardModalHeader}>
+            <Text style={styles.forwardModalTitle}>Forward Message</Text>
+            <TouchableOpacity
+              onPress={() => {
+                setShowForwardModal(false);
+                setForwardingMessage(null);
+              }}
+            >
+              <Icon name="close" size={24} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.forwardModalSubtitle}>Select a chat to forward to:</Text>
+          
+          <FlatList
+            data={forwardableChats}
+            keyExtractor={(item) => String(item._id || item.id)}
+            renderItem={({ item }) => {
+              // Get display name with proper fallback chain
+              const displayName = 
+                item.enquiryTitle || 
+                item.EnquiryName || 
+                item.enquiryName ||
+                item.clientName || 
+                item.ClientName || 
+                item._originalData?.EnquiryName ||
+                item._originalData?.enquiryTitle ||
+                item._originalData?.ClientName ||
+                item._originalData?.clientName ||
+                'Chat';
+              
+              // Get first letter for avatar
+              const avatarLetter = displayName.charAt(0).toUpperCase();
+              
+              return (
+                <TouchableOpacity
+                  style={styles.forwardChatItem}
+                  onPress={() => handleForwardMessage(item)}
+                >
+                  <View style={styles.forwardChatAvatar}>
+                    <Text style={styles.forwardChatAvatarText}>
+                      {avatarLetter}
+                    </Text>
+                  </View>
+                  <View style={styles.forwardChatInfo}>
+                    <Text style={styles.forwardChatName}>
+                      {displayName}
+                    </Text>
+                    <Text style={styles.forwardChatType}>
+                      {item.Type === 'admin-client' ? 'Client Chat' : 'Designer Chat'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            }}
+            ListEmptyComponent={
+              <View style={styles.forwardEmptyContainer}>
+                <Text style={styles.forwardEmptyText}>No chats available</Text>
+              </View>
+            }
+          />
+        </View>
       </Modal>
 
       {/* Media Viewer Modal - For viewing images and videos */}
@@ -3364,6 +5168,24 @@ const styles = StyleSheet.create({
   messageTime: {
     marginRight: 8,
     fontSize: 10,
+  },
+  messageEditedText: {
+    fontSize: 10,
+    fontFamily: fonts.regular,
+    marginRight: 4,
+    fontStyle: 'italic',
+  },
+  messageEditedTextMy: {
+    color: colors.textWhite,
+    opacity: 0.8,
+  },
+  messageEditedTextOther: {
+    color: colors.textLight,
+    opacity: 0.8,
+  },
+  messageDeletedText: {
+    fontStyle: 'italic',
+    opacity: 0.6,
   },
   senderName: {
     fontWeight: '500',
@@ -3799,6 +5621,72 @@ const styles = StyleSheet.create({
     color: colors.textLight,
     marginTop: 4,
   },
+  readReceiptForwardedBy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  readReceiptForwardedByIcon: {
+    marginRight: 6,
+  },
+  readReceiptForwardedByText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    color: colors.textLight,
+    letterSpacing: 0.2,
+  },
+  readReceiptForwardedByNameText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    opacity: 0.7,
+  },
+  // Forwarded indicator styles - WhatsApp style
+  forwardedIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    paddingBottom: 4,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  forwardedIndicatorMy: {
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  forwardedIndicatorOther: {
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  forwardedIndicatorIcon: {
+    marginRight: 4,
+    transform: [{ rotate: '0deg' }],
+  },
+  forwardedIndicatorText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+    letterSpacing: 0.2,
+  },
+  forwardedIndicatorTextMy: {
+    color: colors.textWhite,
+    opacity: 0.9,
+  },
+  forwardedIndicatorTextOther: {
+    color: colors.textLight,
+    opacity: 0.8,
+  },
+  forwardedByNameText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    opacity: 0.7,
+  },
+  forwardedByNameTextMy: {
+    color: colors.textWhite,
+  },
+  forwardedByNameTextOther: {
+    color: colors.textLight,
+  },
   readReceiptList: {
     flex: 1, // Use flex to take available space
     paddingVertical: 8,
@@ -3871,6 +5759,535 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: colors.textLight,
     textAlign: 'center',
+  },
+  // Voice Recording Styles
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.error,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginLeft: 8,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.textWhite,
+    marginRight: 8,
+  },
+  recordingTime: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+    marginRight: 12,
+    minWidth: 40,
+  },
+  cancelRecordingButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  cancelRecordingText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+  },
+  sendRecordingButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  micButtonRecording: {
+    backgroundColor: colors.error,
+    transform: [{ scale: 1.1 }],
+  },
+  // WhatsApp-like Recording Bar Styles
+  recordingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    minHeight: 56,
+  },
+  recordingBarTimer: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    minWidth: 50,
+    marginRight: 12,
+  },
+  recordingBarCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  recordingBarSlideContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  recordingBarSlideText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+  },
+  recordingBarReleaseHint: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.primary,
+  },
+  recordingBarCancelText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.error,
+  },
+  recordingBarSendText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.primary,
+  },
+  recordingBarLockButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  recordingBarMicButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  recordingBarMicButtonLocked: {
+    backgroundColor: colors.success || '#4CAF50',
+  },
+  // Lock Overlay Styles (for hands-free recording)
+  lockOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 100,
+  },
+  lockOverlayContent: {
+    alignItems: 'center',
+  },
+  lockOverlayLockIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(60, 60, 60, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  lockOverlayText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+  },
+  // WhatsApp-like Recording Overlay Styles (deprecated - keeping for reference)
+  recordingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 120,
+  },
+  recordingOverlayContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  waveformContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    height: 40,
+    marginBottom: 16,
+    gap: 3,
+  },
+  waveformBar: {
+    width: 3,
+    backgroundColor: colors.textWhite,
+    borderRadius: 1.5,
+    marginHorizontal: 1.5,
+  },
+  recordingDuration: {
+    fontSize: 56,
+    fontFamily: fonts.bold,
+    color: colors.textWhite,
+    marginBottom: 8,
+    letterSpacing: 1,
+    fontWeight: '600',
+  },
+  recordingInstruction: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textWhite,
+    opacity: 0.9,
+    marginTop: 4,
+  },
+  cancelInstruction: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  cancelInstructionText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.error,
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  lockButton: {
+    position: 'absolute',
+    top: -100,
+    alignSelf: 'center',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(60, 60, 60, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  lockButtonInner: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lockedIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(60, 60, 60, 0.9)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  lockedText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  // Message Action Menu Styles
+  messageMenuContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  messageMenuContent: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 20,
+  },
+  messageMenuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  messageMenuOptionText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
+    marginLeft: 16,
+  },
+  messageMenuCancel: {
+    borderBottomWidth: 0,
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  messageMenuCancelText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.error,
+    textAlign: 'center',
+  },
+  // Forward Modal Styles
+  forwardModalContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+    marginTop: 100,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  forwardModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  forwardModalTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  forwardModalSubtitle: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  forwardChatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  forwardChatAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  forwardChatAvatarText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+    color: colors.textWhite,
+  },
+  forwardChatInfo: {
+    flex: 1,
+  },
+  forwardChatName: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  forwardChatType: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textLight,
+  },
+  forwardEmptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  forwardEmptyText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+  },
+  // Edit Message Modal Styles
+  editMessageModalContainer: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 20,
+    maxHeight: '80%',
+  },
+  editMessageModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  editMessageModalTitle: {
+    fontSize: fonts.lg,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  editMessageInput: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    padding: 16,
+    margin: 20,
+    minHeight: 100,
+    maxHeight: 200,
+    fontSize: fonts.base,
+    fontFamily: fonts.regular,
+    color: colors.textPrimary,
+    textAlignVertical: 'top',
+  },
+  editMessageModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  editMessageButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  editMessageCancelButton: {
+    backgroundColor: colors.backgroundSecondary,
+  },
+  editMessageSaveButton: {
+    backgroundColor: colors.primary,
+  },
+  editMessageCancelText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+  },
+  editMessageSaveText: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+  },
+  editMessageSaveButtonDisabled: {
+    opacity: 0.5,
+  },
+  editMessageLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // WhatsApp-like Voice Note Styles
+  voiceNoteContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    minWidth: 200,
+  },
+  voiceNoteContainerMy: {
+    justifyContent: 'flex-end',
+  },
+  voiceNoteAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+    position: 'relative',
+  },
+  voiceNoteAvatarImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  voiceNoteAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceNoteAvatarText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+  },
+  voiceNoteMicIcon: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.background,
+  },
+  voiceNotePlayButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  voiceNotePlayButtonMy: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  voiceNotePlayButtonOther: {
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  voiceNoteWaveformContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  voiceNoteWaveform: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 24,
+    marginRight: 8,
+    gap: 2,
+  },
+  voiceNoteWaveformBar: {
+    width: 2.5,
+    borderRadius: 1.25,
+    minHeight: 4,
+    maxHeight: 20,
+  },
+  voiceNoteWaveformBarMy: {
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  voiceNoteWaveformBarOther: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  voiceNoteWaveformBarActive: {
+    backgroundColor: colors.textWhite,
+    opacity: 1,
+  },
+  voiceNoteInfo: {
+    minWidth: 40,
+    alignItems: 'flex-end',
+  },
+  voiceNoteDuration: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.medium,
+  },
+  voiceNoteDurationMy: {
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+  voiceNoteDurationOther: {
+    color: colors.textPrimary,
   },
   // Reply Preview Styles
   replyPreview: {

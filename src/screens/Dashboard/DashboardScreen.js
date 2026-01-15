@@ -560,11 +560,25 @@ const DashboardScreen = ({ navigation }) => {
                   key={client.id}
                   client={client}
                   imageUrl={imageUrl}
-                  onPress={() => navigateWithDashboardFilter({ 
-                    filterType: 'client', 
-                    filter: client.name,
-                    clientId: client.id || client._id 
-                  })}
+                  onPress={() => {
+                    // Pre-select these 5 statuses when client card is pressed
+                    // Use exact status names as they appear in the API
+                    const preSelectedStatuses = [
+                      'Enquiry Created',
+                      'Coral',
+                      'Cad',
+                      'Approved Cad',
+                      'Quatation'
+                    ];
+                    
+                    navigateWithDashboardFilter({ 
+                      filterType: 'client', 
+                      filter: client.name,
+                      clientId: client.id || client._id,
+                      statuses: preSelectedStatuses, // Pass pre-selected statuses array
+                      selectedStatuses: preSelectedStatuses, // Alternative format for compatibility
+                    });
+                  }}
                 />
               );
             })}

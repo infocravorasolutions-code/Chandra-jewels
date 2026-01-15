@@ -73,3 +73,5 @@ adb logcat | grep --line-buffered -E "FCM Background|PushNotification|FCM TOKEN|
 
 
 
+
+

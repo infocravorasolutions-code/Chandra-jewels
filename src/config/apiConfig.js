@@ -11,7 +11,7 @@ import { Platform } from 'react-native';
 // Set these to true/false to control which URL is used
 
 // Force production URL even in development (useful for testing production API)
-export const USE_PRODUCTION_URL = true;
+export const USE_PRODUCTION_URL = false;
 
 // Use custom URL (set CUSTOM_API_URL below)
 export const USE_CUSTOM_URL = true;
@@ -22,7 +22,7 @@ export const USE_CUSTOM_URL = true;
 export const USE_PHYSICAL_DEVICE = true;
 
 // Custom IP address for physical device (only used if USE_PHYSICAL_DEVICE is true)
-export const PHYSICAL_DEVICE_IP = '192.168.1.9'; // Change to your computer's IP
+export const PHYSICAL_DEVICE_IP = '192.168.1.5'; // Change to your computer's IP
 
 // ==================== URL CONFIGURATION ====================
 
