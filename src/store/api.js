@@ -1381,9 +1381,10 @@ export const api = createApi({
             }).length;
             
             // Use aggregate counts if available, otherwise use counted values
-            const pendingApprovals = categorizedCounts['Pending'] || statusCounts.pending || pendingCount;
-            const approvalPending = categorizedCounts['Approval Pending'] || approvalPendingCount;
-            const completedOrders = categorizedCounts['Completed'] || statusCounts.completed || completedCount;
+            // Use nullish coalescing (??) instead of || to properly handle 0 values
+            const pendingApprovals = categorizedCounts['Pending'] ?? statusCounts.pending ?? pendingCount ?? 0;
+            const approvalPending = categorizedCounts['Approval Pending'] ?? approvalPendingCount ?? 0;
+            const completedOrders = categorizedCounts['Completed'] ?? statusCounts.completed ?? completedCount ?? 0;
             
             const totalSpent = normalizedEnquiries
               .filter(e => {
@@ -3211,6 +3212,7 @@ export const api = createApi({
         return `/api/chats?${params.toString()}`;
       },
       providesTags: ['Chat'],
+      keepUnusedDataFor: 300, // Keep cache 5 min so list uses cached data until manual refresh
       transformResponse: (data, meta, arg) => {
         if (__DEV__) {
           console.log('getChats API Response (raw):', data);

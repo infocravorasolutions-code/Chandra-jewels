@@ -397,7 +397,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
         CoralCode: enquiryToEdit?.CoralCode || null,
         CadCode: enquiryToEdit?.CadCode || null,
         Category: formData.category || 'Ring',
-        Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+        Budget: formData.budget && formData.budget.trim() ? formData.budget.trim() : null,
         SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
         ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
       };
@@ -451,7 +451,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           Stamping: formData.stamping || null,
           StyleNumber: formData.styleNumber || null,
           GatiOrderNumber: formData.GatiOrderNumber || null,
-          Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+          Budget: formData.budget && formData.budget.trim() ? formData.budget.trim() : null,
           SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
           ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
           // Preserve original fields
@@ -601,6 +601,9 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
               activeOpacity={0.7}
             >
               <IconComponent name="chat" size={20} color={colors.primary} />
+              <Text style={styles.chatButtonText}>
+                Have more instructions? Chat with us
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -662,7 +665,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Budget</Text>
             <Text style={styles.summaryValue}>
-              {formData.budget ? `$${parseFloat(formData.budget).toLocaleString('en-US')}` : 'Not specified'}
+              {formData.budget ? formData.budget : 'Not specified'}
             </Text>
           </View>
         )}
@@ -942,11 +945,20 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   chatButton: {
+    alignItems: 'center',
     padding: 8,
-    borderRadius: 20,
+    borderRadius: 8,
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.primary,
+    maxWidth: 120,
+  },
+  chatButtonText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    marginTop: 4,
+    textAlign: 'center',
   },
   summaryItem: {
     marginBottom: 10,

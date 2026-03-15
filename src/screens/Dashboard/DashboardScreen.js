@@ -23,6 +23,7 @@ import Icon from '../../components/common/Icon';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { formatCurrency, getRoleDisplayName, spacing, responsivePadding, imageSizes } from '../../utils';
+import useDeviceLayout from '../../hooks/useDeviceLayout';
 import { FILE_BASE_URL } from '../../config/apiConfig';
 import { navigateFromNotification } from '../../utils/notificationNavigation';
 
@@ -375,6 +376,23 @@ const DashboardScreen = ({ navigation }) => {
   }, [clientsData, dashboardData?.clientAggregateData, enquiriesData, user?.role]);
 
   const loading = dashboardLoading || clientsLoading || enquiriesLoading || statusStatisticsLoading || notificationsLoading;
+  const { isTablet, width } = useDeviceLayout();
+  
+  // Calculate dynamic max width for tablets (use 94% of screen width with reasonable padding)
+  const tabletMaxWidth = isTablet ? Math.min(width * 0.94, width - 48) : null;
+  
+  const statsGridStyle = isTablet 
+    ? [styles.statsGrid, styles.statsGridTablet, tabletMaxWidth && { maxWidth: tabletMaxWidth }] 
+    : styles.statsGrid;
+  const tabletStatusCardStyle = isTablet ? styles.statusCardTablet : null;
+  const quickActionsCardStyle = isTablet 
+    ? [styles.quickActionsCard, styles.quickActionsCardTablet, tabletMaxWidth && { maxWidth: tabletMaxWidth }] 
+    : styles.quickActionsCard;
+  const actionsGridStyle = isTablet ? [styles.actionsGrid, styles.actionsGridTablet] : styles.actionsGrid;
+  const actionButtonStyle = isTablet ? [styles.actionButton, styles.actionButtonTablet] : styles.actionButton;
+  const actionIconSize = isTablet ? 18 : 22;
+  const actionTextStyle = isTablet ? [styles.actionText, styles.actionTextTablet] : styles.actionText;
+  const statusCardIconSize = isTablet ? 16 : 20;
 
   const navigateWithDashboardFilter = useCallback((params = {}) => {
     navigation.navigate('Enquiries', {
@@ -566,9 +584,9 @@ const DashboardScreen = ({ navigation }) => {
                     const preSelectedStatuses = [
                       'Enquiry Created',
                       'Coral',
-                      'Cad',
+                      'CAD',
                       'Approved Cad',
-                      'Quatation'
+                      'Quotation'
                     ];
                     
                     navigateWithDashboardFilter({ 
@@ -586,64 +604,74 @@ const DashboardScreen = ({ navigation }) => {
         </View>
       )}
 
-      {/* Overview Section */}
-      <View style={styles.overviewSection}>
-        <Text style={styles.overviewTitle}> Overview</Text>
-      </View>
+      {/* Overview Section - Only show on mobile, hidden on tablets */}
+      {!isTablet && (
+        <>
+          <View style={styles.overviewSection}>
+            <Text style={styles.overviewTitle}> Overview</Text>
+          </View>
 
-      {/* Other Stats */}
-      <View style={styles.statsGrid}>
-        <StatusCard
-          title="Total Enquiries"
-          value={dashboardData?.totalEnquiries || '0'}
-          icon={<Icon name="assignment" size={20} color={colors.textWhite} />}
-          color={colors.primary}
-          onPress={() => navigation.navigate('Enquiries')}
-        />
-        <StatusCard
-          title="Total Clients"
-          value={dashboardData?.totalClients || '0'}
-          icon={<Icon name="people" size={20} color={colors.textWhite} />}
-          color={colors.primary}
-          onPress={() => navigation.navigate('ClientsList')}
-        />
-      </View>
+          {/* Other Stats */}
+          <View style={statsGridStyle}>
+            <StatusCard
+              title="Total Enquiries"
+              value={dashboardData?.totalEnquiries || '0'}
+              icon={<Icon name="assignment" size={statusCardIconSize} color={colors.textWhite} />}
+              color={colors.primary}
+              onPress={() => navigation.navigate('Enquiries')}
+              style={tabletStatusCardStyle}
+            />
+            <StatusCard
+              title="Total Clients"
+              value={dashboardData?.totalClients || '0'}
+              icon={<Icon name="people" size={statusCardIconSize} color={colors.textWhite} />}
+              color={colors.primary}
+              onPress={() => navigation.navigate('ClientsList')}
+              style={tabletStatusCardStyle}
+            />
+          </View>
+        </>
+      )}
     </View>
   );
 
   const renderClientDashboard = () => (
-    <View style={styles.statsGrid}>
+    <View style={statsGridStyle}>
       <StatusCard
         title="My Enquiries"
-        value={dashboardData?.myEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
-        icon={<Icon name="assignment" size={20} color={colors.textWhite} />}
+        value={dashboardData?.myEnquiries ?? dashboardData?.categorizedCounts?.['All'] ?? 0}
+        icon={<Icon name="assignment" size={statusCardIconSize} color={colors.textWhite} />}
         color={colors.primary}
         valueColor={colors.primary}
         onPress={() => navigation.navigate('Enquiries')}
+        style={tabletStatusCardStyle}
       />
       <StatusCard
-        title="Pending"
-        value={dashboardData?.pendingApprovals || dashboardData?.categorizedCounts?.['Pending'] || '0'}
-        icon={<Icon name="schedule" size={20} color={colors.textWhite} />}
+        title="In-progress"
+        value={dashboardData?.pendingApprovals ?? dashboardData?.categorizedCounts?.['Pending'] ?? 0}
+        icon={<Icon name="schedule" size={statusCardIconSize} color={colors.textWhite} />}
         color={colors.primary}
         valueColor={colors.primary}
         onPress={() => navigateWithDashboardFilter({ filter: 'pending' })}
+        style={tabletStatusCardStyle}
       />
       <StatusCard
         title="Approval Pending"
-        value={dashboardData?.approvalPending || dashboardData?.categorizedCounts?.['Approval Pending'] || '0'}
-        icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
+        value={dashboardData?.approvalPending ?? dashboardData?.categorizedCounts?.['Approval Pending'] ?? 0}
+        icon={<Icon name="pending-actions" size={statusCardIconSize} color={colors.textWhite} />}
         color={colors.primary}
         valueColor={colors.primary}
         onPress={() => navigateWithDashboardFilter({ filter: 'approval_pending' })}
+        style={tabletStatusCardStyle}
       />
       <StatusCard
         title="Completed Orders"
-        value={dashboardData?.completedOrders || dashboardData?.categorizedCounts?.['Completed'] || '0'}
-        icon={<Icon name="check-circle" size={20} color={colors.textWhite} />}
+        value={dashboardData?.completedOrders ?? dashboardData?.categorizedCounts?.['Completed'] ?? 0}
+        icon={<Icon name="check-circle" size={statusCardIconSize} color={colors.textWhite} />}
         color={colors.primary}
         valueColor={colors.primary}
         onPress={() => navigateWithDashboardFilter({ filter: 'completed' })}
+        style={tabletStatusCardStyle}
       />
     </View>
   );
@@ -706,34 +734,38 @@ const DashboardScreen = ({ navigation }) => {
       const designApprovalPendingCount = dashboardData?.approvalPendingDesigns || dashboardData?.specificStatusCounts?.['Design Approval Pending'] || dashboardData?.categorizedCounts?.['Approval Pending'] || dashboardData?.categorizedCounts?.['Design Approval Pending'] || designApprovalPendingFromStatusStats || '0';
       
       return (
-        <View style={styles.statsGrid}>
+        <View style={statsGridStyle}>
           <StatusCard
             title="Total"
             value={totalCount}
-            icon={<Icon name="work" size={20} color={colors.textWhite} />}
+            icon={<Icon name="work" size={statusCardIconSize} color={colors.textWhite} />}
             color={colors.primary}
             onPress={() => navigation.navigate('Enquiries')}
+            style={tabletStatusCardStyle}
           />
           <StatusCard
             title="Cad"
             value={cadCount}
-            icon={<Icon name="pending" size={20} color={colors.textWhite} />}
+            icon={<Icon name="pending" size={statusCardIconSize} color={colors.textWhite} />}
             color={colors.primaryDark}
             onPress={() => navigateWithDashboardFilter({ filter: 'cad' })}
+            style={tabletStatusCardStyle}
           />
           <StatusCard
             title="Approved Cad"
             value={approvedCadCount}
-            icon={<Icon name="check-circle" size={20} color={colors.textWhite} />}
+            icon={<Icon name="check-circle" size={statusCardIconSize} color={colors.textWhite} />}
             color={colors.primaryLight}
             onPress={() => navigateWithDashboardFilter({ filter: 'approved cad' })}
+            style={tabletStatusCardStyle}
           />
           <StatusCard
             title="Design Approval Pending"
             value={designApprovalPendingCount}
-            icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
+            icon={<Icon name="pending-actions" size={statusCardIconSize} color={colors.textWhite} />}
             color={colors.primary}
             onPress={() => navigateWithDashboardFilter({ filter: 'design approval pending' })}
+            style={tabletStatusCardStyle}
           />
         </View>
       );
@@ -770,18 +802,19 @@ const DashboardScreen = ({ navigation }) => {
     console.log('📊 [DASHBOARD] ===================================================');
     
     return (
-      <View style={styles.statsGrid}>
+      <View style={statsGridStyle}>
         <StatusCard
           title="Assigned Enquiries"
           value={dashboardData?.assignedEnquiries || dashboardData?.categorizedCounts?.['All'] || '0'}
-          icon={<Icon name="work" size={20} color={colors.textWhite} />}
+          icon={<Icon name="work" size={statusCardIconSize} color={colors.textWhite} />}
           color={colors.primary}
           onPress={() => navigation.navigate('Enquiries')}
+          style={tabletStatusCardStyle}
         />
         <StatusCard
           title="Pending Designs"
           value={finalPendingDesignsValue}
-          icon={<Icon name="pending" size={20} color={colors.textWhite} />}
+          icon={<Icon name="pending" size={statusCardIconSize} color={colors.textWhite} />}
           color={colors.primaryDark}
           onPress={() => {
             console.log('🎯 [DASHBOARD] "Pending Designs" tile pressed (Coral role)');
@@ -789,28 +822,30 @@ const DashboardScreen = ({ navigation }) => {
             console.log('🎯 [DASHBOARD] Filter being applied: "coral" → shows Coral status enquiries');
             navigateWithDashboardFilter({ filter: 'coral' });
           }}
+          style={tabletStatusCardStyle}
         />
         <StatusCard
           title="Approval Pending"
           value={dashboardData?.approvalPendingDesigns || dashboardData?.categorizedCounts?.['Approval Pending'] || dashboardData?.categorizedCounts?.['Design Approval Pending'] || approvalPendingFromStatusStats || '0'}
-          icon={<Icon name="pending-actions" size={20} color={colors.textWhite} />}
+          icon={<Icon name="pending-actions" size={statusCardIconSize} color={colors.textWhite} />}
           color={colors.primaryLight}
           onPress={() => navigateWithDashboardFilter({ filter: 'design approval pending' })}
+          style={tabletStatusCardStyle}
         />
         <StatusCard
           title="Completed Designs"
           value={dashboardData?.completedDesigns || dashboardData?.categorizedCounts?.['Completed'] || '0'}
-          icon={<Icon name="palette" size={20} color={colors.textWhite} />}
+          icon={<Icon name="palette" size={statusCardIconSize} color={colors.textWhite} />}
           color={colors.primary}
           onPress={() => navigateWithDashboardFilter({ filter: 'completed' })}
+          style={tabletStatusCardStyle}
         />
       </View>
     );
   };
 
-  const renderQuickActions = () => {
+  const getQuickActionsList = () => {
     const actions = [];
-
     if (user?.role === 'admin') {
       actions.push(
         {
@@ -825,7 +860,6 @@ const DashboardScreen = ({ navigation }) => {
         }
       );
     }
-
     if (user?.role === 'client') {
       actions.push({
         title: 'Add New Enquiry',
@@ -833,7 +867,6 @@ const DashboardScreen = ({ navigation }) => {
         onPress: () => navigation.navigate('AddEnquiryStep1'),
       });
     }
-
     if (user?.role === 'coral' || user?.role === 'cad') {
       actions.push(
         {
@@ -848,6 +881,59 @@ const DashboardScreen = ({ navigation }) => {
         }
       );
     }
+    return actions;
+  };
+
+  const renderCombinedOverviewAndQuickActions = () => {
+    const actions = getQuickActionsList();
+    
+    return (
+      <View style={styles.combinedSectionTablet}>
+        <View style={styles.combinedSectionLeft}>
+          <Text style={styles.combinedSectionTitle}>Overview</Text>
+          <View style={styles.combinedStatsGrid}>
+            <StatusCard
+              title="Total Enquiries"
+              value={dashboardData?.totalEnquiries || '0'}
+              icon={<Icon name="assignment" size={statusCardIconSize} color={colors.textWhite} />}
+              color={colors.primary}
+              onPress={() => navigation.navigate('Enquiries')}
+              style={styles.combinedStatusCard}
+            />
+            <StatusCard
+              title="Total Clients"
+              value={dashboardData?.totalClients || '0'}
+              icon={<Icon name="people" size={statusCardIconSize} color={colors.textWhite} />}
+              color={colors.primary}
+              onPress={() => navigation.navigate('ClientsList')}
+              style={styles.combinedStatusCard}
+            />
+          </View>
+        </View>
+        <View style={styles.combinedSectionRight}>
+          <Text style={styles.combinedSectionTitle}>Quick Actions</Text>
+          <View style={styles.combinedActionsGrid}>
+            {actions.map((action, index) => (
+              <TouchableOpacity
+                key={index}
+                style={[styles.actionButton, styles.combinedActionButton]}
+                onPress={action.onPress}
+                activeOpacity={0.7}
+              >
+                <View style={styles.actionIcon}>
+                  <Icon name={action.icon} size={actionIconSize} color={colors.primary} />
+                </View>
+                <Text style={actionTextStyle}>{action.title}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderQuickActions = () => {
+    const actions = getQuickActionsList();
 
     // TEST BUTTON - Commented out for production
     // To re-enable: Uncomment the test screens in StackNavigator.js first, then uncomment this
@@ -860,7 +946,7 @@ const DashboardScreen = ({ navigation }) => {
     // }
 
     return (
-      <Card style={styles.quickActionsCard}>
+      <Card style={quickActionsCardStyle}>
         <Text style={styles.quickActionsTitle}>Quick Actions</Text>
         {/* DEV MODE BADGE - Commented out for production
         {__DEV__ && (
@@ -869,18 +955,18 @@ const DashboardScreen = ({ navigation }) => {
           </View>
         )}
         */}
-        <View style={styles.actionsGrid}>
+          <View style={actionsGridStyle}>
           {actions.map((action, index) => (
             <TouchableOpacity
               key={index}
-              style={styles.actionButton}
+                style={actionButtonStyle}
               onPress={action.onPress}
               activeOpacity={0.7}
             >
               <View style={styles.actionIcon}>
-                <Icon name={action.icon} size={22} color={colors.primary} />
+                <Icon name={action.icon} size={actionIconSize} color={colors.primary} />
               </View>
-              <Text style={styles.actionText}>{action.title}</Text>
+              <Text style={actionTextStyle}>{action.title}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -1044,8 +1130,15 @@ const DashboardScreen = ({ navigation }) => {
         {user?.role === 'client' && renderClientDashboard()}
         {(user?.role === 'coral' || user?.role === 'cad') && renderDesignerDashboard(user.role)}
 
-        {/* Quick Actions - Hidden for coral, CAD designers, and Client users */}
-        {(user?.role !== 'coral' && user?.role !== 'cad' && user?.role !== 'client' && user?.roleNumber !== 4 && user?.roleId !== 4) && (
+        {/* Combined Overview and Quick Actions - Only on tablets for admin role */}
+        {isTablet && user?.role === 'admin' && (
+          <View style={styles.combinedSectionContainer}>
+            {renderCombinedOverviewAndQuickActions()}
+          </View>
+        )}
+
+        {/* Quick Actions - Only show on mobile, hidden on tablets for admin (shown in combined section) */}
+        {!isTablet && (user?.role !== 'coral' && user?.role !== 'cad' && user?.role !== 'client' && user?.roleNumber !== 4 && user?.roleId !== 4) && (
           <View style={styles.quickActionsSection}>
             {renderQuickActions()}
           </View>
@@ -1219,6 +1312,20 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     justifyContent: 'space-between',
   },
+  statsGridTablet: {
+    alignSelf: 'center',
+    paddingHorizontal: 32,
+    gap: 16,
+  },
+  statusCardTablet: {
+    width: 200,
+    maxWidth: 200,
+    minWidth: 200,
+    marginHorizontal: 8,
+    aspectRatio: 1.1,
+    minHeight: 150,
+    maxHeight: 200,
+  },
 
   // Clients Section
   clientsSection: {
@@ -1305,6 +1412,11 @@ const styles = StyleSheet.create({
     marginVertical: 0,
     padding: 16,
   },
+  quickActionsCardTablet: {
+    alignSelf: 'center',
+    padding: 16,
+    paddingHorizontal: 32,
+  },
   quickActionsTitle: {
     fontSize: fonts.base,
     fontFamily: fonts.bold,
@@ -1317,6 +1429,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
+  actionsGridTablet: {
+    justifyContent: 'flex-start',
+    gap: 16,
+  },
   actionButton: {
     width: '48%',
     backgroundColor: colors.background,
@@ -1328,6 +1444,15 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     minHeight: 100,
     marginBottom: 10,
+  },
+  actionButtonTablet: {
+    width: 180,
+    maxWidth: 180,
+    minWidth: 180,
+    marginRight: 16,
+    marginBottom: 12,
+    padding: 14,
+    minHeight: 130,
   },
   actionIcon: {
     // width: 48,
@@ -1346,6 +1471,10 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     letterSpacing: 0.2,
   },
+  actionTextTablet: {
+    fontSize: fonts.xs,
+    lineHeight: 16,
+  },
   devBadge: {
     backgroundColor: colors.warning + '20',
     paddingHorizontal: 8,
@@ -1361,6 +1490,69 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: colors.warning,
     letterSpacing: 0.5,
+  },
+
+  // Combined Overview and Quick Actions Section (Tablet only)
+  combinedSectionContainer: {
+    paddingHorizontal: 32,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  combinedSectionTablet: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 24,
+  },
+  combinedSectionLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  combinedSectionRight: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  combinedSectionTitle: {
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+    marginBottom: 12,
+    letterSpacing: 0.2,
+  },
+  combinedStatsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    gap: 12,
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+  },
+  combinedStatusCard: {
+    flex: 1,
+    width: '48%',
+    minWidth: 0,
+    maxWidth: '48%',
+    marginHorizontal: 0,
+    marginVertical: 0,
+    aspectRatio: 1.1,
+    minHeight: 140,
+  },
+  combinedActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  combinedActionButton: {
+    flex: 1,
+    width: '48%',
+    minWidth: 0,
+    maxWidth: '48%',
+    marginRight: 0,
+    marginBottom: 0,
+    minHeight: 120,
   },
 
   // Recent Activity Section

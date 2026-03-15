@@ -3,7 +3,6 @@ import { View, StyleSheet, Dimensions, Text } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
-import { formatCurrency } from '../../utils/helpers';
 
 const screenWidth = Dimensions.get('window').width;
 const chartWidth = screenWidth - 64; // Account for padding
@@ -43,7 +42,7 @@ const MetalPriceHistoryChart = ({ historyData, metalType = 'gold' }) => {
     });
 
     // Extract prices
-    const prices = recentData.map((item) => 
+    const prices = recentData.map((item) =>
       parseFloat(item.price || item.Price || 0)
     );
 
@@ -105,11 +104,21 @@ const MetalPriceHistoryChart = ({ historyData, metalType = 'gold' }) => {
     );
   }
 
-  const metalColor = metalType.toLowerCase() === 'gold' 
+  const metalColor = metalType.toLowerCase() === 'gold'
     ? 'rgba(184, 134, 11, 1)'
     : metalType.toLowerCase() === 'silver'
-    ? 'rgba(192, 192, 192, 1)'
-    : 'rgba(229, 228, 226, 1)';
+      ? 'rgba(192, 192, 192, 1)'
+      : 'rgba(229, 228, 226, 1)';
+
+  // Format currency as USD
+  const formatUSD = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
 
   return (
     <View style={styles.container}>
@@ -118,19 +127,19 @@ const MetalPriceHistoryChart = ({ historyData, metalType = 'gold' }) => {
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Current</Text>
           <Text style={[styles.statValue, { color: colors.textPrimary }]}>
-            {formatCurrency(stats.current)}
+            {formatUSD(stats.current)}
           </Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Min</Text>
           <Text style={[styles.statValue, { color: colors.textSecondary }]}>
-            {formatCurrency(stats.min)}
+            {formatUSD(stats.min)}
           </Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Max</Text>
           <Text style={[styles.statValue, { color: colors.textSecondary }]}>
-            {formatCurrency(stats.max)}
+            {formatUSD(stats.max)}
           </Text>
         </View>
         <View style={styles.statItem}>
@@ -139,7 +148,7 @@ const MetalPriceHistoryChart = ({ historyData, metalType = 'gold' }) => {
             styles.statValue,
             { color: stats.change >= 0 ? colors.success : colors.error }
           ]}>
-            {stats.change >= 0 ? '+' : ''}{formatCurrency(stats.change)} ({stats.changePercent >= 0 ? '+' : ''}{stats.changePercent.toFixed(2)}%)
+            {stats.change >= 0 ? '+' : ''}{formatUSD(stats.change)} ({stats.changePercent >= 0 ? '+' : ''}{stats.changePercent.toFixed(2)}%)
           </Text>
         </View>
       </View>

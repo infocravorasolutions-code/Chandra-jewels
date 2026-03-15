@@ -1,7 +1,7 @@
 export const colors = {
-  primary: '#103534', // Brand color - Dark teal
-  primaryDark: '#0a2a29', // Darker shade
-  primaryLight: '#1a4a48', // Lighter shade
+  primary: '#143F45', // Brand color - Dark teal
+  primaryDark: '#0F3236', // Darker shade
+  primaryLight: '#235A63', // Lighter shade
   secondary: '#8B4513', // Brown (complementary)
   accent: '#D4AF37', // Gold accent
   
@@ -15,6 +15,7 @@ export const colors = {
   textSecondary: '#6B7280',
   textLight: '#9CA3AF',
   textWhite: '#FFFFFF',
+  textBlack: '#000000',
   
   // Status colors
   success: '#47b02c', // Vibrant green like the image

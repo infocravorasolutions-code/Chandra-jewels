@@ -37,32 +37,32 @@ import { getUserName, useUserName } from '../../utils/userUtils';
 const SingleEnquiryScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const { enquiry: initialEnquiry, enquiryId: routeEnquiryId, shouldRefresh } = route.params || {};
-  
+
   // Store initial AssignedTo as fallback (in case refetch loses it)
   const initialAssignedToRef = useRef(null);
-  
+
   // Capture initial AssignedTo from initialEnquiry if available
   useEffect(() => {
     if (initialEnquiry && !initialAssignedToRef.current) {
-      const initialId = initialEnquiry?._originalData?.AssignedTo || 
-                       initialEnquiry?.AssignedTo || 
-                       initialEnquiry?.assignedTo;
+      const initialId = initialEnquiry?._originalData?.AssignedTo ||
+        initialEnquiry?.AssignedTo ||
+        initialEnquiry?.assignedTo;
       if (initialId) {
         initialAssignedToRef.current = initialId;
         console.log('[SingleEnquiry] 💾 Stored initial AssignedTo as fallback:', initialId);
       }
     }
   }, [initialEnquiry]);
-  
-  
+
+
   // Log route params when screen loads or params change
   useEffect(() => {
-    
+
   }, [route.params, initialEnquiry, routeEnquiryId, shouldRefresh]);
-  
+
   // Fetch and cache users for name resolution
   const { users: usersList, isLoading: usersLoading } = useUsers();
-  
+
   // Debug: Log users loading status
   useEffect(() => {
     console.log('[SingleEnquiry] 👥 Users Debug:', {
@@ -75,7 +75,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       })),
     });
   }, [usersLoading, usersList]);
-  
+
   // Automatic cache cleanup on screen mount (runs once per app session)
   useEffect(() => {
     let cleanupTimer;
@@ -84,12 +84,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         // Clean up expired entries and old cache on screen load
         const allKeys = await AsyncStorage.getAllKeys();
         const cacheKeys = allKeys.filter(key => key.startsWith('image_cache_'));
-        
+
         if (cacheKeys.length > 0) {
           const now = Date.now();
           const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
           const cacheEntries = await AsyncStorage.multiGet(cacheKeys);
-          
+
           const expiredKeys = cacheEntries
             .map(([key, value]) => {
               try {
@@ -101,11 +101,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               }
             })
             .filter(Boolean);
-          
+
           if (expiredKeys.length > 0) {
             await AsyncStorage.multiRemove(expiredKeys);
           }
-          
+
           // If we still have more than 100 cached images, remove oldest 30%
           const remainingKeys = cacheKeys.filter(k => !expiredKeys.includes(k));
           if (remainingKeys.length > 100) {
@@ -120,10 +120,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 }
               })
               .sort((a, b) => a.timestamp - b.timestamp);
-            
+
             const toRemove = Math.floor(remainingEntries.length * 0.3);
             const oldestKeys = remainingEntries.slice(0, toRemove).map(e => e.key);
-            
+
             if (oldestKeys.length > 0) {
               await AsyncStorage.multiRemove(oldestKeys);
             }
@@ -133,35 +133,35 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         // Silently handle cache cleanup errors
       }
     };
-    
+
     // Run cleanup after a short delay to not block initial render
     cleanupTimer = setTimeout(performCleanup, 2000);
-    
+
     return () => {
       if (cleanupTimer) clearTimeout(cleanupTimer);
     };
   }, []); // Run once on mount
-  
+
   // Use route enquiryId or initialEnquiry id
   const enquiryId = routeEnquiryId || initialEnquiry?.id || initialEnquiry?._id;
-  
+
   // Log enquiryId
   useEffect(() => {
-    
+
   }, [enquiryId]);
-  
+
   // Redux hooks - refetch when screen comes into focus to get latest pricing updates
-  const { 
-    data: enquiryData, 
-    isLoading: loading, 
+  const {
+    data: enquiryData,
+    isLoading: loading,
     error: queryError,
-    refetch 
+    refetch
   } = useGetEnquiryByIdQuery(enquiryId, {
     skip: !enquiryId,
     refetchOnFocus: true, // Refetch when screen comes into focus to get latest data (including pricing)
     refetchOnMountOrArgChange: true, // Refetch when enquiryId changes
   });
-  
+
   // Auto-retry logic for notification navigation (handles timing issues)
   const retryCountRef = useRef(0);
   const maxRetries = 3;
@@ -170,50 +170,50 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     if (queryError && enquiryId && retryCountRef.current < maxRetries && !loading) {
       const isServerError = queryError?.status === 500 || queryError?.originalStatus === 500;
       const isNotFound = queryError?.status === 404 || queryError?.originalStatus === 404;
-      
+
       // Only auto-retry for server errors (might be timing issue) or not found (might be newly created)
       if (isServerError || isNotFound) {
         retryCountRef.current += 1;
         const delay = retryCountRef.current * 1000; // 1s, 2s, 3s delays
         console.log(`[SingleEnquiry] 🔄 Auto-retry ${retryCountRef.current}/${maxRetries} in ${delay}ms for enquiry:`, enquiryId);
-        
+
         const retryTimer = setTimeout(() => {
           refetch();
         }, delay);
-        
+
         return () => clearTimeout(retryTimer);
       }
     }
   }, [queryError, enquiryId, loading, refetch]);
-  
+
   // Reset retry count when enquiryId changes
   useEffect(() => {
     retryCountRef.current = 0;
   }, [enquiryId]);
-  
+
 
   // Watch for status changes and log them
   useEffect(() => {
     if (enquiryData && enquiryId) {
       const currentStatus = enquiryData?.status || enquiryData?.Status || enquiryData?._originalData?.Status;
-      
+
     }
   }, [enquiryData, enquiryId]);
-  
+
   // Log enquiryData changes - reduced logging to prevent performance issues
   useEffect(() => {
-    
+
   }, [enquiryData?.id, enquiryData?.StoneType, enquiryData?.StyleNumber, enquiryData?.GatiOrderNumber, shouldRefresh]);
 
   const [deleteEnquiry, { isLoading: isDeleting }] = useDeleteEnquiryMutation();
-  
+
   // Fetch clients for name lookup (using cached hook)
   const { clients: clientsData = [], isLoading: clientsLoading } = useClients({
     skip: false,
   });
-  
+
   const clients = Array.isArray(clientsData) ? clientsData : [];
-  
+
   // Create client ID to name lookup map - handle all possible ID formats
   const clientNameMap = useMemo(() => {
     const map = new Map();
@@ -222,102 +222,102 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         // Get ID from multiple possible fields
         const clientId = client.id || client._id || client.Id;
         const clientName = client.name || client.Name;
-        
+
         if (clientId && clientName) {
           // Normalize ID to string and create multiple lookup keys
           const idStr = String(clientId).trim();
-          
+
           // Store with original format
           map.set(idStr, clientName);
-          
+
           // Remove spaces
           const noSpaces = idStr.replace(/\s/g, '');
           map.set(noSpaces, clientName);
-          
+
           // Handle MongoDB ObjectId format variations
           const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').trim();
           if (cleanId !== idStr) {
             map.set(cleanId, clientName);
             map.set(cleanId.replace(/\s/g, ''), clientName);
           }
-          
+
           // Also try lowercase version (in case of case sensitivity issues)
           map.set(idStr.toLowerCase(), clientName);
           map.set(noSpaces.toLowerCase(), clientName);
         }
       });
-      
+
     } else {
-      
+
     }
     return map;
   }, [clients]);
-  
+
   // Helper to get client name from ID - try multiple matching strategies
   const getClientName = (clientId) => {
     if (!clientId) {
-      
+
       return 'Unknown Client';
     }
-    
+
     const idStr = String(clientId).trim();
-    
+
     // Try exact match first
     if (clientNameMap.has(idStr)) {
-      
+
       return clientNameMap.get(idStr);
     }
-    
+
     // Try without spaces
     const noSpaces = idStr.replace(/\s/g, '');
     if (clientNameMap.has(noSpaces)) {
       return clientNameMap.get(noSpaces);
     }
-    
+
     // Try cleaned ObjectId format
     const cleanId = idStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').trim();
     if (cleanId !== idStr && clientNameMap.has(cleanId)) {
       return clientNameMap.get(cleanId);
     }
-    
+
     const cleanNoSpaces = cleanId.replace(/\s/g, '');
     if (clientNameMap.has(cleanNoSpaces)) {
       return clientNameMap.get(cleanNoSpaces);
     }
-    
+
     // Try lowercase
     if (clientNameMap.has(idStr.toLowerCase())) {
       return clientNameMap.get(idStr.toLowerCase());
     }
-    
+
     // Fallback: Direct search in clients array (more flexible matching)
     if (clients && clients.length > 0) {
       const foundClient = clients.find(c => {
         const cId = String(c.id || c._id || c.Id || '').trim();
         const cIdNoSpaces = cId.replace(/\s/g, '');
         const enquiryIdNoSpaces = idStr.replace(/\s/g, '');
-        
-        return cId === idStr || 
-               cIdNoSpaces === enquiryIdNoSpaces ||
-               cId.toLowerCase() === idStr.toLowerCase() ||
-               cIdNoSpaces.toLowerCase() === enquiryIdNoSpaces.toLowerCase();
+
+        return cId === idStr ||
+          cIdNoSpaces === enquiryIdNoSpaces ||
+          cId.toLowerCase() === idStr.toLowerCase() ||
+          cIdNoSpaces.toLowerCase() === enquiryIdNoSpaces.toLowerCase();
       });
-      
+
       if (foundClient) {
         const name = foundClient.name || foundClient.Name;
         if (name && name !== 'Unknown Client') {
-          
+
           return name;
         }
       }
     }
-    
+
     // Removed console.warn from render - it causes performance issues
     // Logging moved to useEffect to avoid blocking render
-    
+
     return 'Unknown Client';
   };
-  
+
   // Local UI state
   const [approvalMessage, setApprovalMessage] = useState('');
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -333,11 +333,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   const [modalCurrentIndex, setModalCurrentIndex] = useState(0);
   const [isModalZoomed, setIsModalZoomed] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
-  
+
   // Handle sharing to WhatsApp
   const handleShareToWhatsApp = useCallback(async () => {
     if (isSharing) return;
-    
+
     setIsSharing(true);
     try {
       const currentMedia = modalImages[modalCurrentIndex] || modalImages[0];
@@ -346,26 +346,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         setIsSharing(false);
         return;
       }
-      
+
       const isVideo = currentMedia.isVideo;
       const mediaKey = currentMedia.imageKey || currentMedia.imageId;
       const mediaUri = currentMedia.imageUri || currentMedia.cachedUri || selectedImageUri;
-      
+
       if (!mediaKey && !mediaUri) {
         Alert.alert('Error', 'Media URL not available');
         setIsSharing(false);
         return;
       }
-      
+
       const token = await AsyncStorage.getItem('token');
       if (!token) {
         Alert.alert('Error', 'Authentication required');
         setIsSharing(false);
         return;
       }
-      
+
       let fileUrl = mediaUri;
-      
+
       // If we don't have a direct URL, fetch presigned URL
       if (!fileUrl || (!fileUrl.startsWith('http') && !fileUrl.startsWith('file://'))) {
         try {
@@ -375,7 +375,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               'Authorization': `Bearer ${token}`,
             },
           });
-          
+
           if (response.ok) {
             const contentType = response.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
@@ -387,7 +387,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               const tempDir = RNFS.CachesDirectoryPath;
               const fileName = mediaKey.split('/').pop() || `media_${Date.now()}.${isVideo ? 'mp4' : 'jpg'}`;
               const tempFilePath = `${tempDir}/${fileName}`;
-              
+
               // Convert to base64
               const bytes = new Uint8Array(arrayBuffer);
               let binary = '';
@@ -396,7 +396,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 const chunk = bytes.subarray(i, i + chunkSize);
                 binary += String.fromCharCode.apply(null, chunk);
               }
-              
+
               let base64;
               try {
                 base64 = btoa(binary);
@@ -407,7 +407,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                   throw new Error('Unable to convert to base64');
                 }
               }
-              
+
               await RNFS.writeFile(tempFilePath, base64, 'base64');
               fileUrl = `file://${tempFilePath}`;
             }
@@ -418,7 +418,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           return;
         }
       }
-      
+
       // If fileUrl is a remote URL, download it first
       if (fileUrl.startsWith('http') && !fileUrl.startsWith('file://')) {
         try {
@@ -427,13 +427,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               'Authorization': `Bearer ${token}`,
             },
           });
-          
+
           if (response.ok) {
             const arrayBuffer = await response.arrayBuffer();
             const tempDir = RNFS.CachesDirectoryPath;
             const fileName = mediaKey ? mediaKey.split('/').pop() : `media_${Date.now()}.${isVideo ? 'mp4' : 'jpg'}`;
             const tempFilePath = `${tempDir}/${fileName}`;
-            
+
             // Convert to base64
             const bytes = new Uint8Array(arrayBuffer);
             let binary = '';
@@ -442,7 +442,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               const chunk = bytes.subarray(i, i + chunkSize);
               binary += String.fromCharCode.apply(null, chunk);
             }
-            
+
             let base64;
             try {
               base64 = btoa(binary);
@@ -453,7 +453,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 throw new Error('Unable to convert to base64');
               }
             }
-            
+
             await RNFS.writeFile(tempFilePath, base64, 'base64');
             fileUrl = `file://${tempFilePath}`;
           }
@@ -463,10 +463,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           return;
         }
       }
-      
+
       // Share via WhatsApp
       const shareMessage = `Reference ${isVideo ? 'Video' : 'Image'} from Enquiry`;
-      
+
       try {
         await Share.open({
           message: shareMessage,
@@ -490,7 +490,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       setIsSharing(false);
     }
   }, [isSharing, modalImages, modalCurrentIndex, selectedImageUri]);
-  
+
   const handleImagePress = (uri, index, allImages) => {
     if (!uri) {
       return;
@@ -513,7 +513,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     setModalCurrentIndex(0);
     setIsModalZoomed(false);
   };
-  
+
   // Scroll to selected image when modal opens
   useEffect(() => {
     if (isImageModalVisible && modalImages.length > 1) {
@@ -525,21 +525,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           // Video URL will be fetched by Video component in modal
           setSelectedImageUri(targetImage.imageUri || targetImage.cachedUri || null);
         } else {
-        setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
+          setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
         }
       }
-      
+
       if (modalFlatListRef.current) {
         requestAnimationFrame(() => {
-        modalFlatListRef.current?.scrollToIndex({
-          index: modalCurrentIndex,
-          animated: false,
+          modalFlatListRef.current?.scrollToIndex({
+            index: modalCurrentIndex,
+            animated: false,
+          });
         });
-        });
-    }
+      }
     }
   }, [isImageModalVisible, modalCurrentIndex, modalImages]);
-  
+
   // State for image modal slider - must be at top level of component
   const screenWidth = Dimensions.get('window').width;
   const screenHeight = Dimensions.get('window').height;
@@ -564,7 +564,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       return prev;
     });
   }, [ZOOM_ON_THRESHOLD, ZOOM_OFF_THRESHOLD]);
-  
+
   // Viewability config for modal FlatList - must be at component level
   const updateModalIndex = useCallback((index, scrollList = true) => {
     const boundedIndex = Math.max(0, Math.min((modalImages?.length || 1) - 1, index));
@@ -583,7 +583,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         if (targetImage.isVideo) {
           setSelectedImageUri(targetImage.imageUri || targetImage.cachedUri || null);
         } else {
-        setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
+          setSelectedImageUri(targetImage.cachedUri || targetImage.imageUri || null);
         }
       }
       setIsModalZoomed(false);
@@ -609,14 +609,14 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       const nextIndex = viewableItems[0].index || 0;
       if (nextIndex !== modalCurrentIndex) {
         updateModalIndex(nextIndex, false);
-    }
+      }
     }
   }, [modalCurrentIndex, updateModalIndex]);
 
   const modalViewabilityConfig = useMemo(() => ({
     itemVisiblePercentThreshold: 50,
   }), []);
-  
+
   // API mutations
   const [approveDesignVersion, { isLoading: isApproving }] = useApproveDesignVersionMutation();
   const [rejectDesignVersion, { isLoading: isRejecting }] = useRejectDesignVersionMutation();
@@ -624,26 +624,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   // Use enquiry from query if available, otherwise use initialEnquiry
   const enquiry = enquiryData || initialEnquiry || {};
-  
+
   // Log which enquiry source is being used
   useEffect(() => {
   }, [enquiryData, initialEnquiry, enquiry]);
-  
+
   // Get original data for accessing raw API fields
   const originalData = enquiry?._originalData || enquiry;
-  
+
   console.log('originalData-------gatiOrderNumber-->', enquiry);
   // Extract AssignedTo ID using useMemo to reactively update when enquiry data changes
   // IMPORTANT: Check StatusHistory first (most accurate), then _originalData, then normalized enquiry
   const assignedToId = useMemo(() => {
     let id = null;
-    
+
     // Priority 1: Check StatusHistory (most accurate source - latest assignment)
-    const statusHistory = enquiry?._originalData?.StatusHistory || 
-                         originalData?.StatusHistory || 
-                         enquiry?.StatusHistory || 
-                         [];
-    
+    const statusHistory = enquiry?._originalData?.StatusHistory ||
+      originalData?.StatusHistory ||
+      enquiry?.StatusHistory ||
+      [];
+
     if (Array.isArray(statusHistory) && statusHistory.length > 0) {
       // Sort by timestamp (latest first)
       const sortedHistory = [...statusHistory].sort((a, b) => {
@@ -651,7 +651,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         const dateB = new Date(b.Timestamp || b.timestamp || 0);
         return dateB - dateA; // Descending order (latest first)
       });
-      
+
       // Find the latest entry that has AssignedTo
       for (const entry of sortedHistory) {
         if (entry.AssignedTo || entry.assignedTo) {
@@ -661,26 +661,26 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         }
       }
     }
-    
+
     // Priority 2: Check _originalData (raw API response) - this is most reliable if StatusHistory doesn't have it
     if (!id) {
-      id = enquiry?._originalData?.AssignedTo || 
-           originalData?.AssignedTo ||
-           originalData?.assignedTo;
+      id = enquiry?._originalData?.AssignedTo ||
+        originalData?.AssignedTo ||
+        originalData?.assignedTo;
       if (id) {
         console.log('[SingleEnquiry] ✅ Found AssignedTo in _originalData:', id);
       }
     }
-    
+
     // Priority 3: Check normalized enquiry fields
     if (!id) {
-      id = enquiry?.AssignedTo || 
-           enquiry?.assignedTo;
+      id = enquiry?.AssignedTo ||
+        enquiry?.assignedTo;
       if (id) {
         console.log('[SingleEnquiry] ✅ Found AssignedTo in enquiry:', id);
       }
     }
-    
+
     // Priority 4: Use stored fallback if current data doesn't have it
     if (!id) {
       id = initialAssignedToRef.current;
@@ -688,18 +688,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         console.log('[SingleEnquiry] ⚠️ Using fallback AssignedTo:', id);
       }
     }
-    
+
     // Update fallback if we found a new value
     if (id && id !== initialAssignedToRef.current) {
       initialAssignedToRef.current = id;
     }
-    
+
     // Handle case where id might be an object (shouldn't happen, but just in case)
     if (id && typeof id === 'object') {
       console.warn('[SingleEnquiry] ⚠️ AssignedTo is an object, extracting ID:', id);
       id = id.id || id._id || id.toString();
     }
-    
+
     // Debug: Log assignedToId extraction with detailed info
     console.log('[SingleEnquiry] 🔍 AssignedTo ID extracted (useMemo):', {
       'StatusHistory length': statusHistory?.length || 0,
@@ -714,7 +714,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       'enquiry exists': !!enquiry,
       'enquiry._originalData exists': !!enquiry?._originalData,
     });
-    
+
     return id || null;
   }, [
     enquiry?._originalData?.StatusHistory, // Check StatusHistory
@@ -728,10 +728,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     enquiry?._originalData, // Also watch entire _originalData object
     enquiry, // Watch entire enquiry object
   ]);
-  
+
   // Use reactive hook to get assigned user name
   const assignedToName = useUserName(assignedToId);
-  
+
   // Debug: Log assignedToName from hook
   useEffect(() => {
     console.log('[SingleEnquiry] 👤 AssignedToName from hook:', {
@@ -740,15 +740,15 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       'assignedToName type': typeof assignedToName,
     });
   }, [assignedToId, assignedToName]);
-  
+
   // Log originalData for debugging - Enhanced to show all fields
   useEffect(() => {
   }, [enquiry, originalData]);
-  
+
   // Debug: Log enquiry structure to understand data format
   useEffect(() => {
   }, [enquiry]);
-  
+
   // Get priority from API (show as badge)
   const priority = originalData?.Priority || enquiry?.Priority || enquiry?.priority || 'Normal';
 
@@ -760,7 +760,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // 4. Fallback to normalized status fields
   // This ensures we display the full status like "Design Approval Pending" instead of just "pending"
   let status = null;
-  
+
   // First, try to get status from StatusHistory (most accurate source)
   const statusHistory = originalData?.StatusHistory || enquiry?.StatusHistory || [];
   if (Array.isArray(statusHistory) && statusHistory.length > 0) {
@@ -773,23 +773,23 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const latestStatus = sortedHistory[0];
     status = latestStatus?.Status || latestStatus?.status || null;
   }
-  
+
   // If not found in StatusHistory, check other fields
   if (!status) {
-    status = originalData?.CurrentStatus || 
-             originalData?.Status || 
-             enquiry?.CurrentStatus ||
-             enquiry?.Status;
+    status = originalData?.CurrentStatus ||
+      originalData?.Status ||
+      enquiry?.CurrentStatus ||
+      enquiry?.Status;
   }
-  
+
   // Final fallback to normalized status
   if (!status) {
     status = enquiry?.status || 'pending';
   }
-  
+
   // Get client name from ClientId - prioritize already resolved name, then lookup
   const clientId = originalData?.ClientId || enquiry?.ClientId || enquiry?.clientId;
-  
+
   // First check if enquiry already has a valid client name (not "Unknown Client")
   let clientName = enquiry?.clientName || enquiry?.client;
   if (!clientName || clientName === 'Unknown Client') {
@@ -804,25 +804,25 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       clientName = 'Unknown Client';
     }
   }
-  
+
   // Debug logging for client name resolution - moved to useEffect to avoid blocking render
   useEffect(() => {
   }, [clientId, clientName, clientsLoading, clients.length, clientNameMap]);
-  
+
   // Get dates - check multiple possible fields
   const createdAt = enquiry?.createdAt || originalData?.createdAt || new Date().toISOString();
   const updatedAt = enquiry?.updatedAt || originalData?.updatedAt || enquiry?.createdAt || createdAt;
 
   // Use ref to track last shouldRefresh value to prevent duplicate refetches
   const lastShouldRefreshRef = useRef(shouldRefresh);
-  
+
   // Refresh enquiry data when screen comes into focus (if needed)
   useFocusEffect(
     useCallback(() => {
       // Always refetch when screen comes into focus to get latest updates
       // This ensures client sees status changes made by admin AND fields added during editing
       if (enquiryId && refetch) {
-        
+
         // Use a small delay to ensure navigation is complete
         const timeoutId = setTimeout(() => {
           refetch()
@@ -832,10 +832,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               }
             })
             .catch((error) => {
-              
+
             });
         }, 100);
-        
+
         return () => clearTimeout(timeoutId);
       } else {
         // Update ref even if not refetching
@@ -886,7 +886,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
 
   const getCachedImage = useCallback(async (cacheKey) => {
     if (!cacheKey) return null;
-    
+
     // First check in-memory cache (works even when storage is full)
     if (memoryCacheRef.current.has(cacheKey)) {
       const cached = memoryCacheRef.current.get(cacheKey);
@@ -898,12 +898,12 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         memoryCacheRef.current.delete(cacheKey);
       }
     }
-    
+
     // If storage is known to be full, skip AsyncStorage check
     if (storageFullRef.current) {
       return null;
     }
-    
+
     // Try AsyncStorage cache
     try {
       const cached = await AsyncStorage.getItem(cacheKey);
@@ -937,23 +937,23 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     try {
       const allKeys = await AsyncStorage.getAllKeys();
       const cacheKeys = allKeys.filter(key => key.startsWith('image_cache_'));
-      
+
       if (cacheKeys.length === 0) {
         return { removed: 0, remaining: 0 };
       }
-      
+
       // Get all cache entries with timestamps
       const cacheEntries = await AsyncStorage.multiGet(cacheKeys);
       const now = Date.now();
       const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
-      
+
       const entriesWithTimestamps = cacheEntries
         .map(([key, value]) => {
           try {
             const data = JSON.parse(value);
             const age = now - (data.timestamp || 0);
-            return { 
-              key, 
+            return {
+              key,
               timestamp: data.timestamp || 0,
               age,
               expired: age > maxAge
@@ -963,10 +963,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           }
         })
         .sort((a, b) => a.timestamp - b.timestamp); // Oldest first
-      
+
       // Determine what to remove
       let keysToRemove = [];
-      
+
       if (aggressive) {
         // Aggressive cleanup: Remove 50% of oldest entries + all expired
         const expiredKeys = entriesWithTimestamps.filter(e => e.expired).map(e => e.key);
@@ -980,13 +980,13 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         const oldestKeys = entriesWithTimestamps.slice(0, toRemove).map(e => e.key);
         keysToRemove = [...new Set([...expiredKeys, ...oldestKeys])];
       }
-      
+
       if (keysToRemove.length > 0) {
         await AsyncStorage.multiRemove(keysToRemove);
         const remaining = cacheKeys.length - keysToRemove.length;
         return { removed: keysToRemove.length, remaining };
       }
-      
+
       return { removed: 0, remaining: cacheKeys.length };
     } catch (error) {
       return { removed: 0, remaining: 0 };
@@ -1008,11 +1008,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         if (__DEV__) {
           console.warn('⚠️ Storage full, attempting aggressive cache cleanup...');
         }
-        
+
         // Get all cache keys first to check how many we have
         const allKeys = await AsyncStorage.getAllKeys();
         const cacheKeys = allKeys.filter(key => key.startsWith('image_cache_'));
-        
+
         // If we have very few cache entries but storage is full, clear ALL cache
         // This suggests other data is filling storage, not image cache
         if (cacheKeys.length <= 5) {
@@ -1025,7 +1025,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               console.log(`🧹 Cleared all ${cacheKeys.length} image cache entries`);
             }
           }
-          
+
           // Try saving after clearing all cache
           try {
             await AsyncStorage.setItem(cacheKey, JSON.stringify({
@@ -1036,34 +1036,34 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               console.log('✅ Cache saved after clearing all image cache');
             }
             return true;
-              } catch (clearAllError) {
-                // Storage is consistently full - disable AsyncStorage caching and use memory cache only
-                storageFullRef.current = true;
-                if (__DEV__) {
-                  console.warn('⚠️ Storage STILL full after clearing all image cache - switching to memory-only cache');
-                  console.warn('💡 Consider clearing other AsyncStorage data (tokens, user data, etc.)');
-                }
-                
-                // Store in memory cache as fallback
-                memoryCacheRef.current.set(cacheKey, {
-                  dataUri,
-                  timestamp: Date.now(),
-                });
-                // Limit memory cache size
-                if (memoryCacheRef.current.size > MAX_MEMORY_CACHE_SIZE) {
-                  const firstKey = memoryCacheRef.current.keys().next().value;
-                  memoryCacheRef.current.delete(firstKey);
-                }
-                if (__DEV__) {
-                  console.log('💾 Stored in memory cache (AsyncStorage full):', cacheKey);
-                }
-                return true; // Consider it "saved" in memory cache
-              }
+          } catch (clearAllError) {
+            // Storage is consistently full - disable AsyncStorage caching and use memory cache only
+            storageFullRef.current = true;
+            if (__DEV__) {
+              console.warn('⚠️ Storage STILL full after clearing all image cache - switching to memory-only cache');
+              console.warn('💡 Consider clearing other AsyncStorage data (tokens, user data, etc.)');
+            }
+
+            // Store in memory cache as fallback
+            memoryCacheRef.current.set(cacheKey, {
+              dataUri,
+              timestamp: Date.now(),
+            });
+            // Limit memory cache size
+            if (memoryCacheRef.current.size > MAX_MEMORY_CACHE_SIZE) {
+              const firstKey = memoryCacheRef.current.keys().next().value;
+              memoryCacheRef.current.delete(firstKey);
+            }
+            if (__DEV__) {
+              console.log('💾 Stored in memory cache (AsyncStorage full):', cacheKey);
+            }
+            return true; // Consider it "saved" in memory cache
+          }
         }
-        
+
         // Try normal cleanup first
         let cleanupResult = await cleanupImageCache(false);
-        
+
         // If still full after normal cleanup, try aggressive cleanup
         if (cleanupResult.remaining > 0) {
           try {
@@ -1081,7 +1081,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             }
             // Try aggressive cleanup (removes 50%)
             cleanupResult = await cleanupImageCache(true);
-            
+
             // Try saving again after aggressive cleanup
             try {
               await AsyncStorage.setItem(cacheKey, JSON.stringify({
@@ -1115,7 +1115,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                   if (__DEV__) {
                     console.warn('⚠️ Storage still full after clearing ALL cache - switching to memory-only cache');
                   }
-                  
+
                   // Store in memory cache as fallback
                   memoryCacheRef.current.set(cacheKey, {
                     dataUri,
@@ -1138,7 +1138,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       } else if (__DEV__) {
         console.warn('⚠️ Error saving image cache:', error);
       }
-      
+
       // If storage is known to be full, use memory cache as fallback
       if (storageFullRef.current) {
         memoryCacheRef.current.set(cacheKey, {
@@ -1155,7 +1155,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         }
         return true;
       }
-      
+
       return false; // Failed
     }
   }, [cleanupImageCache]);
@@ -1163,7 +1163,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   // Handle error state with better error messages
   const error = queryError ? (queryError.data?.error || queryError.data?.message || queryError.message || 'Failed to load enquiry') : null;
   const errorStatus = queryError?.status || queryError?.originalStatus;
-  
+
   // Log error details for debugging
   useEffect(() => {
     if (queryError && enquiryId) {
@@ -1190,18 +1190,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     // Check if it's a 500 error (Internal Server Error)
     const isServerError = errorStatus === 500 || error?.toLowerCase().includes('internal server error');
     const isNotFound = errorStatus === 404 || error?.toLowerCase().includes('not found');
-    
+
     return (
       <View style={styles.container}>
         <View style={styles.errorContainer}>
           <Icon name="error-outline" size={48} color={colors.error} />
           <Text style={[styles.errorText, { color: colors.textPrimary, fontSize: fonts.lg, marginTop: 16 }]}>
-            {isServerError 
-              ? 'Server Error' 
-              : isNotFound 
-              ? 'Enquiry Not Found' 
-              : error || 'Failed to load enquiry'}
-        </Text>
+            {isServerError
+              ? 'Server Error'
+              : isNotFound
+                ? 'Enquiry Not Found'
+                : error || 'Failed to load enquiry'}
+          </Text>
           {isServerError && (
             <Text style={[styles.errorSubtext, { color: colors.textSecondary, fontSize: fonts.sm, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 }]}>
               The enquiry might still be saving. Please try again in a moment.
@@ -1223,82 +1223,82 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             variant="primary"
             style={styles.retryButton}
           />
-        <Button
-          title="Go Back"
-          onPress={() => navigation.goBack()}
+          <Button
+            title="Go Back"
+            onPress={() => navigation.goBack()}
             variant="secondary"
-          style={styles.backButton}
-        />
+            style={styles.backButton}
+          />
         </View>
       </View>
     );
   }
 
   const handleApprove = () => {
-    
-    
+
+
     // Get available design versions
     const originalData = enquiry?._originalData || enquiry;
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
-    
+
     console.log('originalData-------gati-->', originalData);
-    
+
     // Determine which design type and version to approve
     // Priority: Latest coral version, or latest cad version if no coral
     let designType = 'coral';
     let versionIndex = coralVersions.length > 0 ? coralVersions.length - 1 : (cadVersions.length > 0 ? cadVersions.length - 1 : null);
-    
+
     if (coralVersions.length === 0 && cadVersions.length > 0) {
       designType = 'cad';
     }
-    
+
     if (versionIndex === null) {
-      
+
       Alert.alert('Error', 'No design versions available to approve');
       return;
     }
-    
-    const version = designType === 'coral' 
+
+    const version = designType === 'coral'
       ? (coralVersions[versionIndex]?.Version || `Version ${versionIndex + 1}`)
       : (cadVersions[versionIndex]?.Version || `Version ${versionIndex + 1}`);
-    
-    
-    
+
+
+
     Alert.alert(
       'Approve Design Version',
       `Are you sure you want to approve ${designType.toUpperCase()} ${version}?`,
       [
-        { 
-          text: 'Cancel', 
+        {
+          text: 'Cancel',
           style: 'cancel',
           onPress: () => {
-            
+
           }
         },
         {
           text: 'Approve',
           onPress: async () => {
-            
-            
+
+
             try {
               const enquiryId = enquiry.id || enquiry._id;
-              
-              
-              
+
+
+
               const result = await approveDesignVersion({
                 enquiryId,
                 designType,
                 version,
               }).unwrap();
-              
-              
-              
+
+
+
               Alert.alert('Success', `${designType.toUpperCase()} ${version} approved successfully`);
               // Refetch enquiry data to get updated approval status
               refetch();
             } catch (error) {
-              
+
               Alert.alert(
                 'Error',
                 error?.data?.error || error?.message || 'Failed to approve design version. Please try again.'
@@ -1315,20 +1315,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const originalData = enquiry?._originalData || enquiry;
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
-    
+
     // Determine which design type and version to reject
     let designType = 'coral';
     let versionIndex = coralVersions.length > 0 ? coralVersions.length - 1 : (cadVersions.length > 0 ? cadVersions.length - 1 : null);
-    
+
     if (coralVersions.length === 0 && cadVersions.length > 0) {
       designType = 'cad';
     }
-    
+
     if (versionIndex === null) {
       Alert.alert('Error', 'No design versions available to reject');
       return;
     }
-    
+
     // Store design type and version for rejection
     setSelectedDesignType(designType);
     setSelectedVersionIndex(versionIndex);
@@ -1351,30 +1351,30 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       const versions = selectedDesignType === 'coral'
         ? (originalData?.Coral || enquiry?.Coral || [])
         : (originalData?.Cad || enquiry?.Cad || []);
-      
+
       if (selectedVersionIndex >= versions.length) {
         Alert.alert('Error', 'Selected version not found');
         return;
       }
-      
+
       const version = versions[selectedVersionIndex]?.Version || `Version ${selectedVersionIndex + 1}`;
       const enquiryId = enquiry.id || enquiry._id;
-      
+
       await rejectDesignVersion({
         enquiryId,
         designType: selectedDesignType,
         version,
         reason: approvalMessage.trim(),
       }).unwrap();
-      
+
       Alert.alert('Success', `${selectedDesignType.toUpperCase()} ${version} rejected successfully`);
-      
+
       // Reset state
       setShowApprovalModal(false);
       setApprovalMessage('');
       setSelectedDesignType(null);
       setSelectedVersionIndex(null);
-      
+
       // Refetch enquiry data to get updated rejection status
       refetch();
     } catch (error) {
@@ -1433,9 +1433,9 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         const isVideo = asset.type?.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp)$/i.test(asset.fileName || '');
         const defaultExtension = isVideo ? 'mp4' : 'jpg';
         const defaultName = asset.fileName || `reference_${Date.now()}_${index}.${defaultExtension}`;
-        
+
         return {
-        uri: asset.uri,
+          uri: asset.uri,
           type: asset.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
           name: defaultName,
         };
@@ -1465,7 +1465,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     if (!cell) return false;
     const value = cell.value;
     const result = value !== null && value !== undefined && String(value).trim() !== '';
-    
+
     // Debug: Log hasDetailValue check for Assigned To
     if (cell.label === 'Assigned To') {
       console.log('[SingleEnquiry] ✅ hasDetailValue check for Assigned To:', {
@@ -1476,7 +1476,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         'result': result,
       });
     }
-    
+
     return result;
   };
 
@@ -1486,7 +1486,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     }
 
     const valueExists = hasDetailValue(cell);
-    
+
     // Debug: Log renderDetailCell for Assigned To
     if (cell.label === 'Assigned To') {
       console.log('[SingleEnquiry] 🎨 renderDetailCell for Assigned To:', {
@@ -1498,7 +1498,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         'value to display': valueExists ? cell.value : (cell.placeholder ?? 'N/A'),
       });
     }
-    
+
     if (!valueExists && !cell.showIfEmpty && !showAllDetails) {
       return <View style={styles.detailCellPlaceholder} />;
     }
@@ -1540,94 +1540,94 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
   };
 
   const renderEnquiryDetails = () => {
-    
+
     // Extract metal details - check ALL possible locations (originalData, enquiry normalized, enquiry raw)
     const metal = originalData?.Metal || enquiry?.Metal || enquiry?.metal || {};
     const metalColor = metal.Color || metal.color || null;
     const metalQuality = metal.Quality || metal.quality || null;
-    
+
     // Extract weights - check ALL possible locations with comprehensive fallback
-    const metalWeight = originalData?.MetalWeight || 
-                       enquiry?.MetalWeight || 
-                       enquiry?.metalWeight || 
-                       originalData?.metalWeight ||
-                       {};
-    const diamondWeight = originalData?.DiamondWeight || 
-                         enquiry?.DiamondWeight || 
-                         enquiry?.diamondWeight || 
-                         originalData?.diamondWeight ||
-                         {};
-    
+    const metalWeight = originalData?.MetalWeight ||
+      enquiry?.MetalWeight ||
+      enquiry?.metalWeight ||
+      originalData?.metalWeight ||
+      {};
+    const diamondWeight = originalData?.DiamondWeight ||
+      enquiry?.DiamondWeight ||
+      enquiry?.diamondWeight ||
+      originalData?.diamondWeight ||
+      {};
+
     // Extract other fields - comprehensive fallback chain
-    const styleNumber = originalData?.StyleNumber || 
-                       enquiry?.StyleNumber || 
-                       enquiry?.styleNumber ||
-                       originalData?.styleNumber ||
-                       null;
+    const styleNumber = originalData?.StyleNumber ||
+      enquiry?.StyleNumber ||
+      enquiry?.styleNumber ||
+      originalData?.styleNumber ||
+      null;
     // Extract Gati Order Number - check ALL possible locations and variations
     console.log('originalData-------gatiOrderNumber-->', originalData);
-    const gatiOrderNumber = originalData?.GatiOrderNumber || 
-                            originalData?.gatiOrderNumber ||
-                            originalData?.Gati_Order_Number ||
-                            originalData?.gati_order_number ||
-                            enquiry?._originalData?.GatiOrderNumber ||
-                            enquiry?._originalData?.gatiOrderNumber ||
-                            enquiry?.GatiOrderNumber || 
-                            enquiry?.gatiOrderNumber ||
-                            enquiry?.Gati_Order_Number ||
-                            enquiry?.gati_order_number ||
-                            null;
-    
-    const stamping = originalData?.Stamping || 
-                     enquiry?.Stamping || 
-                     enquiry?.stamping ||
-                     originalData?.stamping ||
-                     null;
-    const category = originalData?.Category || 
-                     enquiry?.Category || 
-                     enquiry?.category ||
-                     originalData?.category ||
-                     null;
-    const stoneType = originalData?.StoneType || 
-                      enquiry?.StoneType || 
-                      enquiry?.stoneType ||
-                      originalData?.stoneType ||
-                      null;
-    const quantity = originalData?.Quantity || 
-                     enquiry?.Quantity || 
-                     enquiry?.quantity ||
-                     originalData?.quantity ||
-                     null;
-    const budget = originalData?.Budget || 
-                   enquiry?.Budget || 
-                   enquiry?.budget ||
-                   originalData?.budget ||
-                   null;
-    const specialRemarks = originalData?.SpecialRemarks || 
-                           enquiry?.SpecialRemarks || 
-                           enquiry?.specialRemarks ||
-                           originalData?.specialRemarks ||
-                           null;
-    const approvedDate = originalData?.ApprovedDate || 
-                         enquiry?.ApprovedDate || 
-                         enquiry?.approvedDate ||
-                         originalData?.approvedDate ||
-                         null;
-    const shippingDate = originalData?.ShippingDate || 
-                         enquiry?.ShippingDate || 
-                         enquiry?.deadline ||
-                         originalData?.deadline ||
-                         null;
+    const gatiOrderNumber = originalData?.GatiOrderNumber ||
+      originalData?.gatiOrderNumber ||
+      originalData?.Gati_Order_Number ||
+      originalData?.gati_order_number ||
+      enquiry?._originalData?.GatiOrderNumber ||
+      enquiry?._originalData?.gatiOrderNumber ||
+      enquiry?.GatiOrderNumber ||
+      enquiry?.gatiOrderNumber ||
+      enquiry?.Gati_Order_Number ||
+      enquiry?.gati_order_number ||
+      null;
+
+    const stamping = originalData?.Stamping ||
+      enquiry?.Stamping ||
+      enquiry?.stamping ||
+      originalData?.stamping ||
+      null;
+    const category = originalData?.Category ||
+      enquiry?.Category ||
+      enquiry?.category ||
+      originalData?.category ||
+      null;
+    const stoneType = originalData?.StoneType ||
+      enquiry?.StoneType ||
+      enquiry?.stoneType ||
+      originalData?.stoneType ||
+      null;
+    const quantity = originalData?.Quantity ||
+      enquiry?.Quantity ||
+      enquiry?.quantity ||
+      originalData?.quantity ||
+      null;
+    const budget = originalData?.Budget ||
+      enquiry?.Budget ||
+      enquiry?.budget ||
+      originalData?.budget ||
+      null;
+    const specialRemarks = originalData?.SpecialRemarks ||
+      enquiry?.SpecialRemarks ||
+      enquiry?.specialRemarks ||
+      originalData?.specialRemarks ||
+      null;
+    const approvedDate = originalData?.ApprovedDate ||
+      enquiry?.ApprovedDate ||
+      enquiry?.approvedDate ||
+      originalData?.approvedDate ||
+      null;
+    const shippingDate = originalData?.ShippingDate ||
+      enquiry?.ShippingDate ||
+      enquiry?.deadline ||
+      originalData?.deadline ||
+      null;
     // Use assignedToName from hook (extracted at component level with useMemo)
     // If useUserName returns '-' or the userId (fallback), try to get name from usersList directly
     let assignedTo = assignedToName;
-    
+
     // Check if we need to look up the user manually
-    const needsLookup = !assignedTo || 
-                       assignedTo === '-' || 
-                       assignedTo === assignedToId ||
-                       (assignedTo && assignedTo.startsWith('User ') && assignedToId);
-    
+    const needsLookup = !assignedTo ||
+      assignedTo === '-' ||
+      assignedTo === assignedToId ||
+      (assignedTo && assignedTo.startsWith('User ') && assignedToId);
+
     // If user not found in map, try to find in usersList directly
     if (needsLookup && assignedToId && usersList && usersList.length > 0) {
       const assignedToIdStr = String(assignedToId || '').trim();
@@ -1635,11 +1635,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         const userId = String(u.id || u._id || '').trim();
         const userIdNoSpaces = userId.replace(/\s/g, '');
         const assignedToIdNoSpaces = assignedToIdStr.replace(/\s/g, '');
-        return userId === assignedToIdStr || 
-               userIdNoSpaces === assignedToIdNoSpaces ||
-               String(userId).toLowerCase() === assignedToIdStr.toLowerCase();
+        return userId === assignedToIdStr ||
+          userIdNoSpaces === assignedToIdNoSpaces ||
+          String(userId).toLowerCase() === assignedToIdStr.toLowerCase();
       });
-      
+
       if (foundUser) {
         assignedTo = foundUser.name || foundUser.Name || foundUser.email || foundUser.Email || assignedTo;
         console.log('[SingleEnquiry] ✅ Found user in usersList:', {
@@ -1648,7 +1648,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         });
       }
     }
-    
+
     // Final fallback - if still no name found but we have an ID
     if ((!assignedTo || assignedTo === '-' || assignedTo === assignedToId) && assignedToId) {
       // If we have an assignedToId but no name, show a truncated ID instead of just '-'
@@ -1663,7 +1663,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     } else if (!assignedTo || assignedTo === '-') {
       assignedTo = '-';
     }
-    
+
     // Debug: Log final assignedTo value being used for display
     console.log('[SingleEnquiry] 📋 Final AssignedTo for display:', {
       'assignedToId': assignedToId,
@@ -1673,7 +1673,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       'usersList length': usersList?.length || 0,
       'renderEnquiryDetails called': true,
     });
-    
+
     // Format metal weight - only return value if exists, otherwise null (so field won't display)
     let metalWeightText = null;
     if (metalWeight.Exact || metalWeight.exact) {
@@ -1685,7 +1685,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         metalWeightText = `From: ${from}${to ? ` To: ${to}` : ''} gms`;
       }
     }
-    
+
     // Format diamond weight - only return value if exists, otherwise null (so field won't display)
     let diamondWeightText = null;
     if (diamondWeight.Exact || diamondWeight.exact) {
@@ -1703,7 +1703,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     // Check both originalData and enquiry for versions (data might be in either location)
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
-    
+
     // Debug: Log version structure
     if (__DEV__ && (coralVersions.length > 0 || cadVersions.length > 0)) {
       console.log('[SingleEnquiry] Version structure check:', {
@@ -1717,39 +1717,39 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         originalDataCadCode: originalData?.CadCode,
       });
     }
-    
+
     // Helper function to extract code from a version object
     const getCodeFromVersion = (version) => {
       if (!version) return null;
-      
+
       // Check all possible field names for code
-      const code = version.Code || 
-                   version.code || 
-                   version.DesignCode || 
-                   version.designCode ||
-                   version.CoralCode ||
-                   version.coralCode ||
-                   version.CadCode ||
-                   version.cadCode ||
-                   null;
-      
+      const code = version.Code ||
+        version.code ||
+        version.DesignCode ||
+        version.designCode ||
+        version.CoralCode ||
+        version.coralCode ||
+        version.CadCode ||
+        version.cadCode ||
+        null;
+
       // Debug logging in development
       if (__DEV__ && version && !code) {
         console.log('[SingleEnquiry] Version object keys:', Object.keys(version));
         console.log('[SingleEnquiry] Version object:', JSON.stringify(version, null, 2).substring(0, 500));
       }
-      
+
       return code;
     };
-    
+
     // Get code from latest version (most recent)
     const latestCoralVersion = coralVersions.length > 0 ? coralVersions[coralVersions.length - 1] : null;
     const latestCadVersion = cadVersions.length > 0 ? cadVersions[cadVersions.length - 1] : null;
-    
+
     // Also check all versions to find any code (fallback if latest doesn't have one)
     let anyCoralCode = null;
     let anyCadCode = null;
-    
+
     // Check all versions in reverse order (latest first) to find first available code
     for (let i = coralVersions.length - 1; i >= 0; i--) {
       const code = getCodeFromVersion(coralVersions[i]);
@@ -1758,7 +1758,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         break; // Use the latest version that has a code
       }
     }
-    
+
     for (let i = cadVersions.length - 1; i >= 0; i--) {
       const code = getCodeFromVersion(cadVersions[i]);
       if (code) {
@@ -1766,7 +1766,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         break; // Use the latest version that has a code
       }
     }
-    
+
     // Debug logging
     if (__DEV__) {
       console.log('[SingleEnquiry] Code extraction:', {
@@ -1780,27 +1780,27 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         originalDataCoralCode: originalData?.CoralCode,
       });
     }
-    
+
     // Priority: Enquiry-level > Latest version > Any version
-    const coralCode = enquiry?.CoralCode || 
-                     originalData?.CoralCode || 
-                     enquiry?.coralCode || 
-                     originalData?.coralCode || 
-                     enquiry?.coralVersion || 
-                     originalData?.coralVersion || 
-                     getCodeFromVersion(latestCoralVersion) ||
-                     anyCoralCode ||
-                     'N/A';
-    
-    const cadCode = enquiry?.CadCode || 
-                   originalData?.CadCode || 
-                   enquiry?.cadCode || 
-                   originalData?.cadCode || 
-                   enquiry?.cadVersion || 
-                   originalData?.cadVersion || 
-                   getCodeFromVersion(latestCadVersion) ||
-                   anyCadCode ||
-                   'N/A';
+    const coralCode = enquiry?.CoralCode ||
+      originalData?.CoralCode ||
+      enquiry?.coralCode ||
+      originalData?.coralCode ||
+      enquiry?.coralVersion ||
+      originalData?.coralVersion ||
+      getCodeFromVersion(latestCoralVersion) ||
+      anyCoralCode ||
+      'N/A';
+
+    const cadCode = enquiry?.CadCode ||
+      originalData?.CadCode ||
+      enquiry?.cadCode ||
+      originalData?.cadCode ||
+      enquiry?.cadVersion ||
+      originalData?.cadVersion ||
+      getCodeFromVersion(latestCadVersion) ||
+      anyCadCode ||
+      'N/A';
 
     return (
       <>
@@ -1812,7 +1812,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             </Text>
             <View style={styles.statusContainer}>
               <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status) }]}>
-                <Text 
+                <Text
                   style={{ color: colors.textWhite, fontSize: fonts.sm, textAlign: 'center' }}
                   numberOfLines={2}
                   adjustsFontSizeToFit={false}
@@ -1821,7 +1821,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 </Text>
               </View>
               <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(priority) }]}>
-                <Text 
+                <Text
                   style={{ color: colors.textWhite, fontSize: fonts.sm }}
                   numberOfLines={1}
                   adjustsFontSizeToFit={true}
@@ -1971,7 +1971,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     if (image && typeof image === 'object' && (image._isVideo === true || image.isVideo === true)) {
       return true;
     }
-    
+
     // Check file extension from key
     if (imageKey && typeof imageKey === 'string') {
       const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
@@ -1979,7 +1979,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         return true;
       }
     }
-    
+
     // Check file extension from URI
     if (imageUri && typeof imageUri === 'string') {
       const videoExtensions = /\.(mp4|mov|avi|mkv|webm|wmv|flv|3gp|m4v)$/i;
@@ -1987,20 +1987,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         return true;
       }
     }
-    
+
     // Check mime type from image object
     if (image && typeof image === 'object') {
       const contentType = image.ContentType || image.contentType || image.Type || image.type || image.MimeType || image.mimeType;
       if (contentType && typeof contentType === 'string' && contentType.startsWith('video/')) {
         return true;
       }
-      
+
       // Check if it's from ReferenceVideos field (backend might mark it)
       if (image.FileType === 'video' || image.fileType === 'video' || image.MediaType === 'video' || image.mediaType === 'video') {
         return true;
       }
     }
-    
+
     return false;
   };
 
@@ -2011,20 +2011,20 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const [videoError, setVideoError] = useState(false);
     const videoRef = useRef(null);
     const mountedRef = useRef(true);
-    
+
     useEffect(() => {
       mountedRef.current = true;
       return () => {
         mountedRef.current = false;
       };
     }, []);
-    
+
     // Fetch video URL with authentication
     const fetchVideoUrl = useCallback(async () => {
       if (!mountedRef.current) return;
-      
+
       let videoUrlToUse = null;
-      
+
       // If we have a direct URI, use it
       if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
         videoUrlToUse = imageUri;
@@ -2033,14 +2033,14 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         try {
           setVideoLoading(true);
           setVideoError(false);
-          
+
           const token = await AsyncStorage.getItem('token');
           if (!token) {
             setVideoError(true);
             setVideoLoading(false);
             return;
           }
-          
+
           const encodedKey = encodeURIComponent(imageKey);
           const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${encodedKey}`, {
             method: 'GET',
@@ -2048,10 +2048,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               'Authorization': `Bearer ${token}`,
             },
           });
-          
+
           if (response.ok) {
             const contentType = response.headers.get('content-type') || '';
-            
+
             // Check if response is JSON (presigned URL)
             if (contentType.includes('application/json')) {
               const jsonData = await response.json();
@@ -2075,21 +2075,21 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         try {
           setVideoLoading(true);
           setVideoError(false);
-          
+
           const token = await AsyncStorage.getItem('token');
           if (!token) {
             setVideoError(true);
             setVideoLoading(false);
             return;
           }
-          
+
           const response = await fetch(`${API_BASE_URL}/api/enquiries/files/${imageId}`, {
             method: 'GET',
             headers: {
               'Authorization': `Bearer ${token}`,
             },
           });
-          
+
           if (response.ok) {
             const contentType = response.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
@@ -2107,7 +2107,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           return;
         }
       }
-      
+
       if (videoUrlToUse && mountedRef.current) {
         setVideoUrl(videoUrlToUse);
         setVideoLoading(false);
@@ -2117,11 +2117,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         setVideoLoading(false);
       }
     }, [imageKey, imageId, imageUri]);
-    
+
     useEffect(() => {
       fetchVideoUrl();
     }, [fetchVideoUrl]);
-    
+
     if (videoError) {
       return (
         <View style={styles.videoContainer}>
@@ -2132,7 +2132,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </View>
       );
     }
-    
+
     if (videoLoading || !videoUrl) {
       return (
         <View style={styles.videoContainer}>
@@ -2143,7 +2143,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </View>
       );
     }
-    
+
     return (
       <TouchableOpacity
         style={styles.videoContainer}
@@ -2184,11 +2184,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     const [imageDataUri, setImageDataUri] = useState(initialDataUri || null);
     const [imageLoading, setImageLoading] = useState(false);
     const [imageError, setImageError] = useState(false);
-    
+
     const lastImageKeyRef = useRef(null);
     const isFetchingRef = useRef(false);
     const mountedRef = useRef(true);
-    
+
     // Reset mounted flag on mount
     useEffect(() => {
       mountedRef.current = true;
@@ -2196,7 +2196,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         mountedRef.current = false;
       };
     }, []);
-    
+
     useEffect(() => {
       if (initialDataUri && initialDataUri !== imageDataUri) {
         setImageDataUri(initialDataUri);
@@ -2204,29 +2204,29 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         setImageError(false);
       }
     }, [initialDataUri, imageDataUri, index]);
-    
+
     // Fetch image with authentication and caching
     const fetchImageWithAuth = useCallback(async (imageUrl, cacheKey) => {
       if (!imageUrl) {
         return;
       }
-      
+
       // Don't fetch if we already have the data URI
       if (imageDataUri) {
         return;
       }
-      
+
       // Don't fetch if already fetching (prevent duplicate requests)
       if (isFetchingRef.current) {
         return;
       }
-      
+
       isFetchingRef.current = true;
-      
+
       try {
         setImageLoading(true);
         setImageError(false);
-        
+
         const token = await AsyncStorage.getItem('token');
         if (!token) {
           setImageError(true);
@@ -2234,31 +2234,31 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           return;
         }
 
-        
+
         const response = await fetch(imageUrl, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,
           },
         });
-        
+
         if (response.ok) {
           const contentType = response.headers.get('content-type') || '';
-          
+
           // Check if response is JSON (API returns a URL object)
           if (contentType.includes('application/json')) {
             const jsonData = await response.json();
-            
+
             // Extract the actual image URL from JSON
             const actualImageUrl = jsonData.url || jsonData.imageUrl || jsonData.src || jsonData.location;
-            
+
             if (!actualImageUrl) {
               setImageError(true);
               setImageLoading(false);
               return;
             }
-            
-            
+
+
             // Fetch the actual image from the URL (likely S3)
             const imageResponse = await fetch(actualImageUrl, {
               method: 'GET',
@@ -2266,25 +2266,25 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 'Authorization': `Bearer ${token}`,
               },
             });
-            
+
             if (!imageResponse.ok) {
               setImageError(true);
               setImageLoading(false);
               return;
             }
-            
+
             const arrayBuffer = await imageResponse.arrayBuffer();
-            
+
             // Convert arrayBuffer to base64
             const bytes = new Uint8Array(arrayBuffer);
             let binary = '';
             const chunkSize = 8192;
-            
+
             for (let i = 0; i < bytes.length; i += chunkSize) {
               const chunk = bytes.subarray(i, i + chunkSize);
               binary += String.fromCharCode.apply(null, chunk);
             }
-            
+
             let base64;
             try {
               base64 = btoa(binary);
@@ -2295,10 +2295,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 throw new Error('Unable to convert to base64');
               }
             }
-            
+
             const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
-            
+
             // Save to cache (fire-and-forget, don't block on storage errors)
             if (cacheKey) {
               memoryCacheRef.current.set(cacheKey, {
@@ -2313,23 +2313,23 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 // Silently fail - cache is optional
               });
             }
-            
+
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
           } else {
             // Direct image response
-            
+
             const arrayBuffer = await response.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
             let binary = '';
             const chunkSize = 8192;
-            
+
             for (let i = 0; i < bytes.length; i += chunkSize) {
               const chunk = bytes.subarray(i, i + chunkSize);
               binary += String.fromCharCode.apply(null, chunk);
             }
-            
+
             let base64;
             try {
               base64 = btoa(binary);
@@ -2340,10 +2340,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 throw new Error('Unable to convert to base64');
               }
             }
-            
+
             const imageContentType = contentType || 'image/jpeg';
             const dataUri = `data:${imageContentType};base64,${base64}`;
-            
+
             // Save to cache (fire-and-forget, don't block on storage errors)
             if (cacheKey) {
               memoryCacheRef.current.set(cacheKey, {
@@ -2358,7 +2358,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                 // Silently fail - cache is optional
               });
             }
-            
+
             setImageDataUri(dataUri);
             setImageLoading(false);
             setImageError(false);
@@ -2377,11 +2377,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         isFetchingRef.current = false;
       }
     }, [imageDataUri, getCachedImage, saveImageToCache]);
-    
+
     useEffect(() => {
       // Generate unique key for this image
       const currentImageKey = imageKey || imageId || imageUri || `image_${index}`;
-      
+
       // If a preloaded URI is provided, use it immediately and skip further work
       if (initialDataUri) {
         lastImageKeyRef.current = currentImageKey;
@@ -2390,11 +2390,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         setImageError(false);
         return;
       }
-      
+
       // Generate image URL and cache key first
       let imageUrl = null;
       const cacheKey = getImageCacheKey(imageKey, imageId, imageUri);
-      
+
       if (imageUri && (imageUri.startsWith('http') || imageUri.startsWith('https'))) {
         imageUrl = imageUri;
       } else if (imageKey) {
@@ -2403,17 +2403,17 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       } else if (imageId) {
         imageUrl = `${API_BASE_URL}/api/enquiries/files/${imageId}`;
       }
-      
+
       if (!imageUrl) {
         setImageError(true);
         return;
       }
-      
+
       // Check if this is the same image we already loaded
       if (lastImageKeyRef.current === currentImageKey && imageDataUri) {
         return;
       }
-      
+
       // Check memory cache FIRST (synchronously, before any async operations)
       if (cacheKey && memoryCacheRef.current.has(cacheKey)) {
         const cached = memoryCacheRef.current.get(cacheKey);
@@ -2425,15 +2425,15 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
           setImageLoading(false);
           setImageError(false);
           return; // Exit early - found in memory cache
-      } else {
+        } else {
           memoryCacheRef.current.delete(cacheKey);
         }
       }
-      
+
       // Check cache (AsyncStorage) and fetch if needed
       const loadImage = async () => {
         if (!mountedRef.current) return;
-        
+
         // Try AsyncStorage cache (if not in memory-only mode)
         if (cacheKey && !storageFullRef.current) {
           try {
@@ -2458,29 +2458,29 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
             }
           }
         }
-        
+
         // Cache miss - reset state and fetch
         if (!mountedRef.current) {
           return;
         }
-        
+
         lastImageKeyRef.current = currentImageKey;
         // Don't reset imageDataUri immediately - keep previous image visible until new one loads
         // This prevents flicker when navigating between images
         setImageError(false);
         isFetchingRef.current = false;
         setImageLoading(true);
-        
+
         fetchImageWithAuth(imageUrl, cacheKey);
       };
-      
+
       loadImage();
     }, [imageKey, imageId, imageUri, index, onPress, initialDataUri, getImageCacheKey, getCachedImage, fetchImageWithAuth]);
-    
+
     // Use modal styles if onPress is null (modal context)
     const containerStyle = onPress === null ? styles.modalImageWrapper : styles.imageContainer;
     const placeholderStyle = onPress === null ? styles.modalImagePlaceholder : styles.imagePlaceholder;
-    
+
     if (imageError) {
       return (
         <View style={containerStyle}>
@@ -2490,7 +2490,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </View>
       );
     }
-    
+
     // Show loading state only if we don't have imageDataUri yet
     if (!imageDataUri) {
       return (
@@ -2511,7 +2511,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </View>
       );
     }
-    
+
     // If onPress is null, render without TouchableOpacity (for modal - zoom handled by parent ScrollView)
     if (onPress === null) {
       return (
@@ -2532,7 +2532,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         </View>
       );
     }
-    
+
     return (
       <TouchableOpacity
         style={styles.imageContainer}
@@ -2571,7 +2571,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     // Safety check for images array - prioritize enquiry.images since it's the normalized data
     // Check multiple possible locations for images, but prioritize arrays with actual content
     let images = [];
-    
+
     // Check enquiry.images first (normalized data from API)
     if (enquiry?.images && Array.isArray(enquiry.images) && enquiry.images.length > 0) {
       images = enquiry.images;
@@ -2584,7 +2584,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     } else if (originalData?.Images && Array.isArray(originalData.Images) && originalData.Images.length > 0) {
       images = originalData.Images;
     }
-    
+
     // Also check for ReferenceVideos field (videos might be stored separately)
     let videos = [];
     if (enquiry?.ReferenceVideos && Array.isArray(enquiry.ReferenceVideos) && enquiry.ReferenceVideos.length > 0) {
@@ -2596,11 +2596,11 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     } else if (originalData?.Videos && Array.isArray(originalData.Videos) && originalData.Videos.length > 0) {
       videos = originalData.Videos;
     }
-    
+
     // Also get videos from CAD/Coral versions
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
-    
+
     // Extract videos from all Coral versions
     coralVersions.forEach((version, index) => {
       if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
@@ -2609,7 +2609,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         videos = [...videos, ...version.videos];
       }
     });
-    
+
     // Extract videos from all CAD versions
     cadVersions.forEach((version, index) => {
       if (version?.Videos && Array.isArray(version.Videos) && version.Videos.length > 0) {
@@ -2618,7 +2618,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         videos = [...videos, ...version.videos];
       }
     });
-    
+
     // Merge images and videos into a single array for display
     // Mark videos explicitly so they're rendered correctly
     if (videos.length > 0) {
@@ -2628,7 +2628,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       }));
       images = [...(images || []), ...videosWithFlag];
     }
-    
+
     if (!Array.isArray(images) || images.length === 0) {
       return (
         <Card style={styles.imagesCard}>
@@ -2649,7 +2649,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
       let imageKey = null;
       let imageId = null;
       let imageUri = null;
-      
+
       if (typeof image === 'object' && image !== null) {
         imageKey = image.Key || image.key || image.KeyName || image.keyName || '';
         imageId = image.Id || image.id || image._id || image.FileId || image.fileId || '';
@@ -2660,7 +2660,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         } else {
           imageKey = image;
         }
-    }
+      }
 
       const cacheKey = getImageCacheKey(imageKey, imageId, imageUri);
       let cachedUri = null;
@@ -2699,10 +2699,10 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     if (images.length === 1) {
       const meta = buildImageMeta(images[0]);
 
-    return (
-      <Card style={styles.imagesCard}>
-        <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
-          Reference Images/Videos
+      return (
+        <Card style={styles.imagesCard}>
+          <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
+            Reference Images/Videos
           </Text>
           {meta.isVideo ? (
             <VideoWithFallback
@@ -2714,15 +2714,15 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
               onPress={(uri) => handleImagePress(uri, 0, [meta])}
             />
           ) : (
-          <ImageWithFallback
-            image={meta.image}
-            imageKey={meta.imageKey}
-            imageId={meta.imageId}
-            imageUri={meta.imageUri}
-            index={0}
-            initialDataUri={meta.cachedUri}
-            onPress={(uri) => handleImagePress(uri, 0, [meta])}
-          />
+            <ImageWithFallback
+              image={meta.image}
+              imageKey={meta.imageKey}
+              imageId={meta.imageId}
+              imageUri={meta.imageUri}
+              index={0}
+              initialDataUri={meta.cachedUri}
+              onPress={(uri) => handleImagePress(uri, 0, [meta])}
+            />
           )}
         </Card>
       );
@@ -2754,18 +2754,18 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
                     }}
                   />
                 ) : (
-              <ImageWithFallback
-                image={meta.image}
-                imageKey={meta.imageKey}
-                imageId={meta.imageId}
-                imageUri={meta.imageUri}
-                index={index}
-                initialDataUri={meta.cachedUri}
-                onPress={(uri) => {
+                  <ImageWithFallback
+                    image={meta.image}
+                    imageKey={meta.imageKey}
+                    imageId={meta.imageId}
+                    imageUri={meta.imageUri}
+                    index={index}
+                    initialDataUri={meta.cachedUri}
+                    onPress={(uri) => {
                       // Pass all media data to modal for slider
-                  handleImagePress(uri, index, imageDataForModal);
-                }}
-              />
+                      handleImagePress(uri, index, imageDataForModal);
+                    }}
+                  />
                 )}
               </React.Fragment>
             );
@@ -2779,15 +2779,15 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
     // Get Coral and CAD codes from original data
     const coralCode = originalData?.CoralCode || enquiry?.CoralCode || enquiry?.coralCode || enquiry?.coralVersion;
     const cadCode = originalData?.CadCode || enquiry?.CadCode || enquiry?.cadCode || enquiry?.cadVersion;
-    
+
     // Get all versions
     const coralVersions = originalData?.Coral || enquiry?.Coral || [];
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
-    
+
     // Check if Coral/CAD data exists
     const hasCoral = coralCode || coralVersions.length > 0;
     const hasCAD = cadCode || cadVersions.length > 0;
-console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
+    console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
     return (
       <Card style={styles.versionsCard}>
         <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
@@ -2804,14 +2804,14 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
           {hasCoral ? (
             <View>
               {coralVersions.map((version, index) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   key={index}
                   style={[styles.versionFile, { marginBottom: index < coralVersions.length - 1 ? 8 : 0 }]}
                   onPress={() => handleVersionSelect(index, 'coral')}
                 >
                   <Icon name="description" size={16} color={colors.primary} />
                   <Text style={[styles.fileName, { color: colors.success, fontSize: 13 }]}>
-                   Coral - {version.Version || `Version ${index + 1}`} - {version.CoralCode} {version.IsApprovedVersion==true ? '- Approved' : ''} 
+                    Coral - {version.Version || `Version ${index + 1}`} - {version.CoralCode} {version.IsApprovedVersion == true ? '- Approved' : ''}
                   </Text>
                   <Icon name="visibility" size={16} color={colors.primary} />
                 </TouchableOpacity>
@@ -2834,14 +2834,14 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
           {hasCAD ? (
             <View>
               {cadVersions.map((version, index) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   key={index}
                   style={[styles.versionFile, { marginBottom: index < cadVersions.length - 1 ? 8 : 0 }]}
                   onPress={() => handleVersionSelect(index, 'cad')}
                 >
                   <Icon name="description" size={16} color={colors.primary} />
                   <Text style={[styles.fileName, { color: colors.success, fontSize: 13 }]}>
-                   CAD - {version.Version || `Version ${index + 1}`} - {version.CadCode} {version.IsApprovedVersion==true ? '- Approved' : ''} 
+                    CAD - {version.Version || `Version ${index + 1}`} - {version.CadCode} {version.IsApprovedVersion == true ? '- Approved' : ''}
                   </Text>
                   <Icon name="visibility" size={16} color={colors.primary} />
                 </TouchableOpacity>
@@ -2856,7 +2856,7 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
       </Card>
     );
   };
-  
+
   const handleVersionSelect = (versionIndex, designType) => {
     navigation.navigate('DesignViewer', {
       designType: designType,
@@ -2872,21 +2872,21 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
         // Refetch to get latest data
         const result = await refetch();
         const fullEnquiry = result?.data || enquiryData || enquiry;
-        
-        navigation.navigate('EditEnquiryStep1', { 
+
+        navigation.navigate('EditEnquiryStep1', {
           enquiry: fullEnquiry,
           enquiryId: enquiryId, // Pass ID as fallback
         });
       } else {
         // Fallback if refetch fails
-        navigation.navigate('EditEnquiryStep1', { 
+        navigation.navigate('EditEnquiryStep1', {
           enquiry: enquiry,
           enquiryId: enquiryId,
         });
       }
     } catch (error) {
       // Navigate with what we have
-      navigation.navigate('EditEnquiryStep1', { 
+      navigation.navigate('EditEnquiryStep1', {
         enquiry: enquiry,
         enquiryId: enquiryId,
       });
@@ -2909,13 +2909,16 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
           onPress: async () => {
             try {
               // Navigate back immediately for better UX (optimistic update handles cache removal)
-              navigation.navigate('MainTabs', { screen: 'Enquiries' });
-              
+              navigation.navigate('MainTabs', {
+                screen: 'Enquiries',
+                params: { refreshTimestamp: Date.now() }
+              });
+
               // Delete enquiry (optimistic update removes it from cache immediately)
               await deleteEnquiry(enquiryId || enquiry?.id).unwrap();
-              
+
               // Success - no need for alert since user already navigated
-              
+
             } catch (error) {
               // Show error alert
               Alert.alert(
@@ -2933,8 +2936,8 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
     <Card style={styles.actionsCard}>
       <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
         Actions
-        </Text>
-      
+      </Text>
+
       <Button
         title="Edit Enquiry"
         onPress={handleEditEnquiry}
@@ -2973,8 +2976,8 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
     <Card style={styles.actionsCard}>
       <Text style={[styles.sectionTitle, { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }]}>
         Designer Actions
-        </Text>
-      
+      </Text>
+
       <View style={styles.adminActionsRow}>
         <TouchableOpacity
           onPress={role === 'coral' ? handleUploadCoral : handleUploadCAD}
@@ -2995,12 +2998,12 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
   const handleViewCAD = () => {
     // Get all CAD versions
     const cadVersions = originalData?.Cad || enquiry?.Cad || [];
-    
+
     if (cadVersions.length === 0) {
       Alert.alert('No Versions', 'No CAD versions available');
       return;
     }
-    
+
     // If only one version, go directly
     if (cadVersions.length === 1) {
       navigation.navigate('DesignViewer', {
@@ -3010,16 +3013,16 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
       });
       return;
     }
-    
+
     // Show version selector for multiple versions
     setSelectedDesignType('cad');
     setShowVersionSelector(true);
   };
 
   const renderAdminActions = () => {
-    const hasCAD = originalData?.CadCode || enquiry?.CadCode || enquiry?.cadCode || 
-                   (originalData?.Cad && Array.isArray(originalData.Cad) && originalData.Cad.length > 0) ||
-                   (enquiry?.Cad && Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0);
+    const hasCAD = originalData?.CadCode || enquiry?.CadCode || enquiry?.cadCode ||
+      (originalData?.Cad && Array.isArray(originalData.Cad) && originalData.Cad.length > 0) ||
+      (enquiry?.Cad && Array.isArray(enquiry.Cad) && enquiry.Cad.length > 0);
 
     return (
       <Card style={[styles.actionsCard, styles.adminActionsCard]}>
@@ -3049,15 +3052,15 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
         </View>
 
         {/* Upload Buttons for Admin */}
-          <View style={styles.adminActionsRow}>
-            <TouchableOpacity
-              style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
-              activeOpacity={0.85}
+        <View style={styles.adminActionsRow}>
+          <TouchableOpacity
+            style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+            activeOpacity={0.85}
             onPress={handleUploadCoral}
-            >
+          >
             <Icon name="cloud-upload" size={18} color={colors.textWhite} />
             <Text style={styles.adminActionText}>Upload Coral</Text>
-            </TouchableOpacity>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
@@ -3106,7 +3109,7 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
     const version = selectedVersionIndex !== null && selectedVersionIndex < versions.length
       ? (versions[selectedVersionIndex]?.Version || `Version ${selectedVersionIndex + 1}`)
       : 'this version';
-    
+
     return (
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
@@ -3119,31 +3122,31 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
           <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 8 }}>
             Please provide a reason for rejection:
           </Text>
-        
-        <Input
-          placeholder="Enter rejection reason..."
-          value={approvalMessage}
-          onChangeText={setApprovalMessage}
-          multiline
-          numberOfLines={3}
-          style={styles.modalInput}
-        />
 
-        <View style={styles.modalButtons}>
-          <Button
-            title="Cancel"
-            variant="outline"
-            onPress={() => setShowApprovalModal(false)}
-            style={styles.modalButton}
+          <Input
+            placeholder="Enter rejection reason..."
+            value={approvalMessage}
+            onChangeText={setApprovalMessage}
+            multiline
+            numberOfLines={3}
+            style={styles.modalInput}
           />
-          <Button
-            title="Reject"
-            onPress={confirmReject}
-            style={[styles.modalButton, styles.rejectButton]}
-          />
+
+          <View style={styles.modalButtons}>
+            <Button
+              title="Cancel"
+              variant="outline"
+              onPress={() => setShowApprovalModal(false)}
+              style={styles.modalButton}
+            />
+            <Button
+              title="Reject"
+              onPress={confirmReject}
+              style={[styles.modalButton, styles.rejectButton]}
+            />
+          </View>
         </View>
       </View>
-    </View>
     );
   };
 
@@ -3171,17 +3174,17 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
         >
           <View style={styles.fullscreenImageBackdrop}>
             {/* Close button - positioned with high z-index */}
-            <TouchableOpacity 
-              style={styles.fullscreenImageCloseButton} 
+            <TouchableOpacity
+              style={styles.fullscreenImageCloseButton}
               onPress={closeImageModal}
               activeOpacity={0.7}
             >
               <Icon name="close" size={24} color={colors.textWhite} />
             </TouchableOpacity>
-            
+
             {/* Share button - positioned with high z-index */}
-            <TouchableOpacity 
-              style={styles.fullscreenImageShareButton} 
+            <TouchableOpacity
+              style={styles.fullscreenImageShareButton}
               onPress={handleShareToWhatsApp}
               activeOpacity={0.7}
               disabled={isSharing}
@@ -3192,7 +3195,7 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
                 <Icon name="share" size={24} color={colors.textWhite} />
               )}
             </TouchableOpacity>
-            
+
             {modalImages.length > 1 ? (
               <>
                 {/* Image Counter */}
@@ -3201,7 +3204,7 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
                     {modalCurrentIndex + 1} / {modalImages.length}
                   </Text>
                 </View>
-                
+
                 {/* Slider for multiple images/videos with zoom */}
                 <FlatList
                   ref={modalFlatListRef}
@@ -3209,9 +3212,9 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
                   renderItem={({ item, index }) => {
                     // For videos, we need to fetch the URL if not available
                     const videoUrl = item.isVideo ? (item.imageUri || item.cachedUri || selectedImageUri) : null;
-                    
+
                     return (
-                    <View style={styles.modalImageContainer}>
+                      <View style={styles.modalImageContainer}>
                         {item.isVideo ? (
                           videoUrl ? (
                             <Video
@@ -3228,29 +3231,29 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
                             </View>
                           )
                         ) : (
-                      <ImageZoom
-                        cropWidth={screenWidth}
-                        cropHeight={screenHeight}
-                        imageWidth={screenWidth}
-                        imageHeight={screenHeight}
-                        enableCenterFocus
-                        useNativeDriver
-                        enableSwipeDown={false}
-                        pinchToZoom
-                        panToMove={isModalZoomed}
-                        onMove={handleZoomMove}
-                      >
-                      <ImageWithFallback
-                        image={item.image}
-                        imageKey={item.imageKey}
-                        imageId={item.imageId}
-                        imageUri={item.imageUri}
-                        index={index}
-                          initialDataUri={item.cachedUri}
-                        onPress={null} // No click handler in modal
-                      />
-                      </ImageZoom>
-                  )}
+                          <ImageZoom
+                            cropWidth={screenWidth}
+                            cropHeight={screenHeight}
+                            imageWidth={screenWidth}
+                            imageHeight={screenHeight}
+                            enableCenterFocus
+                            useNativeDriver
+                            enableSwipeDown={false}
+                            pinchToZoom
+                            panToMove={isModalZoomed}
+                            onMove={handleZoomMove}
+                          >
+                            <ImageWithFallback
+                              image={item.image}
+                              imageKey={item.imageKey}
+                              imageId={item.imageId}
+                              imageUri={item.imageUri}
+                              index={index}
+                              initialDataUri={item.cachedUri}
+                              onPress={null} // No click handler in modal
+                            />
+                          </ImageZoom>
+                        )}
                       </View>
                     );
                   }}
@@ -3295,7 +3298,7 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
                     </TouchableOpacity>
                   </>
                 )}
-                
+
                 {/* Pagination Dots */}
                 <View style={styles.modalPaginationContainer}>
                   {modalImages.map((_, index) => (
@@ -3321,26 +3324,26 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
                     paused={false}
                   />
                 ) : (
-                <ImageZoom
-                  cropWidth={screenWidth}
-                  cropHeight={screenHeight}
-                  imageWidth={screenWidth}
-                  imageHeight={screenHeight}
-                  enableCenterFocus
-                  useNativeDriver
-                  enableSwipeDown={false}
-                  pinchToZoom
-                  panToMove={isModalZoomed}
-                  onMove={handleZoomMove}
-                >
-            <OptimizedImage
-              source={{ uri: selectedImageUri }}
-              style={styles.fullscreenImage}
-              resizeMode="contain"
-              showLoader={false}
-              cacheEnabled={false}
-            />
-                </ImageZoom>
+                  <ImageZoom
+                    cropWidth={screenWidth}
+                    cropHeight={screenHeight}
+                    imageWidth={screenWidth}
+                    imageHeight={screenHeight}
+                    enableCenterFocus
+                    useNativeDriver
+                    enableSwipeDown={false}
+                    pinchToZoom
+                    panToMove={isModalZoomed}
+                    onMove={handleZoomMove}
+                  >
+                    <OptimizedImage
+                      source={{ uri: selectedImageUri }}
+                      style={styles.fullscreenImage}
+                      resizeMode="contain"
+                      showLoader={false}
+                      cacheEnabled={false}
+                    />
+                  </ImageZoom>
                 )}
               </View>
             )}
@@ -3349,7 +3352,7 @@ console.log('🔍 [SingleEnquiryScreen] coralVersions:', coralVersions);
       )}
 
       {showApprovalModal && renderApprovalModal()}
-      
+
       <EnquiryHistoryModal
         visible={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}

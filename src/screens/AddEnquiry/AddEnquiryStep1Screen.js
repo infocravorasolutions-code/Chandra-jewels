@@ -401,7 +401,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         CoralCode: null,
         CadCode: null,
         Category: formData.category || 'Ring',
-        Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+        Budget: formData.budget && formData.budget.trim() ? formData.budget.trim() : null,
         SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
         ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
         // Do NOT include ReferenceImages here - they will be uploaded in Step 2
@@ -621,7 +621,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
               placeholder="Enter budget amount"
               value={formData.budget}
               onChangeText={(value) => handleInputChange('budget', value)}
-              keyboardType="decimal-pad"
             />
           </View>
         </View>

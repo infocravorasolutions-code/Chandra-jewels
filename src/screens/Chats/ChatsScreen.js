@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useGetChatsQuery, useGetEnquiriesQuery, useGetChatMessagesQuery, api } from '../../store/api';
 import { useSelector, useDispatch } from 'react-redux';
@@ -187,8 +186,7 @@ const ChatsScreen = ({ navigation }) => {
     { page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType1 },
     {
       skip: !user,
-      refetchOnFocus: true, // Refetch when screen comes into focus
-      pollingInterval: 5000, // Poll every 5 seconds as safety net (WebSocket handles instant updates)
+      refetchOnFocus: false, // Only refetch on mount and manual refresh; use cache otherwise
     }
   );
 
@@ -202,8 +200,7 @@ const ChatsScreen = ({ navigation }) => {
     { page: 1, limit: PAGE_SIZE, search: searchQuery, type: chatType2 },
     {
       skip: !user || !isAdmin || !chatType2,
-      refetchOnFocus: true, // Refetch when screen comes into focus
-      pollingInterval: 5000, // Poll every 5 seconds as safety net (WebSocket handles instant updates)
+      refetchOnFocus: false, // Only refetch on mount and manual refresh; use cache otherwise
     }
   );
 
@@ -843,46 +840,8 @@ const ChatsScreen = ({ navigation }) => {
     }
   }, [refetchChats1, refetchChats2, isAdmin, chatType2, chatType1]);
 
-  // Refetch chats when screen comes into focus (e.g., when returning from ChatDetailScreen)
-  // This ensures unread counts are updated immediately after viewing messages
-  useFocusEffect(
-    useCallback(() => {
-      if (!user) return;
-      
-      let timer1, timer2;
-      
-      // Delay to allow backend to process mark-as-read and update unread counts
-      // The backend needs time to:
-      // 1. Receive mark-as-read WebSocket event
-      // 2. Update database (mark messages as read)
-      // 3. Recalculate unread count for the chat
-      // 4. Return updated count in API response
-      timer1 = setTimeout(() => {
-        if (__DEV__) {
-          console.log('🔄 [ChatsScreen] Screen focused - invalidating cache and refetching chats');
-        }
-        // Invalidate Chat cache to force fresh fetch (bypasses RTK Query cache)
-        dispatch(api.util.invalidateTags(['Chat']));
-        // Then refetch with a delay to ensure cache invalidation is processed
-        timer2 = setTimeout(() => {
-          refetchChats().then(() => {
-            if (__DEV__) {
-              console.log('✅ [ChatsScreen] Chats refetched after focus');
-            }
-          }).catch((error) => {
-            if (__DEV__) {
-              console.error('❌ [ChatsScreen] Error refetching chats:', error);
-            }
-          });
-        }, 300);
-      }, 1200); // 1.2 second delay to allow backend to fully process mark-as-read
-      
-      return () => {
-        if (timer1) clearTimeout(timer1);
-        if (timer2) clearTimeout(timer2);
-      };
-    }, [refetchChats, user, dispatch])
-  );
+  // Chats are refetched only on mount and on manual pull-to-refresh; otherwise cached data is used.
+  // Real-time unread updates still apply via WebSocket (see listener below).
 
   // Fetch enquiries to create chats from them if chats API doesn't exist
   const { data: enquiriesResponse, isLoading: enquiriesLoading } = useGetEnquiriesQuery(user?.role, {

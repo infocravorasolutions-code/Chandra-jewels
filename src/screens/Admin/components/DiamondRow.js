@@ -3,8 +3,45 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { colors } from '../../../constants/colors';
 import { fonts } from '../../../constants/fonts';
+import useDeviceLayout from '../../../hooks/useDeviceLayout';
 
 const DiamondRow = React.memo(({ diamond, index, onPress, onDelete }) => {
+  const { isTablet } = useDeviceLayout();
+
+  if (isTablet) {
+    return (
+      <TouchableOpacity
+        style={[styles.tabletRow, index % 2 === 0 ? styles.evenRow : styles.oddRow]}
+        onPress={() => onPress(index, diamond)}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.tabletCell, { width: '15%' }]}>
+          <Text style={styles.tabletText}>{diamond.Shape || '-'}</Text>
+        </View>
+        <View style={[styles.tabletCell, { width: '15%', alignItems: 'flex-end' }]}>
+          <Text style={styles.tabletText}>{diamond.MmSize ?? '-'}</Text>
+        </View>
+        <View style={[styles.tabletCell, { width: '20%', alignItems: 'flex-end' }]}>
+          <Text style={styles.tabletText}>{diamond.SieveSize || '-'}</Text>
+        </View>
+        <View style={[styles.tabletCell, { width: '15%', alignItems: 'flex-end' }]}>
+          <Text style={styles.tabletText}>{diamond.Carat ?? '-'}</Text>
+        </View>
+        <View style={[styles.tabletCell, { width: '15%', alignItems: 'flex-end' }]}>
+          <Text style={styles.tabletText}>{diamond.Price ?? '-'}</Text>
+        </View>
+        <View style={[styles.tabletCell, { width: '20%', flexDirection: 'row', justifyContent: 'center', gap: 12 }]}>
+          <TouchableOpacity onPress={() => onPress(index, diamond)} style={styles.actionIcon}>
+            <Icon name="edit" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => onDelete(index)} style={styles.actionIcon}>
+            <Icon name="delete" size={20} color={colors.error || '#F44336'} />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
   return (
     <TouchableOpacity
       onPress={() => onPress(index, diamond)}
@@ -56,6 +93,26 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  tabletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    minHeight: 50,
+  },
+  tabletCell: {
+    paddingHorizontal: 4,
+  },
+  tabletText: {
+    fontSize: fonts.sm,
+    color: colors.textPrimary,
+    fontFamily: fonts.medium,
+  },
+  actionIcon: {
+    padding: 4,
   },
   evenRow: {
     backgroundColor: colors.white,

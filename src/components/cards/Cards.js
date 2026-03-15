@@ -12,6 +12,7 @@ import { FILE_BASE_URL } from '../../config/apiConfig';
 import { getUserName } from '../../utils/userUtils';
 import { getCachedImage, cacheImage } from '../../utils/imageCache';
 import { getCachedImageData, cacheImageData } from '../../utils/imageMemoryCache';
+import useDeviceLayout from '../../hooks/useDeviceLayout';
 
 export const Card = ({ children, style, onPress, ...props }) => {
   const CardComponent = onPress ? TouchableOpacity : View;
@@ -26,23 +27,30 @@ export const Card = ({ children, style, onPress, ...props }) => {
   );
 };
 
-export const StatusCard = ({ title, value, icon, color = colors.primary, valueColor, onPress }) => (
-  <Card style={styles.statusCard} onPress={onPress}>
-    <View style={styles.statusCardContent}>
-      <View style={styles.statusHeader}>
-        <View style={[styles.statusIcon, { backgroundColor: color }]}>
-          {icon}
+export const StatusCard = ({ title, value, icon, color = colors.primary, valueColor, onPress, style }) => {
+  const { isTablet } = useDeviceLayout();
+  const contentStyle = isTablet ? [styles.statusCardContent, styles.statusCardContentTablet] : styles.statusCardContent;
+  const iconStyle = isTablet ? [styles.statusIcon, styles.statusIconTablet] : styles.statusIcon;
+  const valueStyle = isTablet ? [styles.statusValue, styles.statusValueTablet, valueColor && { color: valueColor }] : [styles.statusValue, valueColor && { color: valueColor }];
+  
+  return (
+    <Card style={[styles.statusCard, style]} onPress={onPress}>
+      <View style={contentStyle}>
+        <View style={styles.statusHeader}>
+          <View style={[iconStyle, { backgroundColor: color }]}>
+            {icon}
+          </View>
+          <Text style={styles.statusTitle}>
+            {title}
+          </Text>
         </View>
-        <Text style={styles.statusTitle}>
-          {title}
+        <Text style={valueStyle}>
+          {formatCount(value)}
         </Text>
       </View>
-      <Text style={[styles.statusValue, valueColor && { color: valueColor }]}>
-        {formatCount(value)}
-      </Text>
-    </View>
-  </Card>
-);
+    </Card>
+  );
+};
 
 export const EnquiryStatusCard = ({ status, value, color, borderColor, icon, onPress, style }) => (
   <Card style={[styles.enquiryStatusCard, { borderColor: borderColor || color }, style]} onPress={onPress}>
@@ -61,7 +69,7 @@ export const EnquiryStatusCard = ({ status, value, color, borderColor, icon, onP
   </Card>
 );
 
-// Compact Enquiry Card - 2 per row design
+// Compact Enquiry Card - 2 per row design (3 per row on tablets)
 export const CompactEnquiryCard = ({
   enquiry,
   onPress,
@@ -74,6 +82,7 @@ export const CompactEnquiryCard = ({
   userRole,
 }) => {
   // Hooks must be called at the top level, before any conditional returns
+  const { isTablet } = useDeviceLayout();
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [imageDataUri, setImageDataUri] = useState(null);
@@ -873,10 +882,22 @@ export const CompactEnquiryCard = ({
     };
   }, [imageUrl, convertToBase64Async, mediaIsVideo]);
 
+  const cardStyle = isTablet 
+    ? [styles.compactEnquiryCard, styles.compactEnquiryCardTablet]
+    : styles.compactEnquiryCard;
+  
+  const imageContainerStyle = isTablet
+    ? [styles.compactImageContainer, styles.compactImageContainerTablet]
+    : styles.compactImageContainer;
+  
+  const cardContentStyle = isTablet
+    ? [styles.compactCardContent, styles.compactCardContentTablet]
+    : styles.compactCardContent;
+
   return (
-    <Card style={styles.compactEnquiryCard} onPress={onPress}>
+    <Card style={cardStyle} onPress={onPress}>
       {/* Reference Image/Video - Always show container */}
-      <View style={styles.compactImageContainer}>
+      <View style={imageContainerStyle}>
         {isVideo && videoUrl && !imageError ? (
           <View style={styles.compactVideoContainer}>
             <Video
@@ -924,7 +945,7 @@ export const CompactEnquiryCard = ({
         )}
       </View>
 
-      <View style={styles.compactCardContent}>
+      <View style={cardContentStyle}>
         {/* Name, Priority and Status - Header section */}
         <View style={styles.compactHeaderSection}>
           <Text style={styles.compactName} numberOfLines={2}>
@@ -1239,6 +1260,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     height: '100%',
   },
+  statusCardContentTablet: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
   statusHeader: {
     flexDirection: 'column',
     alignItems: 'flex-start',
@@ -1252,12 +1277,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 6,
   },
+  statusIconTablet: {
+    width: 24,
+    height: 24,
+    borderRadius: 5,
+    marginBottom: 4,
+  },
   statusTitle: {
     color: colors.textPrimary,
     fontSize: fonts.xs,
     fontFamily: fonts.medium,
     textAlign: 'left',
     maxWidth: '100%',
+  },
+  statusValue: {
+    fontSize: fonts.xl || 24,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary || '#000000',
+    textAlign: 'left',
+  },
+  statusValueTablet: {
+    fontSize: fonts.lg || 18,
   },
   
   // Enquiry Status Card (like the image)
@@ -1489,7 +1529,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   
-  // Compact Enquiry Card Styles (2 per row)
+  // Compact Enquiry Card Styles (2 per row on mobile, 3 per row on tablet)
   compactEnquiryCard: {
     width: '48%',
     marginHorizontal: '1%',
@@ -1509,6 +1549,12 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
     overflow: 'hidden',
   },
+  compactEnquiryCardTablet: {
+    width: '31%',
+    marginHorizontal: '1%',
+    marginVertical: 10,
+    borderRadius: 14,
+  },
   compactImageContainer: {
     width: '100%',
     height: 100,
@@ -1516,6 +1562,9 @@ const styles = StyleSheet.create({
     position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  compactImageContainerTablet: {
+    height: 120,
   },
   compactImage: {
     width: '100%',
@@ -1569,6 +1618,9 @@ const styles = StyleSheet.create({
   compactCardContent: {
     padding: 8,
   },
+  compactCardContentTablet: {
+    padding: 10,
+  },
   // Header Section: Name, Priority and Status
   compactHeaderSection: {
     marginBottom: 6,
@@ -1578,6 +1630,10 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: colors.textPrimary,
     marginBottom: 4,
+  },
+  compactNameTablet: {
+    fontSize: fonts.base,
+    marginBottom: 6,
   },
   compactBadgesRow: {
     flexDirection: 'row',

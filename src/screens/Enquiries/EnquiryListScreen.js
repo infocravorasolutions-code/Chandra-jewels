@@ -38,6 +38,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import { API_BASE_URL } from '../../config/apiConfig';
+import useDeviceLayout from '../../hooks/useDeviceLayout';
 // Import PDF generator module
 import * as pdfGeneratorModule from '../../utils/pdfGenerator';
 
@@ -59,7 +60,8 @@ const EnquiryListScreen = ({ navigation }) => {
   const dispatch = useDispatch();
   const { user } = useAuth();
   const route = useRoute();
-  
+  const { isTablet, width } = useDeviceLayout();
+
   // Check if user is a designer (coral or cad)
   const isDesigner = user?.role === 'coral' || user?.role === 'cad';
   const roleLower = user?.role?.toLowerCase();
@@ -73,15 +75,15 @@ const EnquiryListScreen = ({ navigation }) => {
     roleLower === 'cl' ||
     user?.roleId === 4 ||
     user?.roleNumber === 4;
-  
+
   // Get status options from API (cached) - already includes role-based filtering
   const statusOptions = useStatusOptions();
-  
+
   // Convert status options to status list (array of status names/values)
   const statusList = useMemo(() => {
     return statusOptions.map(opt => opt.value === 'all' ? 'All' : opt.value);
   }, [statusOptions]);
-  
+
   // Redux state
   const filters = useSelector(state => state.enquiries.filters);
   const searchQuery = useSelector(state => state.enquiries.searchQuery);
@@ -90,18 +92,19 @@ const EnquiryListScreen = ({ navigation }) => {
   const selectedStatus = useSelector(state => state.enquiries.selectedStatus);
   const selectedStatuses = useSelector(state => state.enquiries.selectedStatuses || []);
   const selectedClient = useSelector(state => state.enquiries.selectedClient);
-  
+
   // Get current user ID for filtering assigned enquiries
   // This is used to filter enquiries by assigned user for non-admin roles
   const currentUserId = user?.id || user?._id || user?.userId;
-  
+
   // For Client users (role 4), use ClientId from token instead of userId
   const clientUserId = (isClient && user?.clientId) ? user.clientId : currentUserId;
-  
+
   const [enquiries, setEnquiries] = useState([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isPrefetching, setIsPrefetching] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [pagination, setPaginationState] = useState({
     total: 0,
@@ -112,12 +115,14 @@ const EnquiryListScreen = ({ navigation }) => {
   const requestIdRef = useRef(0);
   const prefetchingPageRef = useRef(null);
   const hasLoadedOnceRef = useRef(false);
+  const lastAppendPageRequestedRef = useRef(null);
+  const onEndReachedDuringMomentumRef = useRef(false);
   const [clientNameOverrides, setClientNameOverrides] = useState({});
   const fetchingClientIdsRef = useRef(new Set());
   const flatListRef = useRef(null);
   const scrollPositionRef = useRef(0);
   const scrollPositionKey = 'enquiryListScrollPosition';
-  
+
   const resolvedFilters = useMemo(() => {
     const normalizedFilters = {
       status: filters.status,
@@ -135,31 +140,31 @@ const EnquiryListScreen = ({ navigation }) => {
       createdDateFrom: filters.createdDateFrom,
       createdDateTo: filters.createdDateTo,
     };
-    
+
     // For Client users (role 4), use ClientId from token
     if ((!normalizedFilters.clientId || normalizedFilters.clientId === 'all') && isClient && clientUserId) {
       normalizedFilters.clientId = clientUserId;
-     
+
     } else if (isClient && !clientUserId) {
-     
+
     }
-    
+
     if ((!normalizedFilters.assignedTo || normalizedFilters.assignedTo === 'all') && !isAdmin && !isClient && currentUserId) {
       normalizedFilters.assignedTo = currentUserId;
     }
-    
+
     return normalizedFilters;
   }, [filters, isClient, isAdmin, clientUserId]);
-  
+
   const buildQueryString = useCallback((pageToLoad = 1) => {
     const params = new URLSearchParams();
     params.append('page', String(pageToLoad));
     params.append('limit', String(PAGE_SIZE));
-    
+
     if (searchQuery && searchQuery.trim()) {
       params.append('search', searchQuery.trim());
     }
-    
+
     Object.entries(resolvedFilters).forEach(([key, value]) => {
       // Skip empty values, 'all', or empty arrays
       if (!value || value === 'all' || value === 'All' || (Array.isArray(value) && value.length === 0)) {
@@ -174,7 +179,7 @@ const EnquiryListScreen = ({ navigation }) => {
             .filter(item => item && item !== 'all' && item !== 'All')
             .map(item => String(item).trim())
             .filter(item => item);
-          
+
           if (validStatuses.length > 0) {
             // Send multiple parameters with same key for OR logic
             // Backend should interpret multiple CurrentStatus= parameters as OR condition
@@ -197,7 +202,7 @@ const EnquiryListScreen = ({ navigation }) => {
         params.append(paramKey, String(value));
       }
     });
-    
+
     // Map frontend sort field names to backend API field names
     const sortFieldMap = {
       'AssignedDate': 'AssignedDate',
@@ -218,20 +223,31 @@ const EnquiryListScreen = ({ navigation }) => {
       'title': 'Name',
       'clientName': 'ClientId',
     };
-    
+
     const backendSortField = sortFieldMap[sortBy] || sortBy || 'AssignedDate';
     const sortDirection = sortOrder || 'desc';
     params.append('sortBy', backendSortField);
     params.append('sortOrder', sortDirection);
-    
+
     return params;
   }, [resolvedFilters, searchQuery, sortBy, sortOrder]);
-  
-  const fetchEnquiries = useCallback(async ({ pageToLoad = 1, append = false, suppressInlineLoader = false } = {}) => {
+
+  const fetchEnquiries = useCallback(async ({
+    pageToLoad = 1,
+    append = false,
+    suppressInlineLoader = false,
+    recursionDepth = 0,
+    showFooterLoader = append, // for append calls, default to showing footer loader
+  } = {}) => {
     const requestId = ++requestIdRef.current;
-    
+    let shouldStopLoading = true;
+
     if (append) {
-      setIsLoadingMore(true);
+      if (showFooterLoader) {
+        setIsLoadingMore(true);
+      } else {
+        setIsPrefetching(true);
+      }
     } else {
       if (!hasLoadedOnceRef.current) {
         setIsInitialLoading(true);
@@ -240,12 +256,12 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       prefetchingPageRef.current = null;
     }
-    
+
     try {
       const params = buildQueryString(pageToLoad);
       const token = await AsyncStorage.getItem('token');
       const apiUrl = `${API_BASE_URL}/api/enquiries/search?${params.toString()}`;
-      
+
       if (__DEV__) {
         console.log('🔍 [ENQUIRY LIST] Fetch Query:', {
           filters: filters,
@@ -268,16 +284,16 @@ const EnquiryListScreen = ({ navigation }) => {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
-      
+
       if (!response.ok) {
         throw new Error(`Failed to load enquiries (${response.status})`);
       }
-      
+
       const payload = await response.json();
       if (requestId !== requestIdRef.current) {
         return;
       }
-      
+
       if (__DEV__) {
         console.log('📥 [ENQUIRY LIST] API Response:', {
           payloadKeys: Object.keys(payload || {}),
@@ -291,7 +307,7 @@ const EnquiryListScreen = ({ navigation }) => {
           })),
         });
       }
-      
+
       const data = Array.isArray(payload?.data)
         ? payload.data
         : Array.isArray(payload)
@@ -299,52 +315,79 @@ const EnquiryListScreen = ({ navigation }) => {
           : Array.isArray(payload?.enquiries)
             ? payload.enquiries
             : [];
-      
+
       const normalized = data
         .map(item => ({
           ...item,
           id: item?.id || item?._id || item?.Id || item?.EnquiryId || item?.enquiryId,
         }))
         .filter(item => item && item.id);
-      
+
       // Frontend filtering workaround: If backend doesn't filter by multiple statuses correctly,
       // filter the results on the frontend
       let filteredData = normalized;
       if (filters.status && Array.isArray(filters.status) && filters.status.length > 0) {
-        const selectedStatuses = filters.status.map(s => String(s).toLowerCase().trim());
+        // Normalize selected statuses for comparison (remove spaces, lowercase)
+        const normalizeForComparison = (status) => {
+          return String(status).toLowerCase().trim().replace(/\s+/g, '');
+        };
+
+        const selectedStatusesNormalized = filters.status.map(s => normalizeForComparison(s));
+
         filteredData = normalized.filter(item => {
           // Get status from various possible fields
-          const itemStatus = (
-            item?.CurrentStatus || 
-            item?.Status || 
+          const itemStatusRaw = (
+            item?.CurrentStatus ||
+            item?.Status ||
             item?.status ||
             item?.CurrentStatusName ||
             ''
-          ).toLowerCase().trim();
-          
-          // Check if item status matches any of the selected statuses
-          return selectedStatuses.some(selectedStatus => 
-            itemStatus === selectedStatus || 
-            itemStatus.includes(selectedStatus) ||
-            selectedStatus.includes(itemStatus)
           );
+
+          const itemStatusNormalized = normalizeForComparison(itemStatusRaw);
+
+          // Check if item status matches any of the selected statuses (exact match after normalization)
+          const matches = selectedStatusesNormalized.some(selectedStatus => {
+            // Exact match after normalization
+            if (itemStatusNormalized === selectedStatus) {
+              return true;
+            }
+
+            // Also check if one contains the other (for partial matches like "Approved Cad" contains "Cad")
+            // But be more strict - only if one is clearly a subset
+            if (itemStatusNormalized.includes(selectedStatus) && selectedStatus.length >= 3) {
+              return true;
+            }
+            if (selectedStatus.includes(itemStatusNormalized) && itemStatusNormalized.length >= 3) {
+              return true;
+            }
+
+            return false;
+          });
+
+          return matches;
         });
-        
+
         if (__DEV__) {
           console.log('🔍 [ENQUIRY LIST] Frontend Status Filter Applied:', {
             totalBeforeFilter: normalized.length,
             totalAfterFilter: filteredData.length,
             selectedStatuses: filters.status,
+            selectedStatusesNormalized: selectedStatusesNormalized,
+            sampleItemStatuses: normalized.slice(0, 5).map(e => ({
+              raw: e?.CurrentStatus || e?.Status || 'N/A',
+              normalized: normalizeForComparison(e?.CurrentStatus || e?.Status || '')
+            })),
             filteredStatuses: filteredData.map(e => e?.CurrentStatus || e?.Status || 'N/A').slice(0, 5),
           });
         }
       }
-      
+
       setEnquiries(prev => {
         if (append && prev && prev.length > 0) {
           const existingIds = new Map(prev.map(enquiry => [enquiry.id, enquiry]));
           const merged = [...prev];
-          
+
           filteredData.forEach(item => {
             if (!existingIds.has(item.id)) {
               merged.push(item);
@@ -356,13 +399,13 @@ const EnquiryListScreen = ({ navigation }) => {
               }
             }
           });
-          
+
           return merged;
         }
-        
+
         return filteredData;
       });
-      
+
       const responseLimit = payload?.limit ?? payload?.Limit ?? PAGE_SIZE;
       const totalFromServer = Number(payload?.total ?? payload?.Total ?? 0);
       const calculatedTotalPages = totalFromServer > 0
@@ -375,7 +418,7 @@ const EnquiryListScreen = ({ navigation }) => {
         limit: responseLimit,
         totalPages: calculatedTotalPages,
       };
-      
+
       setPaginationState(paginationSnapshot);
       const hasReliableTotal = totalFromServer > 0;
       const inferredHasMore = normalized.length === responseLimit;
@@ -383,6 +426,28 @@ const EnquiryListScreen = ({ navigation }) => {
         ? currentPageSafe * responseLimit < totalFromServer
         : inferredHasMore;
       setHasMore(computedHasMore);
+
+      // Recursively fetch more pages if filtered results are sparse to prevent flickering
+      // This fixes the issue where "Load more" button flickers when many items are filtered out
+      if (append && filteredData.length < 5 && computedHasMore && recursionDepth < 5) {
+        shouldStopLoading = false;
+        if (__DEV__) {
+          console.log('🔄 [ENQUIRY LIST] Recursively fetching next page to fill list:', {
+            currentPage: pageToLoad,
+            nextPage: pageToLoad + 1,
+            filteredCount: filteredData.length,
+            recursionDepth
+          });
+        }
+        return fetchEnquiries({
+          pageToLoad: pageToLoad + 1,
+          append: true,
+          suppressInlineLoader,
+          recursionDepth: recursionDepth + 1,
+          // recursion is an internal fill operation — keep it silent to avoid footer flicker
+          showFooterLoader: false,
+        });
+      }
     } catch (error) {
       if (__DEV__) {
         console.error('Failed to fetch enquiries:', error);
@@ -392,40 +457,58 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       throw error;
     } finally {
-      if (append) {
-        setIsLoadingMore(false);
-      } else if (!hasLoadedOnceRef.current) {
-        setIsInitialLoading(false);
-        hasLoadedOnceRef.current = true;
-      } else if (!suppressInlineLoader) {
-        setIsFetching(false);
+      if (shouldStopLoading) {
+        if (append) {
+          setIsLoadingMore(false);
+          setIsPrefetching(false);
+        } else if (!hasLoadedOnceRef.current) {
+          setIsInitialLoading(false);
+          hasLoadedOnceRef.current = true;
+        } else if (!suppressInlineLoader) {
+          setIsFetching(false);
+        }
       }
     }
   }, [buildQueryString]);
-  
+
   useEffect(() => {
     if (!user) {
       return;
     }
-    
-    fetchEnquiries({ pageToLoad: 1, append: false }).catch(() => {});
+
+    fetchEnquiries({ pageToLoad: 1, append: false }).catch(() => { });
   }, [user, fetchEnquiries]);
-  
+
+  // Convert status filter to a stable string for dependency comparison
+  const statusFilterKey = useMemo(() => {
+    if (Array.isArray(filters.status)) {
+      return [...filters.status].sort().join(',');
+    }
+    return filters.status || 'all';
+  }, [filters.status]);
+
   // Watch for filter changes and trigger fetch
   useEffect(() => {
     if (!user || !hasLoadedOnceRef.current) {
       return; // Don't fetch on initial mount, let the above useEffect handle it
     }
-    
+
     // Trigger fetch when filters change
-    fetchEnquiries({ pageToLoad: 1, append: false }).catch(() => {});
-  }, [filters.status, filters.priority, filters.clientId, searchQuery, user, fetchEnquiries]);
+    fetchEnquiries({ pageToLoad: 1, append: false }).catch(() => { });
+  }, [
+    statusFilterKey,
+    filters.priority,
+    filters.clientId,
+    searchQuery,
+    user,
+    fetchEnquiries
+  ]);
 
   // Track previous filter values to detect changes
   const prevFiltersRef = useRef({ status: null, priority: null, clientId: null, searchQuery: null });
   const lastDashboardFilterRef = useRef(null);
   const processedRouteParamsRef = useRef(new Set()); // Track processed route params to prevent loops
-  
+
   // Clear scroll position when filters change (so user starts from top with new filters)
   useEffect(() => {
     const currentFilters = {
@@ -434,22 +517,22 @@ const EnquiryListScreen = ({ navigation }) => {
       clientId: filters.clientId,
       searchQuery: searchQuery,
     };
-    
+
     // Check if filters actually changed (not on initial mount)
-    const filtersChanged = 
+    const filtersChanged =
       prevFiltersRef.current.status !== currentFilters.status ||
       prevFiltersRef.current.priority !== currentFilters.priority ||
       prevFiltersRef.current.clientId !== currentFilters.clientId ||
       prevFiltersRef.current.searchQuery !== currentFilters.searchQuery;
-    
+
     if (filtersChanged && prevFiltersRef.current.status !== null && flatListRef.current) {
       // Scroll to top when filters change
       flatListRef.current.scrollToOffset({ offset: 0, animated: true });
       scrollPositionRef.current = 0;
-      AsyncStorage.removeItem(scrollPositionKey).catch(() => {});
+      AsyncStorage.removeItem(scrollPositionKey).catch(() => { });
       hasRestoredScrollRef.current = false; // Allow restore after filter change
     }
-    
+
     // Update previous filters
     prevFiltersRef.current = currentFilters;
   }, [filters.status, filters.priority, filters.clientId, searchQuery]);
@@ -622,27 +705,38 @@ const EnquiryListScreen = ({ navigation }) => {
       cancelled = true;
     };
   }, [enquiries, clientNameMap, clientNameOverrides]);
-  
+
   const handleLoadMore = useCallback(() => {
     if (!hasMore || isInitialLoading || isFetching || isLoadingMore) {
       return;
     }
-    
+
     const nextPage = (pagination?.page || 1) + 1;
-    fetchEnquiries({ pageToLoad: nextPage, append: true }).catch(() => {});
+    if (lastAppendPageRequestedRef.current === nextPage) {
+      return;
+    }
+    lastAppendPageRequestedRef.current = nextPage;
+    fetchEnquiries({ pageToLoad: nextPage, append: true, showFooterLoader: true })
+      .catch(() => { })
+      .finally(() => {
+        // allow retries if needed after request settles
+        if (lastAppendPageRequestedRef.current === nextPage) {
+          lastAppendPageRequestedRef.current = null;
+        }
+      });
   }, [fetchEnquiries, hasMore, isLoadingMore, isInitialLoading, isFetching, pagination?.page]);
-  
+
   const currentPage = pagination.page;
   const totalPages = pagination.totalPages;
   const total = pagination.total;
-  
+
   // Fetch clients to enrich client names (using cached hook)
   const { clients: clientsData = [], isLoading: clientsLoading, error: clientsError } = useClients({
     skip: !user,
   });
-  
+
   const clients = Array.isArray(clientsData) ? clientsData : [];
-  
+
   // Debug clients API response (in useEffect to avoid hook order issues)
   useEffect(() => {
     if (__DEV__ && clientsData) {
@@ -653,7 +747,7 @@ const EnquiryListScreen = ({ navigation }) => {
       });
     }
   }, [clientsData, clientsError]);
-  
+
   // Local UI state
   const [showFilters, setShowFilters] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
@@ -669,7 +763,7 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       return map;
     }
-    
+
     clients.forEach(client => {
       if (client && client.id && client.name) {
         // Store both string and normalized versions for lookup
@@ -684,12 +778,12 @@ const EnquiryListScreen = ({ navigation }) => {
         map.set(cleanId.trim(), client.name);
       }
     });
-    
+
     if (__DEV__) {
       console.log('Client Name Map created with', map.size, 'entries');
       console.log('Sample client IDs in map:', Array.from(map.keys()).slice(0, 5));
     }
-    
+
     return map;
   }, [clients]);
 
@@ -700,7 +794,7 @@ const EnquiryListScreen = ({ navigation }) => {
       if (!enquiries || !Array.isArray(enquiries) || enquiries.length === 0) {
         return [];
       }
-      
+
       return enquiries
         .filter(enquiry => enquiry && typeof enquiry === 'object') // Filter out invalid entries
         .map(enquiry => {
@@ -716,7 +810,7 @@ const EnquiryListScreen = ({ navigation }) => {
                 const cleanId = clientIdStr.replace(/^ObjectId\(/, '').replace(/\)$/, '').trim();
                 clientName = clientNameOverrides[cleanId] || clientNameMap.get(cleanId);
               }
-              
+
               if (clientName) {
                 finalClientName = clientName;
               }
@@ -783,8 +877,8 @@ const EnquiryListScreen = ({ navigation }) => {
 
     prefetchingPageRef.current = nextPage;
 
-    fetchEnquiries({ pageToLoad: nextPage, append: true })
-      .catch(() => {})
+    fetchEnquiries({ pageToLoad: nextPage, append: true, showFooterLoader: false })
+      .catch(() => { })
       .finally(() => {
         if (prefetchingPageRef.current === nextPage) {
           prefetchingPageRef.current = null;
@@ -808,13 +902,13 @@ const EnquiryListScreen = ({ navigation }) => {
     if (!clients || clients.length === 0) {
       return [];
     }
-    
+
     // Create a map to deduplicate by ID (in case of duplicate names)
     const clientMap = new Map();
     clients.forEach(client => {
       const clientId = client.id || client._id;
       const clientName = client.name || client.Name;
-      
+
       if (clientId && clientName && clientName.trim() !== '' && clientName !== 'Unknown Client') {
         // Use ID as key to prevent duplicates
         if (!clientMap.has(clientId)) {
@@ -822,11 +916,11 @@ const EnquiryListScreen = ({ navigation }) => {
         }
       }
     });
-    
+
     // Convert to array and sort by name
     const clientList = Array.from(clientMap.values())
       .sort((a, b) => a.name.localeCompare(b.name));
-    
+
     return clientList;
   }, [clients]);
 
@@ -839,7 +933,7 @@ const EnquiryListScreen = ({ navigation }) => {
     const dashboardToken = rawFilter
       ? `${filterType || 'status'}:${rawFilter}:${filterAppliedAt || 'na'}`
       : null;
-    
+
     // Create a unique key for this route params combination
     const routeParamsKey = JSON.stringify({
       filter: rawFilter,
@@ -850,12 +944,12 @@ const EnquiryListScreen = ({ navigation }) => {
       statuses: route.params?.statuses,
       selectedStatuses: route.params?.selectedStatuses,
     });
-    
+
     // Skip if we've already processed these exact route params
     if (processedRouteParamsRef.current.has(routeParamsKey)) {
       return;
     }
-    
+
     let routeFilterHandled = false;
 
     // When navigating from dashboard, clear all existing filters so only the clicked filter applies
@@ -885,7 +979,7 @@ const EnquiryListScreen = ({ navigation }) => {
       const statusFilter = rawFilter.toLowerCase().trim();
       const isDesigner = user?.role === 'coral' || user?.role === 'cad';
       let mappedStatus = 'all';
-      
+
       // Map common status filter values from DashboardScreen
       // Priority order matches DashboardScreen navigation calls
       if (statusFilter === 'coral') {
@@ -899,11 +993,11 @@ const EnquiryListScreen = ({ navigation }) => {
         mappedStatus = 'Completed';
       } else if (statusFilter === 'pending') {
         mappedStatus = isDesigner ? 'Design Approval Pending' : 'Enquiry Created';
-      } else if (statusFilter === 'enquiry created' || 
-          (statusFilter.includes('pending') && !statusFilter.includes('approval') && !statusFilter.includes('cam'))) {
+      } else if (statusFilter === 'enquiry created' ||
+        (statusFilter.includes('pending') && !statusFilter.includes('approval') && !statusFilter.includes('cam'))) {
         mappedStatus = 'Enquiry Created';
-      } else if (statusFilter === 'approval_pending' || 
-                 (statusFilter.includes('approval') && statusFilter.includes('pending'))) {
+      } else if (statusFilter === 'approval_pending' ||
+        (statusFilter.includes('approval') && statusFilter.includes('pending'))) {
         mappedStatus = 'Design Approval Pending';
       } else if (statusFilter === 'approved cad' || statusFilter === 'approvedcad' || statusFilter === 'approved_cad') {
         mappedStatus = 'Approved Cad';
@@ -927,13 +1021,13 @@ const EnquiryListScreen = ({ navigation }) => {
         const knownStatuses = statusOptions
           .filter(opt => opt.value !== 'all')
           .map(opt => opt.value);
-        const matchedStatus = knownStatuses.find(s => 
-          s.toLowerCase() === statusFilter || 
+        const matchedStatus = knownStatuses.find(s =>
+          s.toLowerCase() === statusFilter ||
           s.toLowerCase().replace(/\s+/g, '') === statusFilter.replace(/\s+/g, '')
         );
         mappedStatus = matchedStatus || (rawFilter.charAt(0).toUpperCase() + rawFilter.slice(1).toLowerCase());
       }
-      
+
       // Only dispatch if status is actually different (prevent unnecessary updates)
       const currentStatus = Array.isArray(filters.status) ? filters.status[0] : filters.status;
       if (mappedStatus !== currentStatus && mappedStatus !== filters.status) {
@@ -949,40 +1043,70 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       routeFilterHandled = true;
     }
-    
+
     // Handle client filter from route params
     if (filterType === 'client' && rawFilter) {
       const clientName = rawFilter;
       const clientId = route.params?.clientId;
       const preSelectedStatuses = route.params?.statuses || route.params?.selectedStatuses || [];
-      
+
       // Normalize status names to match API format (case-insensitive matching)
       const normalizeStatusName = (statusName) => {
         if (!statusName) return statusName;
-        
+
+        const statusLower = String(statusName).toLowerCase().trim();
+
+        // Common status name mappings (handles variations and typos)
+        const statusMappings = {
+          'cad': 'CAD',
+          'coral': 'Coral',
+          'enquiry created': 'Enquiry Created',
+          'approved cad': 'Approved Cad',
+          'quotation': 'Quotation',
+          'quatation': 'Quotation', // Handle typo
+          'design approval pending': 'Design Approval Pending',
+          'order placement': 'Order Placement',
+          'cam pending': 'CAM Pending',
+          'production': 'Production',
+          'completed': 'Completed',
+        };
+
+        // Check mappings first (handles common variations)
+        if (statusMappings[statusLower]) {
+          return statusMappings[statusLower];
+        }
+
         // Get known statuses from API options
         const knownStatuses = statusOptions
           .filter(opt => opt.value !== 'all')
           .map(opt => opt.value);
-        
-        // Try to find exact match (case-insensitive)
-        const normalized = knownStatuses.find(s => 
-          s.toLowerCase() === statusName.toLowerCase() ||
-          s.toLowerCase().replace(/\s+/g, '') === statusName.toLowerCase().replace(/\s+/g, '')
-        );
-        
-        return normalized || statusName; // Return matched status or original if not found
+
+        if (knownStatuses.length > 0) {
+          // Try to find exact match (case-insensitive)
+          const normalized = knownStatuses.find(s => {
+            const sLower = String(s).toLowerCase().trim();
+            return sLower === statusLower ||
+              sLower.replace(/\s+/g, '') === statusLower.replace(/\s+/g, '');
+          });
+
+          if (normalized) {
+            return normalized;
+          }
+        }
+
+        // If no match found, return original (will be handled by frontend filter)
+        return statusName;
       };
-      
+
       // Normalize all pre-selected statuses
+      // Always normalize (even if statusOptions not ready, use mappings)
       const normalizedStatuses = preSelectedStatuses.length > 0
         ? preSelectedStatuses.map(normalizeStatusName).filter(s => s) // Filter out any null/undefined
         : [];
-      
-      
+
       // Set both client filter and clientId
       if (clientId) {
-        dispatch(setFilters({ 
+        dispatch(setFilters({
           client: clientName,
           clientId: clientId,
           status: normalizedStatuses.length > 0 ? normalizedStatuses : 'all' // Use normalized pre-selected statuses
@@ -991,20 +1115,20 @@ const EnquiryListScreen = ({ navigation }) => {
         // Try to find client by name if clientId not provided
         const client = clients.find(c => c.name === clientName);
         if (client) {
-          dispatch(setFilters({ 
+          dispatch(setFilters({
             client: clientName,
             clientId: client.id || client._id,
             status: normalizedStatuses.length > 0 ? normalizedStatuses : 'all' // Use normalized pre-selected statuses
           }));
         } else {
-          dispatch(setFilters({ 
+          dispatch(setFilters({
             client: clientName,
             status: normalizedStatuses.length > 0 ? normalizedStatuses : 'all' // Use normalized pre-selected statuses
           }));
         }
       }
       dispatch(setSelectedClient(clientName));
-      
+
       // Set pre-selected statuses if provided, otherwise clear
       if (normalizedStatuses.length > 0) {
         dispatch(setSelectedStatuses(normalizedStatuses));
@@ -1018,13 +1142,13 @@ const EnquiryListScreen = ({ navigation }) => {
     if (routeFilterHandled) {
       // Mark these route params as processed
       processedRouteParamsRef.current.add(routeParamsKey);
-      
+
       // Clean up old entries (keep only last 10 to prevent memory leak)
       if (processedRouteParamsRef.current.size > 10) {
         const firstKey = processedRouteParamsRef.current.values().next().value;
         processedRouteParamsRef.current.delete(firstKey);
       }
-      
+
       const clearParams = () => {
         navigation.setParams({
           filter: undefined,
@@ -1052,13 +1176,112 @@ const EnquiryListScreen = ({ navigation }) => {
     route.params?.clientId,
     clients,
     // Removed filters.status from dependencies to prevent infinite loop
-    // Removed statusOptions from dependencies - use useMemo to stabilize it if needed
+    statusOptions, // Add statusOptions to ensure normalization happens when options are available
     dispatch,
     user?.role,
     navigation,
   ]);
-  
-  // Debug: Log loading states (only on significant changes, not every render)
+
+  // Re-normalize statuses when statusOptions become available (if we have preselected statuses)
+  useEffect(() => {
+    // Only re-normalize if:
+    // 1. statusOptions are now available
+    // 2. We have preselected statuses from route params
+    // 3. We haven't already processed these route params
+    if (statusOptions.length > 0 &&
+      route.params?.statuses &&
+      route.params?.statuses.length > 0 &&
+      route.params?.filterType === 'client') {
+
+      const preSelectedStatuses = route.params?.statuses || route.params?.selectedStatuses || [];
+
+      // Normalize status names to match API format
+      const normalizeStatusName = (statusName) => {
+        if (!statusName) return statusName;
+
+        const statusLower = String(statusName).toLowerCase().trim();
+
+        // Common status name mappings
+        const statusMappings = {
+          'cad': 'CAD',
+          'coral': 'Coral',
+          'enquiry created': 'Enquiry Created',
+          'approved cad': 'Approved Cad',
+          'quotation': 'Quotation',
+          'quatation': 'Quotation',
+          'design approval pending': 'Design Approval Pending',
+          'order placement': 'Order Placement',
+          'cam pending': 'CAM Pending',
+          'production': 'Production',
+          'completed': 'Completed',
+        };
+
+        if (statusMappings[statusLower]) {
+          return statusMappings[statusLower];
+        }
+
+        const knownStatuses = statusOptions
+          .filter(opt => opt.value !== 'all')
+          .map(opt => opt.value);
+
+        if (knownStatuses.length > 0) {
+          const normalized = knownStatuses.find(s => {
+            const sLower = String(s).toLowerCase().trim();
+            return sLower === statusLower ||
+              sLower.replace(/\s+/g, '') === statusLower.replace(/\s+/g, '');
+          });
+
+          if (normalized) {
+            return normalized;
+          }
+        }
+
+        return statusName;
+      };
+
+      const normalizedStatuses = preSelectedStatuses.map(normalizeStatusName).filter(s => s);
+
+      // Only update if normalized statuses are different from current filters
+      const currentStatuses = Array.isArray(filters.status) ? filters.status :
+        (filters.status !== 'all' ? [filters.status] : []);
+
+      const currentNormalized = currentStatuses.map(s => String(s).toLowerCase().trim()).sort().join(',');
+      const newNormalized = normalizedStatuses.map(s => String(s).toLowerCase().trim()).sort().join(',');
+
+      if (currentNormalized !== newNormalized && normalizedStatuses.length > 0) {
+        if (__DEV__) {
+          console.log('🔄 [ENQUIRY LIST] Re-normalizing statuses after statusOptions loaded:', {
+            original: preSelectedStatuses,
+            normalized: normalizedStatuses,
+            current: currentStatuses,
+          });
+        }
+
+        dispatch(setFilters({ status: normalizedStatuses }));
+        dispatch(setSelectedStatuses(normalizedStatuses));
+      }
+    }
+  }, [statusOptions, route.params?.statuses, route.params?.filterType, filters.status, dispatch]);
+
+
+
+  // Handle refresh request from other screens (e.g. after deletion)
+  useEffect(() => {
+    if (route.params?.refreshTimestamp) {
+      if (__DEV__) {
+        console.log('🔄 [ENQUIRY LIST] Refresh triggered via params:', route.params.refreshTimestamp);
+      }
+
+      // Clear the param to prevent infinite loops
+      navigation.setParams({ refreshTimestamp: undefined });
+
+      // Set refreshing true IMMEDIATELY to trigger loader
+      setRefreshing(true);
+
+      // Trigger refresh
+      onRefresh();
+    }
+  }, [route.params?.refreshTimestamp]);
   // Removed excessive logging - uncomment if needed for debugging
   // useEffect(() => {
   //   if (__DEV__ && (isInitialLoading || isFetching || isLoadingMore)) {
@@ -1074,7 +1297,7 @@ const EnquiryListScreen = ({ navigation }) => {
   //     });
   //   }
   // }, [isLoadingMore, isInitialLoading, isFetching, hasMore, currentPage, totalPages, displayEnquiries]);
-  
+
   // Render enquiry card item for FlatList
   const renderEnquiryItem = ({ item: enquiry }) => {
     if (!enquiry || !enquiry.id) {
@@ -1083,7 +1306,7 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       return null;
     }
-    
+
     try {
       return (
         <CompactEnquiryCardMemo
@@ -1101,7 +1324,7 @@ const EnquiryListScreen = ({ navigation }) => {
                 Alert.alert('Error', 'Invalid enquiry data. Please refresh the list.');
                 return;
               }
-              
+
               if (!navigation || typeof navigation.navigate !== 'function') {
                 if (__DEV__) {
                   console.error('Navigation not available');
@@ -1109,9 +1332,9 @@ const EnquiryListScreen = ({ navigation }) => {
                 Alert.alert('Error', 'Navigation is not available. Please try again.');
                 return;
               }
-              
-              navigation.navigate('SingleEnquiry', { 
-                enquiryId: enquiry.id, 
+
+              navigation.navigate('SingleEnquiry', {
+                enquiryId: enquiry.id,
                 enquiry,
                 shouldRefresh: false,
               });
@@ -1138,26 +1361,28 @@ const EnquiryListScreen = ({ navigation }) => {
       return null; // Return null on error to prevent crash
     }
   };
-  
+
   // Render list header - no longer needed as chips are moved outside FlatList
   const renderListHeader = () => {
     return null;
   };
-  
+
   // Render loading footer for infinite scroll
   const renderListFooter = () => {
     // Check if we have more data available
     const hasMoreData = hasMore;
-    
-    // Check if currently loading more data
+
     const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
-    const isCurrentlyLoading = isLoadingMore || (isFetching && displayEnquiriesLength > 0 && currentPage > 1);
-    
+    // Only treat explicit "load more" / append requests as "loading more"
+    // Filter changes and initial refetches use isFetching/isInitialLoading and should not
+    // toggle the footer between "Loading more..." and "Load more enquiries"
+    const isCurrentlyLoading = isLoadingMore;
+
     // Don't show anything if no data at all
     if (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiriesLength === 0) {
       return null;
     }
-    
+
     // Show "No more data" message if we've loaded all pages
     if (!hasMoreData && !isCurrentlyLoading) {
       return (
@@ -1167,19 +1392,19 @@ const EnquiryListScreen = ({ navigation }) => {
         </View>
       );
     }
-    
+
     if (isCurrentlyLoading) {
       return (
         <View style={styles.loadingMoreContainer}>
           <View style={styles.loadingMoreContent}>
-            <ActivityIndicator 
-              size="small" 
-              color={colors.primary} 
+            <ActivityIndicator
+              size="small"
+              color={colors.primary}
               style={styles.loadingSpinner}
             />
-            {isCurrentlyLoading && (
+            {/* {isCurrentlyLoading && (
               <Text style={styles.loadingMoreText}>Loading more...</Text>
-            )}
+            )} */}
           </View>
         </View>
       );
@@ -1200,10 +1425,10 @@ const EnquiryListScreen = ({ navigation }) => {
         </View>
       );
     }
-    
+
     return null;
   };
-  
+
   // Helper function to check if status filter is active (handles both array and string)
   const isStatusFilterActive = () => {
     if (!filters.status || filters.status === 'all') return false;
@@ -1215,11 +1440,23 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Render empty state
   const renderEmpty = () => {
-    const hasActiveFilters = isStatusFilterActive() || 
-                            (filters.priority && filters.priority !== 'all') ||
-                            (filters.clientId && filters.clientId !== 'all') ||
-                            searchQuery;
-    
+    // Show loader if we are currently refreshing or fetching
+    if (refreshing || isFetching || isInitialLoading) {
+      return (
+        <View style={{ padding: 40, alignItems: 'center' }}>
+          <AnimatedLogoLoader size={60} />
+          <Text style={{ marginTop: 16, color: colors.textSecondary, fontSize: fonts.sm }}>
+            Updating list...
+          </Text>
+        </View>
+      );
+    }
+
+    const hasActiveFilters = isStatusFilterActive() ||
+      (filters.priority && filters.priority !== 'all') ||
+      (filters.clientId && filters.clientId !== 'all') ||
+      searchQuery;
+
     return (
       <Card style={styles.emptyCard}>
         <Icon name="description" size={40} color={colors.textLight} />
@@ -1227,8 +1464,8 @@ const EnquiryListScreen = ({ navigation }) => {
           {hasActiveFilters ? 'No enquiries match your filters' : 'No enquiries found'}
         </Text>
         <Text style={{ color: colors.textLight, fontSize: fonts.sm }}>
-          {hasActiveFilters 
-            ? 'Try adjusting your filters or search query' 
+          {hasActiveFilters
+            ? 'Try adjusting your filters or search query'
             : 'Try adjusting your search or filters'}
         </Text>
         {hasActiveFilters && (
@@ -1256,7 +1493,7 @@ const EnquiryListScreen = ({ navigation }) => {
     try {
       // Use backend PDF download endpoint for better performance with large datasets
       const downloadFn = pdfGeneratorModule?.downloadEnquiriesPDFFromBackend;
-      
+
       if (!downloadFn || typeof downloadFn !== 'function') {
         if (__DEV__) {
           console.error('downloadEnquiriesPDFFromBackend not available:', {
@@ -1267,7 +1504,7 @@ const EnquiryListScreen = ({ navigation }) => {
           });
         }
         Alert.alert(
-          'Error', 
+          'Error',
           'PDF export function is not available. Please contact support if this issue persists.'
         );
         return;
@@ -1276,19 +1513,19 @@ const EnquiryListScreen = ({ navigation }) => {
       // Build filters object from current filters, search query, and sorting
       // This matches what the backend expects for the export-pdf endpoint
       const exportFilters = {};
-      
+
       // Add search query if present
       if (searchQuery && searchQuery.trim()) {
         exportFilters.search = searchQuery.trim();
       }
-      
+
       // Add all active filters
       Object.entries(resolvedFilters).forEach(([key, value]) => {
         if (value && value !== 'all' && value !== 'All') {
           exportFilters[key] = value;
         }
       });
-      
+
       // Add sorting parameters
       const sortFieldMap = {
         'AssignedDate': 'AssignedDate',
@@ -1308,7 +1545,7 @@ const EnquiryListScreen = ({ navigation }) => {
         'title': 'Name',
         'clientName': 'ClientId',
       };
-      
+
       const backendSortField = sortFieldMap[sortBy] || sortBy || 'AssignedDate';
       const sortDirection = sortOrder || 'desc';
       exportFilters.sortBy = backendSortField;
@@ -1374,7 +1611,7 @@ const EnquiryListScreen = ({ navigation }) => {
   if (!user) {
     return <AnimatedLogoLoader size={60} />;
   }
-  
+
   const onRefresh = async () => {
     try {
       setRefreshing(true);
@@ -1440,9 +1677,9 @@ const EnquiryListScreen = ({ navigation }) => {
   // Helper functions for status and priority styling
   const getStatusColor = (status) => {
     if (!status) return colors.textSecondary;
-    
+
     const statusLower = String(status).toLowerCase();
-    
+
     // Handle actual status values from the system
     if (statusLower.includes('enquiry created') || statusLower === 'enquiry created') {
       return colors.info || '#2196F3';
@@ -1474,20 +1711,20 @@ const EnquiryListScreen = ({ navigation }) => {
     if (statusLower.includes('rejected')) {
       return colors.error || '#F44336';
     }
-    
+
     // Legacy support
     if (statusLower === 'pending') return colors.warning || '#FF9800';
     if (statusLower === 'completed') return colors.success || '#4CAF50';
     if (statusLower === 'rejected') return colors.error || '#F44336';
-    
+
     return colors.textSecondary;
   };
 
   const getStatusIcon = (status) => {
     if (!status) return 'help';
-    
+
     const statusLower = String(status).toLowerCase();
-    
+
     if (statusLower.includes('enquiry created')) return 'add-circle';
     if (statusLower.includes('approval pending')) return 'pending-actions';
     if (statusLower.includes('coral')) return 'palette';
@@ -1497,15 +1734,15 @@ const EnquiryListScreen = ({ navigation }) => {
     if (statusLower.includes('production')) return 'build';
     if (statusLower.includes('completed')) return 'check-circle';
     if (statusLower.includes('rejected')) return 'cancel';
-    
+
     return 'help';
   };
 
   const getPriorityColor = (priority) => {
     if (!priority) return colors.textSecondary;
-    
+
     const priorityLower = String(priority).toLowerCase();
-    
+
     const priorityColors = {
       'normal': colors.success || '#4CAF50',
       'high': colors.warning || '#FF9800',
@@ -1516,22 +1753,22 @@ const EnquiryListScreen = ({ navigation }) => {
       'urgent': colors.warning || '#FF9800',
       'super urgent': colors.error || '#F44336',
     };
-    
+
     return priorityColors[priorityLower] || colors.textSecondary;
   };
 
   const getPriorityIcon = (priority) => {
     if (!priority) return 'help';
-    
+
     const priorityLower = String(priority).toLowerCase();
-    
+
     if (priorityLower.includes('super') || priorityLower === 'high') {
       return 'priority-high';
     }
     if (priorityLower === 'normal' || priorityLower === 'medium' || priorityLower === 'low') {
       return 'low-priority';
     }
-    
+
     return 'help';
   };
 
@@ -1556,7 +1793,7 @@ const EnquiryListScreen = ({ navigation }) => {
     const now = new Date();
     const diffTime = Math.abs(now - date);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
+
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays} days ago`;
@@ -1605,16 +1842,16 @@ const EnquiryListScreen = ({ navigation }) => {
 
   const renderStatusChips = () => {
     if (statusList.length <= 1) return null;
-    
+
     // Filter out 'All' from status list for multi-select
     const availableStatuses = statusList.filter(status => status !== 'All');
-    
+
     return (
-      <View style={styles.compactFilterRow}>
+      <View style={[styles.compactFilterRow, isTablet && styles.compactFilterRowTablet]}>
         <Text style={styles.compactFilterLabel}>Status:</Text>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
           style={styles.compactChipsScroll}
           contentContainerStyle={styles.compactChipsContent}
         >
@@ -1632,7 +1869,7 @@ const EnquiryListScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
           ))}
-          
+
           {/* Show available status options (excluding selected ones) */}
           {availableStatuses
             .filter(status => !selectedStatuses.includes(status))
@@ -1650,7 +1887,7 @@ const EnquiryListScreen = ({ navigation }) => {
                 <Text style={styles.compactChipText}>{status}</Text>
               </TouchableOpacity>
             ))}
-          
+
           {/* Clear all button if any statuses are selected */}
           {selectedStatuses.length > 0 && (
             <TouchableOpacity
@@ -1673,7 +1910,7 @@ const EnquiryListScreen = ({ navigation }) => {
     if (!clientList || clientList.length === 0) {
       return null;
     }
-    
+
     // Always include "All" in the list, and filter out only non-"All" selected clients
     const allClients = [{ id: 'all', name: 'All' }, ...clientList];
     const availableClients = allClients.filter(client => {
@@ -1682,13 +1919,13 @@ const EnquiryListScreen = ({ navigation }) => {
       // Filter out the selected client only if it's not "All"
       return client.name !== selectedClient;
     });
-    
+
     return (
-      <View style={styles.compactFilterRow}>
+      <View style={[styles.compactFilterRow, isTablet && styles.compactFilterRowTablet]}>
         <Text style={styles.compactFilterLabel}>Client:</Text>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
           style={styles.compactChipsScroll}
           contentContainerStyle={styles.compactChipsContent}
         >
@@ -1707,13 +1944,13 @@ const EnquiryListScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
           )}
-          
+
           {/* Show available client options (including "All" always) */}
           {availableClients.map((client, index) => {
             // Use client ID + index for guaranteed unique key
             const uniqueKey = `client-${client.id}-${index}`;
             const clientName = client.name;
-            
+
             return (
               <TouchableOpacity
                 key={uniqueKey}
@@ -1723,13 +1960,13 @@ const EnquiryListScreen = ({ navigation }) => {
                 ]}
                 onPress={() => {
                   dispatch(setSelectedClient(clientName));
-                  
+
                   if (client.id === 'all') {
                     dispatch(setFilters({ clientId: 'all', client: 'all' }));
                   } else {
-                    dispatch(setFilters({ 
+                    dispatch(setFilters({
                       clientId: String(client.id).trim(),
-                      client: clientName 
+                      client: clientName
                     }));
                   }
                 }}
@@ -1781,7 +2018,7 @@ const EnquiryListScreen = ({ navigation }) => {
               <Icon name="close" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
-          
+
           <ScrollView style={styles.sortOptionsList}>
             {sortOptions.map((option) => (
               <TouchableOpacity
@@ -1792,10 +2029,10 @@ const EnquiryListScreen = ({ navigation }) => {
                 ]}
                 onPress={() => handleSortChange(option.key)}>
                 <View style={styles.sortOptionContent}>
-                  <Icon 
-                    name={option.icon} 
-                    size={20} 
-                    color={sortBy === option.key ? colors.primary : colors.textSecondary} 
+                  <Icon
+                    name={option.icon}
+                    size={20}
+                    color={sortBy === option.key ? colors.primary : colors.textSecondary}
                   />
                   <Text style={[
                     styles.sortOptionText,
@@ -1806,10 +2043,10 @@ const EnquiryListScreen = ({ navigation }) => {
                 </View>
                 {sortBy === option.key && (
                   <View style={styles.sortOrderIndicator}>
-                    <Icon 
-                      name={sortOrder === 'asc' ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} 
-                      size={20} 
-                      color={colors.primary} 
+                    <Icon
+                      name={sortOrder === 'asc' ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+                      size={20}
+                      color={colors.primary}
                     />
                   </View>
                 )}
@@ -1830,7 +2067,7 @@ const EnquiryListScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <TopNavbar navigation={navigation} />
-      <View style={styles.header}>
+      <View style={[styles.header, isTablet && styles.headerTablet]}>
         <View style={styles.searchRow}>
           <View style={styles.searchContainer}>
             <SearchInput
@@ -1840,26 +2077,26 @@ const EnquiryListScreen = ({ navigation }) => {
               onClear={() => dispatch(setSearchQuery(''))}
             />
           </View>
-          
+
           <TouchableOpacity
             style={styles.sortButton}
             onPress={() => setShowSortModal(true)}>
             <Icon name="sort" size={20} color={colors.primary} />
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={styles.filterButton}
             onPress={() => setShowFilters(true)}>
             <Icon name="tune" size={20} color={colors.primary} />
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={styles.downloadButton}
             onPress={handleDownloadAllPDF}>
             <Icon name="download" size={20} color={colors.primary} />
           </TouchableOpacity>
         </View>
-        
+
       </View>
 
       {/* Filter chips - moved outside FlatList to remove gap */}
@@ -1891,6 +2128,7 @@ const EnquiryListScreen = ({ navigation }) => {
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={[
           styles.flatListContent,
+          isTablet && styles.flatListContentTablet,
           (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length === 0) && styles.flatListContentEmpty
         ]}
         style={styles.flatList}
@@ -1898,6 +2136,9 @@ const EnquiryListScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         onScroll={handleScroll}
+        onMomentumScrollBegin={() => {
+          onEndReachedDuringMomentumRef.current = false;
+        }}
         onScrollEndDrag={(event) => {
           const offsetY = event.nativeEvent.contentOffset.y;
           saveScrollPosition(offsetY);
@@ -1907,21 +2148,30 @@ const EnquiryListScreen = ({ navigation }) => {
           saveScrollPosition(offsetY);
         }}
         scrollEventThrottle={16}
-        onEndReached={handleLoadMore}
+        onEndReached={() => {
+          // FlatList can fire onEndReached multiple times during the same momentum scroll.
+          if (onEndReachedDuringMomentumRef.current) return;
+          onEndReachedDuringMomentumRef.current = true;
+          handleLoadMore();
+        }}
         onEndReachedThreshold={0.1} // Lower threshold to load more aggressively and display all enquiries
-        numColumns={2}
-        columnWrapperStyle={styles.row}
+        numColumns={isTablet ? 3 : 2}
+        columnWrapperStyle={isTablet ? styles.rowTablet : styles.row}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={true}
-        maxToRenderPerBatch={10}
-        windowSize={10}
-        initialNumToRender={10}
+        maxToRenderPerBatch={isTablet ? 15 : 10}
+        windowSize={isTablet ? 15 : 10}
+        initialNumToRender={isTablet ? 15 : 10}
         updateCellsBatchingPeriod={50}
-        getItemLayout={(data, index) => ({
-          length: 280, // Approximate card height
-          offset: 280 * Math.floor(index / 2),
-          index,
-        })}
+        getItemLayout={(data, index) => {
+          const numCols = isTablet ? 3 : 2;
+          const cardHeight = isTablet ? 260 : 280;
+          return {
+            length: cardHeight,
+            offset: cardHeight * Math.floor(index / numCols),
+            index,
+          };
+        }}
       />
 
       {renderFilterModal()}
@@ -1946,6 +2196,11 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
     marginBottom: 0,
+  },
+  headerTablet: {
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    maxWidth: '100%',
   },
   headerActions: {
     flexDirection: 'row',
@@ -2003,6 +2258,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
+  },
+  filterChipsContainerTablet: {
+    paddingHorizontal: 32,
+    paddingVertical: 16,
   },
   filterChips: {
     flex: 1,
@@ -2069,9 +2328,18 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     paddingTop: 0,
   },
+  flatListContentTablet: {
+    paddingBottom: 24,
+    paddingTop: 0,
+  },
   row: {
     justifyContent: 'space-between',
     paddingHorizontal: 16,
+  },
+  rowTablet: {
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    gap: 16,
   },
   loadingMoreContainer: {
     paddingVertical: 24,
@@ -2189,7 +2457,7 @@ const styles = StyleSheet.create({
   applyButton: {
     width: '100%',
   },
-  
+
   // Sort Modal Styles
   modalOverlay: {
     flex: 1,
@@ -2275,6 +2543,10 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderLight,
     marginTop: 0,
   },
+  compactFilterRowTablet: {
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+  },
   compactFilterLabel: {
     fontSize: fonts.sm,
     fontFamily: fonts.bold,
@@ -2339,12 +2611,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: colors.textWhite,
   },
-  
+
   // Old chip styles (keeping for backward compatibility if needed)
   chipsGroupRow: {
     marginBottom: 2,
     paddingLeft: 20,    // match Enquiry Cards' left inset
-    paddingRight: 20,  
+    paddingRight: 20,
   },
   chipGroupLabel: {
     fontSize: 13,

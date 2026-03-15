@@ -232,7 +232,7 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         CoralCode: enquiry.CoralCode || enquiry.coralCode || null,
         CadCode: enquiry.CadCode || enquiry.cadCode || null,
         Category: formData.category || 'Ring',
-        Budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : null,
+        Budget: formData.budget && formData.budget.trim() ? formData.budget.trim() : null,
         SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
         ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
       };
@@ -357,7 +357,7 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
           <View style={styles.summaryRow}>
             <BodyText style={styles.summaryLabel}>Budget:</BodyText>
             <BodyText style={styles.summaryValue}>
-              {formData.budget ? `$${parseFloat(formData.budget).toLocaleString('en-US')}` : 'Not specified'}
+              {formData.budget ? formData.budget : 'Not specified'}
             </BodyText>
           </View>
         )}

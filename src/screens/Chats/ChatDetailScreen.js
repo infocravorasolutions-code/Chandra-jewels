@@ -18,6 +18,7 @@ import {
   PermissionsAndroid,
   PanResponder,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import Video from 'react-native-video';
 import ImageZoom from 'react-native-image-pan-zoom';
@@ -191,7 +192,23 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Get original chat data if available (for accessing ClientId from _originalData)
   const originalChatData = chat?._originalData || routeChat?._originalData || chat || routeChat;
 
+  // Track last edit time to prevent refetch immediately after editing
+  const lastEditTimeRef = useRef(0);
+  
+  // Update last edit time when editing completes
+  useEffect(() => {
+    if (!isEditing && lastEditTimeRef.current > 0) {
+      // Edit completed, but don't reset immediately - keep it for a few seconds
+      // This prevents refetch from overwriting the edit
+      setTimeout(() => {
+        lastEditTimeRef.current = 0;
+      }, 3000); // 3 seconds grace period
+    }
+  }, [isEditing]);
+
   // Force refetch when screen is focused (user revisits) and mark messages as read
+  // Note: The useChat hook preserves locally edited messages during refetch
+  // But we also skip refetch if we just edited a message (within last 3 seconds)
   useFocusEffect(
     React.useCallback(() => {
       if (chat?._id && !messagesLoading) {
@@ -201,7 +218,20 @@ const ChatDetailScreen = ({ route, navigation }) => {
           clearChatNotification(chatIdToClear);
         }
         
+        // Don't refetch if we just edited a message (within last 3 seconds)
+        // This prevents overwriting the optimistic update with stale data
+        const timeSinceLastEdit = Date.now() - lastEditTimeRef.current;
+        if (lastEditTimeRef.current > 0 && timeSinceLastEdit < 3000) {
+          if (__DEV__) {
+            console.log('⏸️ [ChatDetailScreen] Skipping refetch - message was just edited', {
+              timeSinceEdit: Math.round(timeSinceLastEdit / 1000) + 's',
+            });
+          }
+          return;
+        }
+        
         // Small delay to ensure screen is fully mounted
+        // The useChat hook will preserve locally edited messages during refetch
         const timer = setTimeout(() => {
           refetchMessages();
         }, 300);
@@ -291,12 +321,29 @@ const ChatDetailScreen = ({ route, navigation }) => {
           });
         }
         
-        // Trigger refetch to get updated messages
+        // Update message immediately via updateMessage (useChat hook will handle this via socket listener)
+        // Don't refetch immediately - the socket event listener in useChat already updates the message
+        // Refetching too early can bring back stale data before backend fully persists
         if (__DEV__) {
-          console.log('✏️ [ChatDetailScreen] Message edited in current chat, refetching messages');
+          console.log('✏️ [ChatDetailScreen] Message edited - useChat hook will update via socket listener, skipping immediate refetch');
         }
+        
+        // Only refetch after a longer delay to ensure backend has persisted (if needed)
+        // But prefer relying on socket event updates instead of refetch
         setTimeout(() => {
-          if (refetchMessages && typeof refetchMessages === 'function') {
+          // Check if message was actually updated by comparing with current state
+          const currentMessage = messages.find(m => String(m._id || m.id) === String(messageId));
+          const expectedText = editedMessage.Message || editedMessage.message || editedMessage.text || '';
+          const currentText = currentMessage?.Message || currentMessage?.message || currentMessage?.text || '';
+          
+          // Only refetch if message doesn't match expected edit (indicates update didn't work)
+          if (currentText !== expectedText && refetchMessages && typeof refetchMessages === 'function') {
+            if (__DEV__) {
+              console.log('✏️ [ChatDetailScreen] Message text mismatch - refetching to sync:', {
+                expected: expectedText.substring(0, 30),
+                current: currentText.substring(0, 30),
+              });
+            }
             try {
               refetchMessages();
             } catch (error) {
@@ -333,7 +380,19 @@ const ChatDetailScreen = ({ route, navigation }) => {
           console.log('🗑️ [ChatDetailScreen] Message deleted, refetching messages');
         }
         setTimeout(() => {
-          if (refetchMessages && typeof refetchMessages === 'function') {
+          // Check if message was actually updated by comparing with current state
+          const currentMessage = messages.find(m => String(m._id || m.id) === String(messageId));
+          const expectedText = editedMessage.Message || editedMessage.message || editedMessage.text || '';
+          const currentText = currentMessage?.Message || currentMessage?.message || currentMessage?.text || '';
+          
+          // Only refetch if message doesn't match expected edit (indicates update didn't work)
+          if (currentText !== expectedText && refetchMessages && typeof refetchMessages === 'function') {
+            if (__DEV__) {
+              console.log('✏️ [ChatDetailScreen] Message text mismatch after socket event - refetching to sync:', {
+                expected: expectedText.substring(0, 30),
+                current: currentText.substring(0, 30),
+              });
+            }
             try {
               refetchMessages();
             } catch (error) {
@@ -341,8 +400,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 console.warn('⚠️ [ChatDetailScreen] Cannot refetch messages - query not started:', error.message);
               }
             }
+          } else if (__DEV__) {
+            console.log('✅ [ChatDetailScreen] Message already updated via socket event, skipping refetch');
           }
-        }, 300);
+        }, 1000); // Increased delay to 1 second to allow socket event to process
       }
     };
 
@@ -1883,13 +1944,20 @@ const ChatDetailScreen = ({ route, navigation }) => {
     // Store original message for rollback
     const originalMessage = { ...editingMessage };
 
+    // Record edit time to prevent premature refetch
+    lastEditTimeRef.current = Date.now();
+    
     // Optimistic update: Update message immediately in local state
+    // The updateMessage function will set _locallyEdited flag and _editTimestamp
+    // This ensures the edited message is preserved even if refetch happens
     updateMessage(messageIdToUpdate, {
       Message: editMessageText.trim(),
       message: editMessageText.trim(),
       text: editMessageText.trim(),
       IsEdited: true,
       isEdited: true,
+      _locallyEdited: true,
+      _editTimestamp: Date.now(),
     });
 
     if (__DEV__) {
@@ -1943,35 +2011,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
           alert.success('Message Edited', 'Your message has been updated');
         }, 500);
         
-        // Invalidate RTK Query cache to force fresh fetch
-        // This ensures we get the latest data from backend, not cached data
-        // getChatMessages uses 'Chat' tag with chatId, so invalidate that specific chat
-        if (chatId) {
-          dispatch(api.util.invalidateTags([{ type: 'Chat', id: chatId }]));
-          if (__DEV__) {
-            console.log('🗑️ [ChatDetailScreen] Invalidated cache for chat:', chatId);
-          }
+        // Don't invalidate cache or refetch immediately
+        // The optimistic update already shows the edited message
+        // The socket event 'messageEdited' will confirm the edit and update the message
+        // Refetching/invalidating too early can bring back stale data before backend fully persists
+        // The useChat hook's handleMessageEdited listener will update the message via socket event
+        if (__DEV__) {
+          console.log('✅ [ChatDetailScreen] Edit sent - optimistic update applied, waiting for socket confirmation');
         }
-        
-        // Trigger refetch after delay to ensure backend processed it
-        // The socket event listener in useChat will also update the message
-        // But we refetch to ensure persistence even if socket event is missed
-        // Increased delay to 5 seconds to ensure backend has fully persisted
-        setTimeout(() => {
-          if (__DEV__) {
-            console.log('🔄 [ChatDetailScreen] Refetching messages after edit to ensure persistence');
-          }
-          // Force refetch with cache bypass - only if query is available
-          if (refetchMessages && typeof refetchMessages === 'function') {
-            try {
-              refetchMessages();
-            } catch (error) {
-              if (__DEV__) {
-                console.warn('⚠️ [ChatDetailScreen] Cannot refetch messages - query not started:', error.message);
-              }
-            }
-          }
-        }, 5000);
       } else {
         throw new Error('Failed to send edit request');
       }
@@ -3126,11 +3173,18 @@ const ChatDetailScreen = ({ route, navigation }) => {
               <TouchableOpacity 
                 onPress={() => handleFilePress(mediaKey, mediaName, 'image')}
                 activeOpacity={0.8}>
-                <Image
-                  source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
-                  style={styles.messageImage}
-                  resizeMode="cover"
-                />
+                <View style={styles.mediaWrapper}>
+                  <Image
+                    source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
+                    style={styles.messageImage}
+                    resizeMode="cover"
+                  />
+                  {message.status === 'sending' && (
+                    <View style={styles.mediaUploadingOverlay}>
+                      <ActivityIndicator size="large" color={colors.textWhite} />
+                    </View>
+                  )}
+                </View>
                 {message.text && (
                   <Text style={[
                     styles.messageText,
@@ -3153,15 +3207,23 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 onPress={() => handleFilePress(mediaKey, mediaName, 'video')}
                 activeOpacity={0.8}
                 style={styles.videoContainer}>
-                <Video
-                  source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
-                  style={styles.messageVideo}
-                  controls={false}
-                  resizeMode="cover"
-                  paused={true}
-                />
-                <View style={styles.videoPlayOverlay}>
-                  <Icon name="play-circle-filled" size={40} color={colors.textWhite} />
+                <View style={styles.mediaWrapper}>
+                  <Video
+                    source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
+                    style={styles.messageVideo}
+                    controls={false}
+                    resizeMode="cover"
+                    paused={true}
+                  />
+                  {message.status === 'sending' ? (
+                    <View style={styles.mediaUploadingOverlay}>
+                      <ActivityIndicator size="large" color={colors.textWhite} />
+                    </View>
+                  ) : (
+                    <View style={styles.videoPlayOverlay}>
+                      <Icon name="play-circle-filled" size={40} color={colors.textWhite} />
+                    </View>
+                  )}
                 </View>
                 {message.text && (
                   <Text style={[
@@ -3178,20 +3240,29 @@ const ChatDetailScreen = ({ route, navigation }) => {
                 onPress={() => handleFilePress(mediaKey, mediaName)}
                 style={styles.fileMessageContainer}
                 activeOpacity={0.8}>
-                <Icon name="insert-drive-file" size={24} color={myMessage ? colors.textWhite : colors.primary} />
-                <View style={styles.fileMessageInfo}>
-                  <Text style={[
-                    styles.fileMessageName,
-                    myMessage ? styles.myMessageText : styles.otherMessageText,
-                  ]} numberOfLines={1}>
-                    {mediaName || 'File'}
-                  </Text>
-                  <Text style={[
-                    styles.fileMessageSize,
-                    myMessage ? styles.myMessageTime : styles.otherMessageTime,
-                  ]}>
-                    Tap to download
-                  </Text>
+                <View style={styles.mediaWrapper}>
+                  <View style={styles.fileMessageInner}>
+                    <Icon name="insert-drive-file" size={24} color={myMessage ? colors.textWhite : colors.primary} />
+                    <View style={styles.fileMessageInfo}>
+                      <Text style={[
+                        styles.fileMessageName,
+                        myMessage ? styles.myMessageText : styles.otherMessageText,
+                      ]} numberOfLines={1}>
+                        {mediaName || 'File'}
+                      </Text>
+                      <Text style={[
+                        styles.fileMessageSize,
+                        myMessage ? styles.myMessageTime : styles.otherMessageTime,
+                      ]}>
+                        Tap to download
+                      </Text>
+                    </View>
+                  </View>
+                  {message.status === 'sending' && (
+                    <View style={styles.mediaUploadingOverlay}>
+                      <ActivityIndicator size="large" color={colors.textWhite} />
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
             ) : (message.messageType === 'audio' || message.MessageType === 'audio') && mediaKey ? (
@@ -3463,14 +3534,21 @@ const ChatDetailScreen = ({ route, navigation }) => {
               )}
               
               {isImage && mediaKey ? (
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => handleFilePress(mediaKey, mediaName, 'image')}
                   activeOpacity={0.8}>
-                  <Image
-                    source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
-                    style={styles.messageImage}
-                    resizeMode="cover"
-                  />
+                  <View style={styles.mediaWrapper}>
+                    <Image
+                      source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
+                      style={styles.messageImage}
+                      resizeMode="cover"
+                    />
+                    {message.status === 'sending' && (
+                      <View style={styles.mediaUploadingOverlay}>
+                        <ActivityIndicator size="large" color={colors.textWhite} />
+                      </View>
+                    )}
+                  </View>
                 {message.text && (
                   <Text style={[
                     styles.messageText,
@@ -3493,15 +3571,23 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   onPress={() => handleFilePress(mediaKey, mediaName, 'video')}
                   activeOpacity={0.8}
                   style={styles.videoContainer}>
-                  <Video
-                    source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
-                    style={styles.messageVideo}
-                    controls={false}
-                    resizeMode="cover"
-                    paused={true}
-                  />
-                  <View style={styles.videoPlayOverlay}>
-                    <Icon name="play-circle-filled" size={40} color={colors.textWhite} />
+                  <View style={styles.mediaWrapper}>
+                    <Video
+                      source={{ uri: mediaUrl || getMediaUrl(mediaKey) }}
+                      style={styles.messageVideo}
+                      controls={false}
+                      resizeMode="cover"
+                      paused={true}
+                    />
+                    {message.status === 'sending' ? (
+                      <View style={styles.mediaUploadingOverlay}>
+                        <ActivityIndicator size="large" color={colors.textWhite} />
+                      </View>
+                    ) : (
+                      <View style={styles.videoPlayOverlay}>
+                        <Icon name="play-circle-filled" size={40} color={colors.textWhite} />
+                      </View>
+                    )}
                   </View>
                   {message.text && (
                     <Text style={[
@@ -4110,8 +4196,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   />
                 </TouchableOpacity>
                   </View>
-                )}
-              </View>
+            )}
+            </View>
             )}
           </View>
         </KeyboardAvoidingView>
@@ -5215,6 +5301,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 6,
     minHeight: 50,
+  },
+  mediaWrapper: {
+    position: 'relative',
+    zIndex: 1,
+  },
+  mediaUploadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+    elevation: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fileMessageInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   textInput: {
     // Remove flex: 1 to allow height to work properly

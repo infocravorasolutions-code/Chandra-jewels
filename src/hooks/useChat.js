@@ -49,6 +49,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
   const [nextCursor, setNextCursor] = useState(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const presignCacheRef = useRef(new Map());
+  const locallyEditedMessagesRef = useRef(new Map()); // Registry to prevent stale API data from overwriting edits
   const joinedChatsRef = useRef(new Set()); // Track which chats we've already joined to prevent infinite loops
 
   // Upload media mutation
@@ -318,11 +319,15 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
   // Use both _id and id to handle different response formats
   // Also use chatId parameter directly if chat state isn't ready yet (for immediate loading)
   const chatIdForQuery = chat?._id || chat?.id || chatId || (initialChat?._id || initialChat?.id);
+  
+  // Track recent edits to prevent auto-refetch from overwriting them
+  const recentEditTimeRef = useRef(0);
+  
   const { data: apiMessages, isLoading: messagesLoading, refetch: refetchMessages, error: messagesError } = useGetChatMessagesQuery(
     { chatId: chatIdForQuery, limit: 20 },
     {
       skip: !chatIdForQuery,
-      refetchOnFocus: true, // Refetch when screen is focused
+      refetchOnFocus: false, // Disabled - we handle refetch manually to prevent overwriting edits
       refetchOnMountOrArgChange: true, // Refetch when chatId changes
     }
   );
@@ -358,8 +363,41 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
   
   // SIMPLIFIED: Always show messages when API provides them
   useEffect(() => {
+    const now = Date.now();
+    const applyLocalEditOverride = (message) => {
+      if (!message) return message;
+      const id = message._id || message.id;
+      if (!id) return message;
+      const idStr = String(id);
+      const localEdit = locallyEditedMessagesRef.current.get(idStr);
+      if (localEdit) {
+        if (now - localEdit.timestamp >= 60000) {
+          locallyEditedMessagesRef.current.delete(idStr);
+        } else {
+          return {
+            ...message,
+            Message: localEdit.text,
+            message: localEdit.text,
+            text: localEdit.text,
+            IsEdited: true,
+            isEdited: true,
+            _locallyEdited: true,
+            _editTimestamp: localEdit.timestamp,
+          };
+        }
+      }
+      if (message.IsEdited || message.isEdited) {
+        return {
+          ...message,
+          _locallyEdited: true,
+          _editTimestamp: message._editTimestamp || now,
+        };
+      }
+      return message;
+    };
+
     // Debug logging
-      if (__DEV__) {
+    if (__DEV__) {
       console.log('🔍 Message Effect Trigger:', {
         chatId: chatIdForQuery,
         chatIdForQuery,
@@ -396,11 +434,49 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         ? apiMessages.map(msg => msg._id || msg.id).filter(Boolean).join(',')
         : 'empty';
       
+      // Check if we have locally edited messages that should be preserved
+      const hasLocallyEditedMessages = messages.some(msg => {
+        const id = msg._id || msg.id;
+        if (!id) return false;
+        const isLocallyEdited = msg._locallyEdited || 
+                               (msg.IsEdited && msg._editTimestamp && 
+                                (Date.now() - msg._editTimestamp) < 300000);
+        return isLocallyEdited;
+      });
+      
+      // Check time since last edit (from ref or messages)
+      const editTimestamps = messages.filter(m => m._editTimestamp).map(m => m._editTimestamp || 0);
+      const lastEditTime = editTimestamps.length > 0 ? Math.max(...editTimestamps) : recentEditTimeRef.current;
+      const timeSinceLastEdit = Date.now() - lastEditTime;
+      
       // ALWAYS update if:
       // - Chat changed
       // - Messages are empty  
-      // - API messages IDs changed
-      const shouldUpdate = chatChanged || messages.length === 0 || apiMessagesIds !== lastApiMessagesRef.current;
+      // - API messages IDs changed (new messages added/removed)
+      // BUT: If we have locally edited messages and API IDs haven't changed, 
+      // skip update if it's been less than 3 seconds since last edit (to allow backend to persist)
+      const apiIdsChanged = apiMessagesIds !== lastApiMessagesRef.current;
+      const shouldSkipDueToRecentEdit = hasLocallyEditedMessages && !apiIdsChanged && timeSinceLastEdit < 3000;
+      
+      const shouldUpdate = chatChanged || 
+                          messages.length === 0 || 
+                          (apiIdsChanged && !shouldSkipDueToRecentEdit);
+      
+      if (__DEV__ && shouldSkipDueToRecentEdit) {
+        console.log('⏸️ [useChat] Skipping API update - recent edit detected:', {
+          timeSinceEdit: Math.round(timeSinceLastEdit / 1000) + 's',
+          hasLocallyEditedMessages,
+          apiIdsChanged,
+        });
+      }
+      
+      // Update lastApiMessagesRef to prevent repeated checks
+      // If we're skipping due to recent edit but IDs haven't changed, mark as processed to prevent repeated checks
+      // Otherwise, only mark as processed if we're actually updating
+      if (shouldUpdate || (!apiIdsChanged && shouldSkipDueToRecentEdit)) {
+        // Mark API messages as processed
+        lastApiMessagesRef.current = apiMessagesIds;
+      }
       
       if (shouldUpdate) {
         if (__DEV__) {
@@ -409,6 +485,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             currentCount: messages.length,
             reason: chatChanged ? 'chat changed' : messages.length === 0 ? 'empty state' : 'api changed',
             firstMessage: apiMessages[0] || null,
+            timeSinceLastEdit: recentEditTimeRef.current > 0 ? Math.round((Date.now() - recentEditTimeRef.current) / 1000) + 's' : 'none',
           });
         }
 
@@ -438,14 +515,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           prevMessages.forEach(msg => {
             const id = msg._id || msg.id;
             if (id) {
-              // If message was edited locally (has IsEdited flag and was updated recently),
-              // mark it to preserve during merge
-              if (msg.IsEdited || msg.isEdited) {
-                // Store timestamp of when it was edited (if available)
-                msg._locallyEdited = true;
-                msg._editTimestamp = Date.now();
-              }
-              messageMap.set(id, msg);
+              messageMap.set(id, applyLocalEditOverride(msg));
             }
           });
           
@@ -579,9 +649,21 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                 // Message already exists - merge carefully to preserve status
                 // CRITICAL: If message was locally edited, preserve the edited text even if API returns old data
                 // Extended timeout to 5 minutes to handle cases where backend takes time to persist
-                const isLocallyEdited = existingMsg._locallyEdited || 
-                                       (existingMsg.IsEdited && existingMsg._editTimestamp && 
-                                        (Date.now() - existingMsg._editTimestamp) < 300000); // Edited within last 5 minutes
+                // Also check if message text differs from API (indicates local edit that hasn't been persisted yet)
+                const hasEditTimestamp = existingMsg._editTimestamp && (Date.now() - existingMsg._editTimestamp) < 300000;
+                const hasLocalEditFlag = existingMsg._locallyEdited === true;
+                const hasIsEditedFlag = existingMsg.IsEdited || existingMsg.isEdited;
+                const textDiffers = existingMsg.Message !== msg.Message || 
+                                   existingMsg.message !== msg.message || 
+                                   existingMsg.text !== msg.text;
+                
+                // Consider locally edited if:
+                // 1. Explicitly marked as locally edited, OR
+                // 2. Has IsEdited flag AND edit timestamp within 5 minutes, OR
+                // 3. Text differs from API AND has IsEdited flag (indicates unsaved edit)
+                const isLocallyEdited = hasLocalEditFlag || 
+                                       (hasIsEditedFlag && hasEditTimestamp) ||
+                                       (hasIsEditedFlag && textDiffers && hasEditTimestamp);
                 
                 // Also check if message was locally deleted
                 const isLocallyDeleted = existingMsg._locallyDeleted || 
@@ -631,10 +713,11 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                 const finalReplyTo = apiReplyTo || existingReplyTo;
                 
                 // If locally edited, preserve the edited message text and IsEdited flag
+                // Always use the existing message text (which has the edit) over API text
                 const preservedMessage = isLocallyEdited ? {
-                  Message: existingMsg.Message || existingMsg.message || existingMsg.text || '',
-                  message: existingMsg.Message || existingMsg.message || existingMsg.text || '',
-                  text: existingMsg.Message || existingMsg.message || existingMsg.text || '',
+                  Message: existingMsg.Message || existingMsg.message || existingMsg.text || msg.Message || msg.message || msg.text || '',
+                  message: existingMsg.Message || existingMsg.message || existingMsg.text || msg.Message || msg.message || msg.text || '',
+                  text: existingMsg.Message || existingMsg.message || existingMsg.text || msg.Message || msg.message || msg.text || '',
                   IsEdited: true,
                   isEdited: true,
                 } : {};
@@ -656,11 +739,14 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                   media: null,
                 } : {};
                 
+                // Merge order is critical: API data first, then existing (optimistic), then preserved (local edits)
+                // This ensures locally edited text always wins over API data
                 messageMap.set(id, {
-                  ...msg, // API data (newer)
-                  ...existingMsg, // Preserve optimistic updates
-                  ...preservedMessage, // Override with locally edited text if applicable
-                  ...preservedDelete, // Override with locally deleted state if applicable
+                  ...msg, // API data (base)
+                  ...existingMsg, // Preserve optimistic updates (status, etc.)
+                  // CRITICAL: Preserved message must come last to override API data
+                  ...(isLocallyEdited ? preservedMessage : {}), // Override with locally edited text if applicable
+                  ...(isLocallyDeleted ? preservedDelete : {}), // Override with locally deleted state if applicable
                   ReadBy: mergedReadBy,
                   readBy: mergedReadBy,
                   status: calculatedStatus, // Use calculated status
@@ -671,11 +757,11 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                   parentMessageId: finalReplyTo,
                   // Preserve audioDuration from either source
                   audioDuration: msg.audioDuration || msg.AudioDuration || existingMsg.audioDuration || existingMsg.AudioDuration,
-                  // Preserve edit/delete timestamps
-                  _editTimestamp: existingMsg._editTimestamp,
-                  _locallyEdited: isLocallyEdited,
-                  _deleteTimestamp: existingMsg._deleteTimestamp,
-                  _locallyDeleted: isLocallyDeleted,
+                  // CRITICAL: Always preserve edit/delete timestamps and flags
+                  _editTimestamp: existingMsg._editTimestamp || msg._editTimestamp,
+                  _locallyEdited: isLocallyEdited || existingMsg._locallyEdited || false,
+                  _deleteTimestamp: existingMsg._deleteTimestamp || msg._deleteTimestamp,
+                  _locallyDeleted: isLocallyDeleted || existingMsg._locallyDeleted || false,
                 });
                 
                 if (__DEV__) {
@@ -684,7 +770,22 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
                       messageId: id,
                       editedText: preservedMessage.Message?.substring(0, 50),
                       apiText: msg.Message?.substring(0, 50),
-                      timeSinceEdit: existingMsg._editTimestamp ? Math.round((Date.now() - existingMsg._editTimestamp) / 1000) : 'unknown',
+                      existingText: existingMsg.Message?.substring(0, 50),
+                      timeSinceEdit: existingMsg._editTimestamp ? Math.round((Date.now() - existingMsg._editTimestamp) / 1000) + 's' : 'unknown',
+                      hasLocalEditFlag: hasLocalEditFlag,
+                      hasIsEditedFlag: hasIsEditedFlag,
+                      hasEditTimestamp: hasEditTimestamp,
+                      textDiffers: textDiffers,
+                      isLocallyEdited: isLocallyEdited,
+                    });
+                  } else if (hasIsEditedFlag && textDiffers) {
+                    console.warn('⚠️ [useChat] Message has IsEdited flag but not marked as locally edited:', {
+                      messageId: id,
+                      existingText: existingMsg.Message?.substring(0, 50),
+                      apiText: msg.Message?.substring(0, 50),
+                      hasLocalEditFlag: hasLocalEditFlag,
+                      hasEditTimestamp: hasEditTimestamp,
+                      editTimestampAge: existingMsg._editTimestamp ? Math.round((Date.now() - existingMsg._editTimestamp) / 1000) + 's' : 'none',
                     });
                   }
                   if (isLocallyDeleted) {
@@ -768,8 +869,9 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             const timeB = new Date(b.Timestamp || b.timestamp || 0);
             return timeA - timeB;
           });
+          const mergedWithLocalEdits = merged.map(msg => applyLocalEditOverride(msg));
           
-          return merged;
+          return mergedWithLocalEdits;
         });
         
         lastApiMessagesRef.current = apiMessagesIds;
@@ -1433,7 +1535,25 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         console.log('✏️ [useChat] messageEdited event received:', payload);
       }
       
-      // Backend payload structure: { _id, ChatId, Message, IsEdited }
+      const editedMessageId = payload._id || payload.id;
+      const incomingText = payload.Message || payload.message || payload.text || '';
+      const messageKey = String(editedMessageId || '');
+      const localEdit = messageKey ? locallyEditedMessagesRef.current.get(messageKey) : null;
+      const shouldRegisterLocalEdit = !!messageKey && !localEdit && incomingText;
+      const shouldRefreshLocalEdit = !!localEdit && incomingText && incomingText === localEdit.text;
+
+      if (shouldRegisterLocalEdit) {
+        locallyEditedMessagesRef.current.set(messageKey, {
+          text: incomingText,
+          timestamp: Date.now(),
+        });
+      } else if (shouldRefreshLocalEdit) {
+        locallyEditedMessagesRef.current.set(messageKey, {
+          text: localEdit.text,
+          timestamp: Date.now(),
+        });
+      }
+
       const messageChatId = payload.ChatId || payload.chatId;
       const currentChatId = String(chatIdForQuery || '').trim();
       
@@ -1451,11 +1571,13 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         const editedMessageId = payload._id || payload.id;
         const newMessageText = payload.Message || payload.message || payload.text || '';
         
-        if (editedMessageId && newMessageText) {
+        const finalText = (localEdit && localEdit.text) || newMessageText;
+
+        if (editedMessageId && finalText) {
           if (__DEV__) {
             console.log('✏️ [useChat] Updating edited message in local state:', {
               messageId: editedMessageId,
-              newText: newMessageText,
+              newText: finalText,
               isEdited: payload.IsEdited,
               currentMessagesCount: messagesRef.current.length,
             });
@@ -1469,17 +1591,21 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
               
               if (msgId === editId) {
                 if (__DEV__) {
-                  console.log('✅ [useChat] Found and updating message:', msgId, 'with text:', newMessageText);
+                  console.log('✅ [useChat] Found and updating message:', msgId, 'with text:', finalText);
                 }
+                // Track edit time to prevent refetches
+                const editTimestamp = Date.now();
+                recentEditTimeRef.current = editTimestamp;
+                
                 return {
                   ...msg,
-                  Message: newMessageText,
-                  message: newMessageText,
-                  text: newMessageText,
+                Message: finalText,
+                message: finalText,
+                text: finalText,
                   IsEdited: true,
                   isEdited: true,
                   _locallyEdited: true,
-                  _editTimestamp: Date.now(),
+                  _editTimestamp: editTimestamp,
                 };
               }
               return msg;
@@ -1489,7 +1615,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             const wasUpdated = updated.some(msg => {
               const msgId = String(msg._id || msg.id || '').trim();
               const editId = String(editedMessageId).trim();
-              return msgId === editId && (msg.IsEdited || msg.isEdited) && msg.Message === newMessageText;
+              return msgId === editId && (msg.IsEdited || msg.isEdited) && msg.Message === finalText;
             });
             
             if (__DEV__) {
@@ -1506,7 +1632,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           if (__DEV__) {
             console.warn('⚠️ [useChat] Cannot update message - missing ID or text:', {
               editedMessageId,
-              hasNewText: !!newMessageText,
+              hasNewText: !!finalText,
               payload,
             });
           }
@@ -1866,15 +1992,6 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           file,
         });
       }
-      const uploadResult = await uploadChatMedia({
-        uri: file.uri,
-        type: file.type || 'image/jpeg',
-        name: file.name || `file_${Date.now()}.jpg`,
-      }).unwrap();
-
-      if (__DEV__) {
-        console.log('[sendMedia] upload result', uploadResult);
-      }
 
       let messageType = file.messageType || 'file';
       if (!messageType) {
@@ -1885,6 +2002,52 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         } else if (file.type?.startsWith('audio/')) {
           messageType = 'audio';
         }
+      }
+
+      // Extract audio duration if present
+      const audioDuration = file.audioDuration || null;
+
+      // Create optimistic media message immediately so UI shows local thumbnail while uploading
+      const initialMediaName = file.name || 'Media file';
+      const optimisticMediaMessage = {
+        _id: tempMediaId,
+        id: tempMediaId,
+        Message: initialMediaName,
+        message: initialMediaName,
+        text: initialMediaName,
+        SenderId: user.id,
+        senderId: user.id,
+        SenderName: user.name || user.email || 'You',
+        senderName: user.name || user.email || 'You',
+        SenderRole: user.role,
+        senderRole: user.role,
+        Timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        MessageType: messageType,
+        messageType: messageType,
+        // Use a temporary key and local URI until upload completes
+        MediaKey: tempMediaId,
+        mediaKey: tempMediaId,
+        MediaUrl: file.uri,
+        mediaUrl: file.uri,
+        MediaName: initialMediaName,
+        mediaName: initialMediaName,
+        ChatId: chatIdForQuery,
+        chatId: chatIdForQuery,
+        status: 'sending',
+        ...(audioDuration && { audioDuration }),
+      };
+      setMessages(prev => [...prev, optimisticMediaMessage]);
+
+      // Now upload the actual media to the server
+      const uploadResult = await uploadChatMedia({
+        uri: file.uri,
+        type: file.type || 'image/jpeg',
+        name: file.name || `file_${Date.now()}.jpg`,
+      }).unwrap();
+
+      if (__DEV__) {
+        console.log('[sendMedia] upload result', uploadResult);
       }
 
       // Normalize upload response; backend may return a plain string key
@@ -1904,38 +2067,21 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         }
       }
 
-      // Extract audio duration if present
-      const audioDuration = file.audioDuration || null;
-      
-      // Create optimistic media message so UI shows thumbnail immediately
-      const optimisticMediaMessage = {
-        _id: tempMediaId,
-        id: tempMediaId,
-        Message: mediaName,
-        message: mediaName,
-        text: mediaName,
-        SenderId: user.id,
-        senderId: user.id,
-        SenderName: user.name || user.email || 'You',
-        senderName: user.name || user.email || 'You',
-        SenderRole: user.role,
-        senderRole: user.role,
-        Timestamp: new Date().toISOString(),
-        timestamp: new Date().toISOString(),
-        MessageType: messageType,
-        messageType: messageType,
-        MediaKey: mediaKey,
-        mediaKey: mediaKey,
-        MediaUrl: finalMediaUrl,
-        mediaUrl: finalMediaUrl,
-        MediaName: mediaName,
-        mediaName: mediaName,
-        ChatId: chatIdForQuery,
-        chatId: chatIdForQuery,
-        status: 'sending',
-        ...(audioDuration && { audioDuration }),
-      };
-      setMessages(prev => [...prev, optimisticMediaMessage]);
+      // Update optimistic message with real media info from server
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === tempMediaId || msg._id === tempMediaId) {
+          return {
+            ...msg,
+            MediaKey: mediaKey,
+            mediaKey: mediaKey,
+            MediaUrl: finalMediaUrl,
+            mediaUrl: finalMediaUrl,
+            MediaName: mediaName,
+            mediaName: mediaName,
+          };
+        }
+        return msg;
+      }));
 
       if (__DEV__) {
         console.log('[sendMedia] sending via socket', {
@@ -2321,13 +2467,30 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
 
   // Function to update a message in local state (for optimistic updates)
   const updateMessage = useCallback((messageId, updates) => {
+    // Track edit time to prevent refetches from overwriting edits
+    const isEditUpdate = updates.IsEdited || updates.isEdited;
+    if (isEditUpdate) {
+      recentEditTimeRef.current = Date.now();
+      
+      const newText = updates.Message || updates.message || updates.text;
+      if (newText) {
+        // Register this edit in our registry to prevent API overwrites for 60 seconds
+        locallyEditedMessagesRef.current.set(String(messageId), {
+          text: newText,
+          timestamp: Date.now()
+        });
+      }
+      
+      if (__DEV__) {
+        console.log('✏️ [useChat] Registered edit in local registry:', { messageId, text: newText?.substring(0, 20) });
+      }
+    }
+    
     setMessages(prev => prev.map(msg => {
       const msgId = String(msg._id || msg.id || '').trim();
       const updateId = String(messageId).trim();
       
       if (msgId === updateId) {
-        // If updating with IsEdited flag, mark as locally edited
-        const isEditUpdate = updates.IsEdited || updates.isEdited;
         const editTimestamp = isEditUpdate ? Date.now() : (msg._editTimestamp || null);
         
         // If updating with IsDeleted flag, mark as locally deleted

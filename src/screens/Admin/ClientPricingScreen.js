@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useGetClientByIdQuery, useUpdateClientPricingMutation } from '../../store/api';
 import DiamondRow from './components/DiamondRow';
 import DiamondEditModal from './components/DiamondEditModal';
+import useDeviceLayout from '../../hooks/useDeviceLayout';
 
 // DocumentPicker is optional
 let DocumentPicker;
@@ -42,6 +43,7 @@ const ClientPricingScreen = ({ route, navigation }) => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedDiamondIndex, setSelectedDiamondIndex] = useState(null);
   const [selectedDiamondData, setSelectedDiamondData] = useState({});
+  const { isTablet } = useDeviceLayout();
 
   // Fetch client data - refetch when screen comes into focus to get latest pricing
   const { data: clientData, isLoading: isLoadingClient, refetch } = useGetClientByIdQuery(clientId, {
@@ -89,7 +91,7 @@ const ClientPricingScreen = ({ route, navigation }) => {
       setLabour(pricing.Labour?.toString() || pricing.labour?.toString() || '0');
       setExtraCharges(pricing.ExtraCharges?.toString() || pricing.extraCharges?.toString() || '0');
       setDuties(pricing.Duties?.toString() || pricing.duties?.toString() || '0');
-      
+
       const diamondsData = pricing.Diamonds || pricing.diamonds || [];
       setDiamonds(
         diamondsData.length > 0
@@ -218,7 +220,7 @@ const ClientPricingScreen = ({ route, navigation }) => {
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(excelData);
       ws['!cols'] = [
-        { wch: 15 }, { wch: 10 }, { wch: 12 }, 
+        { wch: 15 }, { wch: 10 }, { wch: 12 },
         { wch: 12 }, { wch: 15 }, { wch: 12 }
       ];
       XLSX.utils.book_append_sheet(wb, ws, 'Diamonds');
@@ -232,7 +234,7 @@ const ClientPricingScreen = ({ route, navigation }) => {
       const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
       let base64 = '';
       let i = 0;
-      
+
       while (i < bytes.length) {
         const a = bytes[i++];
         const b = i < bytes.length ? bytes[i++] : 0;
@@ -316,13 +318,13 @@ const ClientPricingScreen = ({ route, navigation }) => {
           Alert.alert('Error', 'Could not access the selected file');
           return;
         }
-        
+
         const fileContent = await RNFS.readFile(fileUri, 'base64');
         const workbook = XLSX.read(fileContent, { type: 'base64' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        
+
         if (jsonData.length < 2) {
           Alert.alert('Error', 'Excel file must have at least a header row and one data row');
           return;
@@ -431,22 +433,20 @@ const ClientPricingScreen = ({ route, navigation }) => {
 
       <View style={styles.form}>
         <View style={styles.pricingFields}>
-          <View style={styles.fieldRow}>
-            <View style={styles.field}>
+          <View style={styles.fieldsGrid}>
+            <View style={[styles.fieldContainer, isTablet && styles.fieldContainerTablet]}>
               <Text style={styles.label}>Loss*</Text>
               <Input value={loss} onChangeText={setLoss} keyboardType="numeric" placeholder="0" />
             </View>
-            <View style={styles.field}>
+            <View style={[styles.fieldContainer, isTablet && styles.fieldContainerTablet]}>
               <Text style={styles.label}>Labour*</Text>
               <Input value={labour} onChangeText={setLabour} keyboardType="numeric" placeholder="0" />
             </View>
-          </View>
-          <View style={styles.fieldRow}>
-            <View style={styles.field}>
+            <View style={[styles.fieldContainer, isTablet && styles.fieldContainerTablet]}>
               <Text style={styles.label}>Extra Charges*</Text>
               <Input value={extraCharges} onChangeText={setExtraCharges} keyboardType="numeric" placeholder="0" />
             </View>
-            <View style={styles.field}>
+            <View style={[styles.fieldContainer, isTablet && styles.fieldContainerTablet]}>
               <Text style={styles.label}>Duties*</Text>
               <Input value={duties} onChangeText={setDuties} keyboardType="numeric" placeholder="0" />
             </View>
@@ -526,6 +526,16 @@ const ClientPricingScreen = ({ route, navigation }) => {
         </TouchableOpacity>
         {isExpanded && (
           <View style={styles.typeContent}>
+            {isTablet && (
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderText, { width: '15%' }]}>Shape</Text>
+                <Text style={[styles.tableHeaderText, { width: '15%', textAlign: 'right' }]}>Mm Size</Text>
+                <Text style={[styles.tableHeaderText, { width: '20%', textAlign: 'right' }]}>Sieve</Text>
+                <Text style={[styles.tableHeaderText, { width: '15%', textAlign: 'right' }]}>Carat</Text>
+                <Text style={[styles.tableHeaderText, { width: '15%', textAlign: 'right' }]}>Price</Text>
+                <Text style={[styles.tableHeaderText, { width: '20%', textAlign: 'center' }]}>Actions</Text>
+              </View>
+            )}
             <FlatList
               data={rows}
               keyExtractor={diamondKeyExtractor}
@@ -635,13 +645,18 @@ const styles = StyleSheet.create({
   pricingFields: {
     marginBottom: 24,
   },
-  fieldRow: {
+  fieldsGrid: {
     flexDirection: 'row',
-    gap: 12,
+    flexWrap: 'wrap',
+    marginHorizontal: -6, // Negative margin to offset padding
+  },
+  fieldContainer: {
+    width: '50%', // Default to 2 columns on mobile
+    paddingHorizontal: 6,
     marginBottom: 12,
   },
-  field: {
-    flex: 1,
+  fieldContainerTablet: {
+    width: '25%', // 4 columns on tablet
   },
   label: {
     fontSize: fonts.sm,
@@ -684,6 +699,21 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 12,
     overflow: 'hidden',
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: colors.backgroundSecondary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  tableHeaderText: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.bold,
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    paddingHorizontal: 4,
   },
   typeHeader: {
     flexDirection: 'row',

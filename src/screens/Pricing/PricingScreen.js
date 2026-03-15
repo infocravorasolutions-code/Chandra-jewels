@@ -27,11 +27,13 @@ import RNFS from 'react-native-fs';
 import Share from 'react-native-share';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as XLSX from 'xlsx';
+import useDeviceLayout from '../../hooks/useDeviceLayout';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const PricingScreen = ({ route, navigation }) => {
   const { enquiry: routeEnquiry, designType, enquiryId } = route.params || {}; // designType: 'coral' or 'cad'
+  const { isTablet, width } = useDeviceLayout();
   
   // Get enquiry ID
   const finalEnquiryId = enquiryId || routeEnquiry?.id || routeEnquiry?._id;
@@ -2173,7 +2175,7 @@ const PricingScreen = ({ route, navigation }) => {
     
     
     return (
-      <Card key={index} style={styles.pricingEntryCard}>
+      <Card key={index} style={[styles.pricingEntryCard, isTablet && styles.pricingEntryCardTablet]}>
         <Heading level={4} style={styles.pricingEntryTitle}>
           {getPricingEntryLabel(originalPricingEntry, index)} - Editable
         </Heading>
@@ -2201,9 +2203,9 @@ const PricingScreen = ({ route, navigation }) => {
         </View>
         
         {/* Editable Pricing Details Grid */}
-        <View style={styles.pricingGrid}>
+        <View style={[styles.pricingGrid, isTablet && styles.pricingGridTablet]}>
           {/* Row 1 */}
-          <View style={styles.inputRowThree}>
+          <View style={[styles.inputRowThree, isTablet && styles.inputRowThreeTablet]}>
             <Input
               label="Metal Price*"
               value={entryFormData.metalPrice}
@@ -2287,7 +2289,7 @@ const PricingScreen = ({ route, navigation }) => {
         </View>
 
         {/* Editable Stones Table for this pricing entry */}
-        <View style={styles.pricingEntryStonesContainer}>
+        <View style={[styles.pricingEntryStonesContainer, isTablet && styles.pricingEntryStonesContainerTablet]}>
           <View style={styles.stonesHeader}>
             <Heading level={5} style={[styles.pricingEntryStonesTitle, { flex: 1 }]}>Stones</Heading>
             <TouchableOpacity
@@ -2430,69 +2432,74 @@ const PricingScreen = ({ route, navigation }) => {
           </Modal>
           
           {entryStones.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.tableScrollView}>
-              <View style={styles.tableWrapper}>
+              <ScrollView 
+                horizontal={!isTablet} 
+                showsHorizontalScrollIndicator={isTablet ? false : true} 
+                style={[styles.tableScrollView, isTablet && styles.tableScrollViewTablet]}
+                contentContainerStyle={isTablet ? styles.tableScrollContentTablet : null}
+              >
+              <View style={[styles.tableWrapper, isTablet && styles.tableWrapperTablet]}>
                 {/* Table Header */}
-                    <View style={styles.tableHeader}>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
+                    <View style={[styles.tableHeader, isTablet && styles.tableHeaderTablet]}>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexNumberTablet]}>
+                        <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>#</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexType]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Type</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexType, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexTypeTablet]}>
+                        <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Type</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Shape</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                        <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Shape</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>MM</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                        <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>MM</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexMediumTablet]}>
+                        <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Sieve</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexWeight]}>
-                    <CustomText variant="caption" style={styles.tableHeaderText}>Wt</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexWeight, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexWeightTablet]}>
+                    <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Wt</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                    <CustomText variant="caption" style={styles.tableHeaderText}>Pcs</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                    <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Pcs</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                    <CustomText variant="caption" style={styles.tableHeaderText}>Ct</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                    <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Ct</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Price</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                        <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Price</CustomText>
                       </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                    <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                    <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Color</CustomText>
                   </View>
-                  <View style={[styles.tableHeaderCell, styles.tableCellFlexAction]}>
-                        <CustomText variant="caption" style={styles.tableHeaderText}>Action</CustomText>
+                  <View style={[styles.tableHeaderCell, styles.tableCellFlexAction, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexActionTablet]}>
+                        <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Action</CustomText>
                       </View>
                     </View>
                     
                 {/* Table Body */}
                     <View style={styles.tableBody}>
                       {entryStones.map((stone, originalIndex) => (
-                      <View key={originalIndex} style={[styles.tableRow, originalIndex % 2 === 1 && styles.tableRowEven]}>
-                    <View style={[styles.tableCell, styles.tableCellFlexNumber]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                      <View key={originalIndex} style={[styles.tableRow, isTablet && styles.tableRowTablet, originalIndex % 2 === 1 && styles.tableRowEven]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexNumber, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexNumberTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {originalIndex + 1}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexType]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexType, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexTypeTablet]}>
                           {renderTypeDropdown(`${index}-${originalIndex}`, stoneTypeOptions.find(opt => opt.value === stone.Type)?.label || '', index, originalIndex)}
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
                           <TextInput
-                            style={styles.tableInput}
+                            style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                             value={stone.Shape || ''}
                             onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Shape', value)}
                             placeholder="Shape"
                             placeholderTextColor={colors.textLight}
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
                           <TextInput
-                            style={styles.tableInput}
+                            style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                             value={stone.MM || ''}
                             onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'MM', value)}
                             placeholder="0"
@@ -2500,9 +2507,9 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexMedium]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexMedium, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexMediumTablet]}>
                           <TextInput
-                            style={styles.tableInput}
+                            style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                             value={stone.Sieve || ''}
                             onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Sieve', value)}
                             placeholder="0"
@@ -2510,9 +2517,9 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexWeight]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexWeight, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexWeightTablet]}>
                           <TextInput
-                            style={styles.tableInput}
+                            style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                             value={stone.Weight || '0'}
                             onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Weight', value)}
                             placeholder="0"
@@ -2520,9 +2527,9 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
                           <TextInput
-                            style={styles.tableInput}
+                            style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                             value={stone.Pieces || '0'}
                             onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Pieces', value)}
                             placeholder="0"
@@ -2530,9 +2537,9 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
                           <TextInput
-                            style={styles.tableInput}
+                            style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                             value={stone.CaratWeight || '0'}
                             onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'CaratWeight', value)}
                             placeholder="0"
@@ -2540,9 +2547,9 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
                           <TextInput
-                            style={styles.tableInput}
+                            style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                             value={stone.Price || '0'}
                             onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Price', value)}
                             placeholder="0"
@@ -2550,16 +2557,16 @@ const PricingScreen = ({ route, navigation }) => {
                             keyboardType="numeric"
                           />
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexSmall]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
                       <TextInput
-                        style={styles.tableInput}
+                        style={[styles.tableInput, isTablet && styles.tableInputTablet]}
                         value={stone.Color || ''}
                         onChangeText={(value) => updatePricingEntryStone(index, originalIndex, 'Color', value)}
                         placeholder="Color"
                         placeholderTextColor={colors.textLight}
                       />
                     </View>
-                    <View style={[styles.tableCell, styles.tableCellFlexAction]}>
+                    <View style={[styles.tableCell, styles.tableCellFlexAction, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexActionTablet]}>
                           <TouchableOpacity
                             onPress={() => {
                               Alert.alert(
@@ -2637,9 +2644,9 @@ const PricingScreen = ({ route, navigation }) => {
         </View>
         
         {/* Pricing Details Grid */}
-        <View style={styles.pricingGrid}>
+        <View style={[styles.pricingGrid, isTablet && styles.pricingGridTablet]}>
           {/* Row 1 */}
-          <View style={styles.inputRowThree}>
+          <View style={[styles.inputRowThree, isTablet && styles.inputRowThreeTablet]}>
             <View style={styles.gridInputThird}>
               <CustomText variant="label" style={styles.pricingEntryLabel}>Metal Price</CustomText>
               <CustomText variant="body" style={styles.pricingEntryValue}>
@@ -2713,95 +2720,100 @@ const PricingScreen = ({ route, navigation }) => {
 
         {/* Stones Table for this pricing entry */}
         {pricingStones.length > 0 && (
-          <View style={styles.pricingEntryStonesContainer}>
+          <View style={[styles.pricingEntryStonesContainer, isTablet && styles.pricingEntryStonesContainerTablet]}>
             <Heading level={5} style={styles.pricingEntryStonesTitle}>Stones</Heading>
-            <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.tableScrollView}>
-            <View style={styles.tableWrapper}>
+            <ScrollView 
+              horizontal={!isTablet} 
+              showsHorizontalScrollIndicator={isTablet ? false : true} 
+              style={[styles.tableScrollView, isTablet && styles.tableScrollViewTablet]}
+              contentContainerStyle={isTablet ? styles.tableScrollContentTablet : null}
+            >
+            <View style={[styles.tableWrapper, isTablet && styles.tableWrapperTablet]}>
                   {/* Table Header */}
-                  <View style={styles.tableHeader}>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>#</CustomText>
+                  <View style={[styles.tableHeader, isTablet && styles.tableHeaderTablet]}>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexNumber, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexNumberTablet]}>
+                      <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>#</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexType]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Type</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexType, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexTypeTablet]}>
+                      <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Type</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Shape</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                      <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Shape</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>MM</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                      <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>MM</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Sieve</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexMedium, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexMediumTablet]}>
+                      <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Sieve</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexWeight]}>
-                  <CustomText variant="caption" style={styles.tableHeaderText}>Wt</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexWeight, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexWeightTablet]}>
+                  <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Wt</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                  <CustomText variant="caption" style={styles.tableHeaderText}>Pcs</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                  <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Pcs</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexCt]}>
-                  <CustomText variant="caption" style={styles.tableHeaderText}>Ct</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexCt, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexCtTablet]}>
+                  <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Ct</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexPrice]}>
-                      <CustomText variant="caption" style={styles.tableHeaderText}>Price</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexPrice, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexPriceTablet]}>
+                      <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Price</CustomText>
                     </View>
-                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall]}>
-                  <CustomText variant="caption" style={styles.tableHeaderText}>Color</CustomText>
+                <View style={[styles.tableHeaderCell, styles.tableCellFlexSmall, isTablet && styles.tableHeaderCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                  <CustomText variant="caption" style={[styles.tableHeaderText, isTablet && styles.tableHeaderTextTablet]}>Color</CustomText>
                 </View>
                   </View>
                   
                   {/* Table Body */}
                   <View style={styles.tableBody}>
                     {pricingStones.map((stone, stoneIndex) => (
-                  <View key={stoneIndex} style={[styles.tableRow, styles.tableRowView, stoneIndex % 2 === 1 && styles.tableRowEven]}>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexNumber]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                  <View key={stoneIndex} style={[styles.tableRow, styles.tableRowView, isTablet && styles.tableRowTablet, stoneIndex % 2 === 1 && styles.tableRowEven]}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexNumber, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexNumberTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {stoneIndex + 1}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexType]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexType, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexTypeTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {stone.Type || '-'}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {stone.Shape || '-'}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {stone.MM || '-'}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexMedium]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexMedium, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexMediumTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {stone.Sieve || '-'}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexWeight]}>
-                      <CustomText variant="body" style={styles.tableCellText} numberOfLines={1}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexWeight, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexWeightTablet]}>
+                      <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]} numberOfLines={1}>
                             {parseFloat(stone.Weight || 0).toFixed(4)}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {stone.Pieces || 0}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexCt]}>
-                          <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexCt, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexCtTablet]}>
+                          <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             {parseFloat(stone.CaratWeight || 0).toFixed(3)}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexPrice]}>
-                      <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexPrice, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexPriceTablet]}>
+                      <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                             ${parseFloat(stone.Price || 0).toFixed(2)}
                           </CustomText>
                         </View>
-                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall]}>
-                      <CustomText variant="body" style={styles.tableCellText}>
+                    <View style={[styles.tableCell, styles.tableCellView, styles.tableCellFlexSmall, isTablet && styles.tableCellTablet, isTablet && styles.tableCellFlexSmallTablet]}>
+                      <CustomText variant="body" style={[styles.tableCellText, isTablet && styles.tableCellTextTablet]}>
                         {stone.Color || '-'}
                       </CustomText>
                     </View>
@@ -2818,7 +2830,7 @@ const PricingScreen = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={[styles.scrollContent, isTablet && styles.scrollContentTablet]}>
         {/* Header with Download Excel */}
         <View style={styles.header}>
           <Heading level={3} style={styles.headerTitle}>Pricing</Heading>
@@ -2959,7 +2971,7 @@ const PricingScreen = ({ route, navigation }) => {
               };
               
               return (
-                <Card key={index} style={styles.pricingEntryCard}>
+                <Card key={index} style={[styles.pricingEntryCard, isTablet && styles.pricingEntryCardTablet]}>
                   <View style={styles.pricingEntryHeader}>
                     <Heading level={4} style={styles.pricingEntryTitle}>
                       {getPricingEntryLabel(pricingEntry, index)}
@@ -3032,7 +3044,7 @@ const PricingScreen = ({ route, navigation }) => {
               );
             })
           ) : (
-            <Card style={styles.pricingEntryCard}>
+            <Card style={[styles.pricingEntryCard, isTablet && styles.pricingEntryCardTablet]}>
               <CustomText variant="body" style={styles.noPricingText}>
                 No pricing entries yet. Click "Add Pricing" to create your first pricing entry.
               </CustomText>
@@ -3350,6 +3362,11 @@ const styles = StyleSheet.create({
     padding: 10,
     paddingBottom: 20,
   },
+  scrollContentTablet: {
+    padding: 16,
+    paddingBottom: 24,
+    maxWidth: '100%',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3393,10 +3410,17 @@ const styles = StyleSheet.create({
   pricingGrid: {
     gap: 6,
   },
+  pricingGridTablet: {
+    gap: 12,
+    maxWidth: '100%',
+  },
   inputRow: {
     flexDirection: 'row',
     gap: 8,
     flexWrap: 'wrap',
+  },
+  inputRowTablet: {
+    gap: 12,
   },
   gridInput: {
     flex: 1,
@@ -3408,9 +3432,16 @@ const styles = StyleSheet.create({
     gap: 6,
     flexWrap: 'nowrap',
   },
+  inputRowThreeTablet: {
+    gap: 12,
+  },
   gridInputThird: {
     flexBasis: '32%',
     marginBottom: 4,
+  },
+  gridInputThirdTablet: {
+    flexBasis: '32%',
+    marginBottom: 8,
   },
   inputRowFour: {
     flexDirection: 'row',
@@ -3544,8 +3575,20 @@ const styles = StyleSheet.create({
   stonesTableContainer: {
     marginTop: 12,
   },
+  stonesTableContainerTablet: {
+    marginTop: 16,
+    width: '100%',
+  },
   tableScrollView: {
     maxHeight: 400,
+  },
+  tableScrollViewTablet: {
+    maxHeight: 500,
+    width: '100%',
+  },
+  tableScrollContentTablet: {
+    width: '100%',
+    flexGrow: 1,
   },
   tableWrapper: {
     backgroundColor: colors.background,
@@ -3555,11 +3598,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     minWidth: SCREEN_WIDTH - 32,
   },
+  tableWrapperTablet: {
+    width: '100%',
+    minWidth: '100%',
+    maxWidth: '100%',
+    alignSelf: 'stretch',
+  },
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: colors.primary || '#2196F3',
     borderBottomWidth: 2,
     borderBottomColor: colors.primaryDark || '#1976D2',
+  },
+  tableHeaderTablet: {
+    minHeight: 44,
   },
   tableHeaderCell: {
     paddingVertical: 4,
@@ -3569,11 +3621,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  tableHeaderCellTablet: {
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    minHeight: 44,
+  },
   tableHeaderText: {
     color: colors.textWhite,
     fontFamily: fonts.bold,
     fontSize: 9,
     textAlign: 'center',
+  },
+  tableHeaderTextTablet: {
+    fontSize: 11,
   },
   tableScrollContainer: {
     // Removed - using flex layout instead
@@ -3597,6 +3657,9 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     minHeight: 28,
   },
+  tableRowTablet: {
+    minHeight: 40,
+  },
   tableRowEven: {
     backgroundColor: colors.backgroundSecondary,
   },
@@ -3609,6 +3672,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 28,
   },
+  tableCellTablet: {
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    minHeight: 40,
+  },
   tableCellText: {
     fontSize: 10,
     fontFamily: fonts.regular,
@@ -3617,6 +3685,10 @@ const styles = StyleSheet.create({
     lineHeight: 12,
     flexShrink: 1,
     flexWrap: 'nowrap',
+  },
+  tableCellTextTablet: {
+    fontSize: 12,
+    lineHeight: 16,
   },
   tableInput: {
     borderWidth: 1,
@@ -3631,6 +3703,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     minWidth: 40,
     width: '100%',
+  },
+  tableInputTablet: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    fontSize: 11,
+    minWidth: 50,
   },
   tableCellNumber: {
     width: 25,
@@ -3658,35 +3736,67 @@ const styles = StyleSheet.create({
     flex: 0.4,
     maxWidth: 30,
   },
+  tableCellFlexNumberTablet: {
+    flex: 0.6,
+    maxWidth: 60,
+  },
   tableCellFlexType: {
     flex: 1.2,
     maxWidth: 90,
+  },
+  tableCellFlexTypeTablet: {
+    flex: 2,
+    maxWidth: 180,
   },
   tableCellFlexSmall: {
     flex: 0.8,
     maxWidth: 55,
   },
+  tableCellFlexSmallTablet: {
+    flex: 1.2,
+    maxWidth: 120,
+  },
   tableCellFlexWeight: {
     flex: 1,
     maxWidth: 65,
   },
+  tableCellFlexWeightTablet: {
+    flex: 1.5,
+    maxWidth: 140,
+  },
   tableCellFlexMedium: {
     flex: 1,
     maxWidth: 70,
+  },
+  tableCellFlexMediumTablet: {
+    flex: 1.8,
+    maxWidth: 160,
   },
   tableCellFlexAction: {
     flex: 0.5,
     maxWidth: 40,
     borderRightWidth: 0,
   },
+  tableCellFlexActionTablet: {
+    flex: 0.8,
+    maxWidth: 80,
+  },
   // Wider columns for view mode
   tableCellFlexCt: {
     flex: 1.2,
     maxWidth: 70,
   },
+  tableCellFlexCtTablet: {
+    flex: 1.5,
+    maxWidth: 140,
+  },
   tableCellFlexPrice: {
     flex: 1.2,
     maxWidth: 75,
+  },
+  tableCellFlexPriceTablet: {
+    flex: 1.5,
+    maxWidth: 150,
   },
   tableCellCompact: {
     minHeight: 20,
@@ -3956,6 +4066,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  pricingEntryCardTablet: {
+    padding: 16,
+    marginHorizontal: 0,
+  },
   pricingEntryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -4162,6 +4276,11 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  pricingEntryStonesContainerTablet: {
+    marginTop: 12,
+    paddingTop: 12,
+    width: '100%',
   },
   pricingEntryStonesTitle: {
     marginBottom: 8,
