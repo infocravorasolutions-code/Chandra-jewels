@@ -35,6 +35,10 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     roleLower === 'cl' ||
     user?.roleId === 4 ||
     user?.roleNumber === 4;
+
+  const isAdminLike = !isClient;
+  const [currentStep, setCurrentStep] = useState(1); // 1: type, 2: details, 3: logistics, 4: materials
+  const [projectType, setProjectType] = useState('coral'); // 'coral' | 'approvedCad'
   
   // Initialize form data for new enquiry
   const getInitialFormData = () => {
@@ -59,24 +63,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   };
 
   // Initialize form data - use empty form initially, will be populated in useEffect
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    clientId: '',
-    clientName: '',
-    priority: 'Normal',
-    category: 'Ring',
-    metalColor: '', // Empty by default - optional field
-    metalQuality: '10K',
-    stoneType: '', // Optional field - no default
-    quantity: '1',
-    stamping: '',
-    status: 'Enquiry Created',
-    assignedTo: '',
-    budget: '',
-    specialRemarks: '',
-    approvedDate: '',
-  });
+  const [formData, setFormData] = useState(getInitialFormData());
   const [errors, setErrors] = useState({});
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showMetalColorDropdown, setShowMetalColorDropdown] = useState(false);
@@ -267,6 +254,35 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Lighter validation for intermediate wizard steps
+  const validateCurrentStep = () => {
+    // Step 1: only project type selection (always valid because we default to "coral")
+    if (currentStep === 1) {
+      return true;
+    }
+
+    const stepErrors = {};
+
+    if (currentStep === 2) {
+      if (!formData.title.trim()) {
+        stepErrors.title = 'Name is required';
+      }
+      if (!formData.clientId && !formData.clientName.trim()) {
+        stepErrors.clientId = 'Client is required';
+      }
+    } else if (currentStep === 3) {
+      if (!formData.quantity.trim()) {
+        stepErrors.quantity = 'Quantity is required';
+      }
+    } else if (currentStep === 4) {
+      // On the last step, run full validation
+      return validateForm();
+    }
+
+    setErrors(prev => ({ ...prev, ...stepErrors }));
+    return Object.keys(stepErrors).length === 0;
+  };
+
   const renderDropdown = (label, value, options, onSelect, isVisible, onToggle) => {
     const selectedOption = value ? options.find(opt => opt.value === value) : null;
     const displayText = selectedOption?.label || `Select ${label}`;
@@ -338,7 +354,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     );
   };
 
-  const handleNext = async () => {
+  const handleSubmit = async () => {
     if (!validateForm()) {
       return;
     }
@@ -498,268 +514,346 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // Stone type options from API - add "None" option at the beginning for optional field
   const stoneTypeOptions = [{ label: 'None', value: '' }, ...(stoneTypesData || [])];
 
-  return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{isEditMode ? 'Edit Enquiry' : 'Enquiry Details'}</Text>
-        <Text style={styles.headerSubtitle}>
-          {isEditMode ? 'Update enquiry information' : 'Step 1 of 2 - Basic Information'}
-        </Text>
+  const totalSteps = 4;
+
+  const goToNextStep = () => {
+    if (currentStep < totalSteps) {
+      setCurrentStep(prev => prev + 1);
+    } else {
+      handleSubmit();
+    }
+  };
+
+  const goToPrevStep = () => {
+    if (currentStep > 1) {
+      setCurrentStep(prev => prev - 1);
+    }
+  };
+
+  const renderProgress = () => {
+    const progress = currentStep / totalSteps;
+    return (
+      <View style={styles.progressBarContainer}>
+        <View style={[styles.progressBarFill, { flex: progress }]} />
+        <View style={{ flex: 1 - progress }} />
+      </View>
+    );
+  };
+
+  const handleSelectProjectType = (type) => {
+    setProjectType(type);
+    if (isClient) {
+      // Client users keep "Enquiry Created" status as per existing logic
+      return;
+    }
+    if (type === 'coral') {
+      handleStatusChange('Coral');
+    } else if (type === 'approvedCad') {
+      handleStatusChange('Approved Cad');
+    }
+  };
+
+  const renderStep1Type = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepQuestion}>What would you like to create?</Text>
+      <View style={styles.projectTileRow}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={[
+            styles.projectTile,
+            projectType === 'coral' && styles.projectTileActive,
+          ]}
+          onPress={() => handleSelectProjectType('coral')}
+        >
+          <IconComponent name="waves" size={32} color={colors.primary} />
+          <Text style={styles.projectTileTitle}>Coral</Text>
+          <Text style={styles.projectTileSubtitle}>
+            Start a new custom coral jewellery design.
+          </Text>
+        </TouchableOpacity>
+
+        {isAdminLike && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[
+              styles.projectTile,
+              projectType === 'approvedCad' && styles.projectTileActive,
+            ]}
+            onPress={() => handleSelectProjectType('approvedCad')}
+          >
+            <IconComponent name="description" size={32} color={colors.primary} />
+            <Text style={styles.projectTileTitle}>Approved CAD</Text>
+            <Text style={styles.projectTileSubtitle}>
+              Review and finalise an approved CAD layout.
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+
+  const renderClientTiles = () => {
+    if (isClient) {
+      return (
+        <View style={styles.dropdownContainer}>
+          <Text style={styles.dropdownLabel}>Client*</Text>
+          <View style={[styles.dropdown, styles.disabledDropdown]}>
+            <Text style={[styles.dropdownText, styles.disabledText]}>
+              {formData.clientName || 'Loading...'}
+            </Text>
+            <IconComponent name="lock" size={20} color={colors.textSecondary} />
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.dropdownContainer}>
+        {renderDropdown(
+          'Client*',
+          formData.clientId,
+          clientOptions,
+          (clientId) => {
+            const selectedClient = clients.find(c => (c.id || c._id) === clientId);
+            handleInputChange('clientId', clientId);
+            handleInputChange('clientName', selectedClient?.name || '');
+          },
+          showClientDropdown,
+          () => setShowClientDropdown(!showClientDropdown)
+        )}
+        {errors.clientId && (
+          <Text style={styles.errorText}>{errors.clientId}</Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderStep2Details = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepQuestion}>Tell us about this piece.</Text>
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
+          <Input
+            label="Name of the Piece*"
+            placeholder="Name of the Piece"
+            value={formData.title}
+            onChangeText={(value) => handleInputChange('title', value)}
+            error={errors.title}
+          />
+        </View>
+      </View>
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
+          {renderClientTiles()}
+        </View>
+      </View>
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
+          <Input
+            label="Remarks"
+            placeholder="Add any notes for this project"
+            value={formData.description}
+            onChangeText={(value) => handleInputChange('description', value)}
+            multiline
+            numberOfLines={4}
+          />
+        </View>
+      </View>
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
+          <Input
+            label="Budget"
+            placeholder="Enter budget amount"
+            value={formData.budget}
+            onChangeText={(value) => handleInputChange('budget', value)}
+          />
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderStep3Logistics = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepQuestion}>Set the pace and person.</Text>
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
+          <View style={styles.priorityContainer}>
+            <Text style={styles.priorityLabel}>Priority</Text>
+            <View style={styles.priorityOptions}>
+              {priorityOptions.map((option, index) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.priorityOption,
+                    formData.priority === option.value && styles.priorityOptionActive,
+                    index === priorityOptions.length - 1 && styles.priorityOptionLast,
+                  ]}
+                  onPress={() => handleInputChange('priority', option.value)}
+                  activeOpacity={0.85}
+                >
+                  <Text
+                    style={[
+                      styles.priorityOptionText,
+                      formData.priority === option.value && styles.priorityOptionTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.form}>
-        {/* Row 1: Name and Client */}
-        <View style={styles.formRow}>
-          <View style={styles.formField}>
-            <Input
-              label="Name*"
-              placeholder="Name*"
-              value={formData.title}
-              onChangeText={(value) => handleInputChange('title', value)}
-              error={errors.title}
-            />
-          </View>
-          <View style={styles.formField}>
-            {isClient ? (
-              // For Client users, show as read-only input (pre-selected)
-              <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Client*</Text>
-                <View style={[styles.dropdown, styles.disabledDropdown]}>
-                  <Text style={[styles.dropdownText, styles.disabledText]}>
-                    {formData.clientName || 'Loading...'}
-                  </Text>
-                  <IconComponent name="lock" size={20} color={colors.textSecondary} />
-                </View>
-              </View>
-            ) : (
-              // For other users, show as dropdown
-              renderDropdown(
-                'Client*',
-                formData.clientId,
-                clientOptions,
-                (clientId) => {
-                  const selectedClient = clients.find(c => (c.id || c._id) === clientId);
-                  handleInputChange('clientId', clientId);
-                  handleInputChange('clientName', selectedClient?.name || '');
-                },
-                showClientDropdown,
-                () => setShowClientDropdown(!showClientDropdown)
-              )
-            )}
-            {errors.clientId && (
-              <Text style={styles.errorText}>{errors.clientId}</Text>
-            )}
-          </View>
-        </View>
-
-        {/* Row 2: Priority and Category */}
-        <View style={styles.formRow}>
-          <View style={styles.formField}>
-            <View style={styles.priorityContainer}>
-              <Text style={styles.priorityLabel}>Priority</Text>
-              <View style={styles.priorityOptions}>
-                {priorityOptions.map((option, index) => (
-                  <TouchableOpacity
-                    key={option.value}
-                    style={[
-                      styles.priorityOption,
-                      formData.priority === option.value && styles.priorityOptionActive,
-                      index === priorityOptions.length - 1 && styles.priorityOptionLast,
-                    ]}
-                    onPress={() => handleInputChange('priority', option.value)}>
-                    <Text
-                      style={[
-                        styles.priorityOptionText,
-                        formData.priority === option.value && styles.priorityOptionTextActive,
-                      ]}>
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-          <View style={styles.formField}>
-            {renderDropdown(
-              'Category',
-              formData.category,
-              categoryOptions,
-              (value) => handleInputChange('category', value),
-              showCategoryDropdown,
-              () => setShowCategoryDropdown(!showCategoryDropdown)
-            )}
-          </View>
-        </View>
-
-        {/* Row 3: Stamping and Quantity */}
-        <View style={styles.formRow}>
-          <View style={styles.formField}>
-            <Input
-              label="Stamping"
-              placeholder="Stamping"
-              value={formData.stamping}
-              onChangeText={(value) => handleInputChange('stamping', value)}
-            />
-          </View>
-          <View style={styles.formField}>
-            <Input
-              label="Quantity"
-              placeholder="Quantity"
-              value={formData.quantity}
-              onChangeText={(value) => handleInputChange('quantity', value)}
-              keyboardType="numeric"
-              error={errors.quantity}
-            />
-          </View>
-        </View>
-
-        {/* Row 3.5: Budget (full width) */}
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Input
-              label="Budget"
-              placeholder="Enter budget amount"
-              value={formData.budget}
-              onChangeText={(value) => handleInputChange('budget', value)}
-            />
-          </View>
-        </View>
-
-        {/* Row 4: Status and Assigned To - Hidden for client users */}
-        {!isClient && (
-          <View style={styles.formRow}>
-            <View style={styles.formField}>
-              {renderDropdown(
-                'Status*',
-                formData.status,
-                statusOptions,
-                (value) => handleStatusChange(value),
-                showStatusDropdown,
-                () => setShowStatusDropdown(!showStatusDropdown)
-              )}
-              {errors.status && (
-                <Text style={styles.errorText}>{errors.status}</Text>
-              )}
-            </View>
-            <View style={styles.formField}>
-              {renderDropdown(
-                'Assigned To',
-                formData.assignedTo,
-                assignedToOptions,
-                (value) => handleInputChange('assignedTo', value),
-                showAssignedToDropdown,
-                () => setShowAssignedToDropdown(!showAssignedToDropdown)
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Row 5: Stone Type (full width) */}
+      {!isClient && (
         <View style={styles.formRow}>
           <View style={[styles.formField, styles.fullWidthField]}>
             {renderDropdown(
-              'Stone Type',
-              formData.stoneType,
-              stoneTypeOptions,
-              (value) => handleInputChange('stoneType', value),
-              showStoneTypeDropdown,
-              () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
+              'Assigned To',
+              formData.assignedTo,
+              assignedToOptions,
+              (value) => handleInputChange('assignedTo', value),
+              showAssignedToDropdown,
+              () => setShowAssignedToDropdown(!showAssignedToDropdown)
             )}
           </View>
         </View>
+      )}
 
-        {/* Row 6: Metal Quality and Metal Color */}
-        <View style={styles.formRow}>
-          <View style={styles.formField}>
-            {renderDropdown(
-              'Metal Quality*',
-              formData.metalQuality,
-              metalQualityOptions,
-              (value) => handleInputChange('metalQuality', value),
-              showMetalQualityDropdown,
-              () => setShowMetalQualityDropdown(!showMetalQualityDropdown)
-            )}
-            {errors.metalQuality && (
-              <Text style={styles.errorText}>{errors.metalQuality}</Text>
-            )}
-          </View>
-          <View style={styles.formField}>
-            {renderDropdown(
-              'Metal Color',
-              formData.metalColor,
-              metalColorOptions,
-              (value) => handleInputChange('metalColor', value),
-              showMetalColorDropdown,
-              () => setShowMetalColorDropdown(!showMetalColorDropdown)
-            )}
-          </View>
+      <View style={styles.formRow}>
+        <View style={styles.formField}>
+          <Input
+            label="Quantity"
+            placeholder="Quantity"
+            value={formData.quantity}
+            onChangeText={(value) => handleInputChange('quantity', value)}
+            keyboardType="numeric"
+            error={errors.quantity}
+          />
         </View>
+        <View style={styles.formField}>
+          <Input
+            label="Stamping"
+            placeholder="Stamping"
+            value={formData.stamping}
+            onChangeText={(value) => handleInputChange('stamping', value)}
+          />
+        </View>
+      </View>
+    </View>
+  );
 
-        {/* Row 7: Remarks (full width textarea) */}
+  const renderChipRow = (label, value, options, onSelect) => (
+    <View style={styles.tileGroup}>
+      <Text style={styles.dropdownLabel}>{label}</Text>
+      <View style={styles.chipRowWrap}>
+        {options.map(option => {
+          const selected = value === option.value;
+          return (
+            <TouchableOpacity
+              key={option.value}
+              style={[
+                styles.choiceChip,
+                selected && styles.choiceChipActive,
+              ]}
+              activeOpacity={0.85}
+              onPress={() => onSelect(option.value)}
+            >
+              <Text
+                style={[
+                  styles.choiceChipLabel,
+                  selected && styles.choiceChipLabelActive,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  const renderStep4Materials = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepQuestion}>Define the metal specifications.</Text>
+      {renderChipRow(
+        'Metal Quality*',
+        formData.metalQuality,
+        metalQualityOptions,
+        (val) => handleInputChange('metalQuality', val),
+      )}
+      {errors.metalQuality && (
+        <Text style={styles.errorText}>{errors.metalQuality}</Text>
+      )}
+
+      {renderChipRow(
+        'Metal Color',
+        formData.metalColor,
+        metalColorOptions,
+        (val) => handleInputChange('metalColor', val),
+      )}
+
+      {renderChipRow(
+        'Stone Type',
+        formData.stoneType,
+        stoneTypeOptions,
+        (val) => handleInputChange('stoneType', val),
+      )}
+
+      {!isClient && (
         <View style={styles.formRow}>
           <View style={[styles.formField, styles.fullWidthField]}>
             <Input
-              label="Remarks"
-              placeholder="Remarks"
-              value={formData.description}
-              onChangeText={(value) => handleInputChange('description', value)}
+              label="Special Remarks"
+              placeholder="Special Remarks"
+              value={formData.specialRemarks}
+              onChangeText={(value) => handleInputChange('specialRemarks', value)}
               multiline
               numberOfLines={4}
             />
           </View>
         </View>
+      )}
+    </View>
+  );
 
-        {/* Row 8: Special Remarks (full width textarea) - Hidden for clients */}
-        {!isClient && (
-          <View style={styles.formRow}>
-            <View style={[styles.formField, styles.fullWidthField]}>
-              <Input
-                label="Special Remarks"
-                placeholder="Special Remarks"
-                value={formData.specialRemarks}
-                onChangeText={(value) => handleInputChange('specialRemarks', value)}
-                multiline
-                numberOfLines={4}
-              />
-            </View>
-          </View>
-        )}
+  const renderStepContent = () => {
+    if (currentStep === 1) return renderStep1Type();
+    if (currentStep === 2) return renderStep2Details();
+    if (currentStep === 3) return renderStep3Logistics();
+    return renderStep4Materials();
+  };
 
-        {/* Row 9: Approved Date (full width) - Hidden for clients */}
-        {!isClient && (
-          <View style={styles.formRow}>
-            <View style={[styles.formField, styles.fullWidthField]}>
-              <Text style={styles.dropdownLabel}>Approved Date</Text>
-              <TouchableOpacity
-                style={[styles.dropdown, { minHeight: 44 }]}
-                onPress={() => {
-                  if (formData.approvedDate) {
-                    try {
-                      setTempApprovedDate(new Date(formData.approvedDate));
-                    } catch (e) {
-                      setTempApprovedDate(new Date());
-                    }
-                  } else {
-                    setTempApprovedDate(new Date());
-                  }
-                  setShowApprovedDatePicker(true);
-                }}
-                activeOpacity={0.7}>
-                <Text style={[
-                  styles.dropdownText,
-                  !formData.approvedDate && styles.dropdownPlaceholder,
-                ]}>
-                  {formData.approvedDate || 'Select Approved Date'}
-                </Text>
-                <IconComponent 
-                  name="calendar-today" 
-                  size={20} 
-                  color={colors.primary} 
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+  const mainActionLabel = currentStep === totalSteps
+    ? 'Submit Project'
+    : 'Next';
+
+  const onPrimaryPress = () => {
+    if (!validateCurrentStep()) {
+      return;
+    }
+    // If we're on the last step, validateCurrentStep already ran full validation
+    if (currentStep === totalSteps) {
+      handleSubmit();
+    } else {
+      goToNextStep();
+    }
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Create Enquiry</Text>
+        <Text style={styles.headerSubtitle}>
+          {`Step ${currentStep} of ${totalSteps}`}
+        </Text>
+        {renderProgress()}
+      </View>
+
+      <View style={styles.form}>
+        {renderStepContent()}
 
         {/* Date Picker Modal for Approved Date - Hidden for clients */}
         {!isClient && showApprovedDatePicker && Platform.OS === 'ios' && (
@@ -821,24 +915,48 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           />
         )}
 
-        <TouchableOpacity
-          onPress={handleNext}
-          style={[styles.adminActionButton, styles.adminActionButtonPrimary, isCreatingEnquiry && styles.disabledButton]}
-          activeOpacity={0.85}
-          disabled={isCreatingEnquiry}
-        >
-          {isCreatingEnquiry ? (
-            <>
-              <ActivityIndicator size="small" color={colors.textWhite} style={{ marginRight: 8 }} />
-              <Text style={styles.adminActionText}>Creating Enquiry...</Text>
-            </>
-          ) : (
-            <>
-              <IconComponent name="save" size={18} color={colors.textWhite} />
-              <Text style={styles.adminActionText}>Next</Text>
-            </>
+        <View style={styles.footerActions}>
+          {currentStep > 1 && (
+            <TouchableOpacity
+              onPress={goToPrevStep}
+              style={[styles.adminActionButton, styles.adminActionButtonSecondary]}
+              activeOpacity={0.85}
+              disabled={isCreatingEnquiry}
+            >
+              <IconComponent name="arrow-back" size={18} color={colors.primary} />
+              <Text style={[styles.adminActionText, styles.adminActionSecondaryText]}>
+                Back
+              </Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={onPrimaryPress}
+            style={[
+              styles.adminActionButton,
+              styles.adminActionButtonPrimary,
+              isCreatingEnquiry && styles.disabledButton,
+            ]}
+            activeOpacity={0.85}
+            disabled={isCreatingEnquiry}
+          >
+            {isCreatingEnquiry ? (
+              <>
+                <ActivityIndicator size="small" color={colors.textWhite} style={{ marginRight: 8 }} />
+                <Text style={styles.adminActionText}>Creating Enquiry...</Text>
+              </>
+            ) : (
+              <>
+                <IconComponent
+                  name={currentStep === totalSteps ? 'check-circle' : 'arrow-forward'}
+                  size={18}
+                  color={colors.textWhite}
+                />
+                <Text style={styles.adminActionText}>{mainActionLabel}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     </ScrollView>
   );
@@ -855,6 +973,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  progressBarContainer: {
+    flexDirection: 'row',
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+    backgroundColor: colors.border,
+    marginTop: 12,
+  },
+  progressBarFill: {
+    backgroundColor: colors.primary,
+  },
   headerTitle: {
     fontSize: fonts.lg,
     fontFamily: fonts.bold,
@@ -869,12 +998,85 @@ const styles = StyleSheet.create({
   form: {
     padding: 16,
   },
+  stepContent: {
+    marginTop: 12,
+  },
+  stepQuestion: {
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+    marginBottom: 16,
+  },
+  projectTileRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  projectTile: {
+    flex: 1,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'space-between',
+  },
+  projectTileActive: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+    backgroundColor: colors.background,
+  },
+  projectTileTitle: {
+    marginTop: 12,
+    fontSize: fonts.base,
+    fontFamily: fonts.bold,
+    color: colors.textPrimary,
+  },
+  projectTileSubtitle: {
+    marginTop: 4,
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+  },
   section: {
     marginTop: 20,
   },
   sectionTitle: {
     marginBottom: 12,
     fontSize: fonts.base,
+    fontFamily: fonts.medium,
+  },
+  tileGroup: {
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  chipScrollContent: {
+    paddingVertical: 4,
+  },
+  chipRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  choiceChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.primaryLight ,
+    backgroundColor: colors.primaryExtraLight ,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  choiceChipActive: {
+    borderColor: colors.primaryDark || colors.primary,
+    backgroundColor: colors.primary,
+  },
+  choiceChipLabel: {
+    fontSize: fonts.sm,
+    color: colors.primaryDark || colors.primary,
+  },
+  choiceChipLabelActive: {
+    color: colors.textWhite,
     fontFamily: fonts.medium,
   },
   priorityContainer: {
@@ -891,12 +1093,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   priorityOption: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.background,
+    borderRadius: 999,
+    backgroundColor: colors.primaryExtraLight,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.primaryLight || colors.primary,
     marginRight: 8,
     marginBottom: 8,
   },
@@ -904,18 +1106,18 @@ const styles = StyleSheet.create({
     marginRight: 0,
   },
   priorityOptionActive: {
-    backgroundColor: colors.background, // Light background for black text readability
-    borderColor: colors.primary,
-    borderWidth: 2, // Thicker border to indicate selection
+    backgroundColor: colors.primary,
+    borderColor: colors.primaryDark || colors.primary,
+    borderWidth: 2,
   },
   priorityOptionText: {
     fontSize: fonts.sm,
-    color: colors.textPrimary, // Black text
+    color: colors.primaryDark || colors.primary,
     fontWeight: '500',
   },
   priorityOptionTextActive: {
     fontSize: fonts.sm,
-    color: colors.textPrimary, // Black text when selected
+    color: colors.textWhite,
     fontWeight: '600',
   },
   formRow: {
@@ -930,6 +1132,12 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
   },
+  footerActions: {
+    marginTop: 24,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
   adminActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -942,6 +1150,12 @@ const styles = StyleSheet.create({
   adminActionButtonPrimary: {
     backgroundColor: colors.primary,
   },
+  adminActionButtonSecondary: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
   disabledButton: {
     opacity: 0.6,
   },
@@ -950,6 +1164,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 14,
     marginLeft: 8,
+  },
+  adminActionSecondaryText: {
+    color: colors.primary,
   },
   errorText: {
     color: colors.error,

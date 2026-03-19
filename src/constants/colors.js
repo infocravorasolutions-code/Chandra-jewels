@@ -1,9 +1,10 @@
 export const colors = {
-  primary: '#143F45', // Brand color - Dark teal
+  primary: '#143F45', // Brand color - Dark teal  
   primaryDark: '#0F3236', // Darker shade
   primaryLight: '#235A63', // Lighter shade
   secondary: '#8B4513', // Brown (complementary)
   accent: '#D4AF37', // Gold accent
+  primaryExtraLight: '#E6F0F1',
   
   // Background colors
   background: '#FFFFFF',

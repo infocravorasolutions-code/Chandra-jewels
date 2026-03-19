@@ -2,6 +2,7 @@
 export const images = {
   // App logos and branding
   logo: require('../assets/images/logo.png'),
+  logoFull: require('../assets/images/logoFull.png'),
   logoWhite: require('../assets/images/logo.png'), // Using same logo for now, can be updated later
   logoHeader: require('../assets/images/Chandra logo .svg'),
   headerLogo: require('../assets/images/HeaderLogo.png'),
