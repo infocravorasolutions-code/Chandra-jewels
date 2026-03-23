@@ -9,17 +9,13 @@ import {
   Text,
   Image,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Input, Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../../components/common/Icon';
 import { useGetUsersQuery, useCreateEnquiryMutation, useGetStoneTypesQuery } from '../../store/api';
 import { useClients } from '../../features/clients/clientsHooks';
-import { useStatusOptions } from '../../features/statuses/statusesHooks';
 import { useAuth } from '../../context/AuthContext';
 
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
@@ -36,15 +32,18 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     user?.roleId === 4 ||
     user?.roleNumber === 4;
 
-  const isAdminLike = !isClient;
-  const [currentStep, setCurrentStep] = useState(1); // 1: type, 2: details, 3: logistics, 4: materials
-  const [projectType, setProjectType] = useState('coral'); // 'coral' | 'approvedCad'
+  /** Client: fields only. Admin: type → fields. Summary is on the next screen (upload + instructions + summary). */
+  const totalSteps = isClient ? 1 : 2;
+  const [currentStep, setCurrentStep] = useState(1);
+  /** Admin only: coral | cad | approvedCad — drives Status sent to API */
+  const [projectType, setProjectType] = useState('coral');
   
   // Initialize form data for new enquiry
   const getInitialFormData = () => {
     return {
       title: '',
       description: '',
+      remark: '',
       clientId: '',
       clientName: '',
       priority: 'Normal',
@@ -54,7 +53,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       stoneType: '', // Optional field - no default
       quantity: '1',
       stamping: '',
-      status: 'Enquiry Created',
+      status: 'Coral',
       assignedTo: '',
       budget: '',
       specialRemarks: '',
@@ -65,15 +64,8 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // Initialize form data - use empty form initially, will be populated in useEffect
   const [formData, setFormData] = useState(getInitialFormData());
   const [errors, setErrors] = useState({});
-  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
-  const [showMetalColorDropdown, setShowMetalColorDropdown] = useState(false);
-  const [showMetalQualityDropdown, setShowMetalQualityDropdown] = useState(false);
-  const [showStoneTypeDropdown, setShowStoneTypeDropdown] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
-  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
-  const [showApprovedDatePicker, setShowApprovedDatePicker] = useState(false);
-  const [tempApprovedDate, setTempApprovedDate] = useState(new Date());
   
   // Fetch clients for dropdown (using cached hook)
   const { clients: clientsData = [] } = useClients({
@@ -112,16 +104,13 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           return false;
         }
         
-        // Filter based on status
-        if (statusLower=='cad') {
-          // Show only users with role === 3 for CAD status
-          return roleNumber === 3;
-        } else if (statusLower=='coral') {
-          // Show only users with role === 2 for Coral status
+        // Coral → role 2; CAD and Approved Cad → role 3
+        if (statusLower.includes('coral') && !statusLower.includes('cad')) {
           return roleNumber === 2;
         }
-        
-        // For other statuses, show all non-client users
+        if (statusLower.includes('cad')) {
+          return roleNumber === 3;
+        }
         return true;
       })
       .map(user => ({
@@ -130,53 +119,56 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       }));
   }, [users, formData.status]);
 
-  // Get status options from API (cached)
-  const statusOptionsFromAPI = useStatusOptions();
-  
   // Fetch stone types from API
   const { data: stoneTypesData = [] } = useGetStoneTypesQuery();
-  
-  // Filter out "All Status" option for create/edit forms (only needed in filters)
-  const statusOptions = statusOptionsFromAPI.filter(opt => opt.value !== 'all');
-
-  console.log('🔍 Status Options:', statusOptionsFromAPI);
 
   // Initialize form on mount (only for creating new enquiries)
   useEffect(() => {
     const initialData = getInitialFormData();
-    setFormData(initialData);
-  }, []); // Only run once on mount
+    setFormData({
+      ...initialData,
+      status: isClient ? 'Enquiry Created' : 'Coral',
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Pre-select client for Client users (Role 4) based on their clientId
+  // Client role: bind enquiry to logged-in client (no client picker on the form)
   useEffect(() => {
-    if (isClient && user?.clientId && clients.length > 0) {
-      // Find the client that matches the user's clientId
-      const userClient = clients.find(c => {
-        const clientId = c.id || c._id;
-        return String(clientId).trim() === String(user.clientId).trim();
-      });
-      
-      if (userClient) {
-        const clientId = userClient.id || userClient._id;
-        const clientName = userClient.name || userClient.Name || '';
-        
-     
-        
-        setFormData(prev => ({
-          ...prev,
-          clientId: clientId,
-          clientName: clientName,
-        }));
-      } else {
-        if (__DEV__) {
-          console.warn('⚠️ [ADD ENQUIRY] Client user clientId not found in clients list:', {
-            userClientId: user.clientId,
-            availableClients: clients.map(c => ({ id: c.id || c._id, name: c.name })),
-          });
-        }
-      }
+    if (!isClient || !user?.clientId) {
+      return;
     }
-  }, [isClient, user?.clientId, clients]);
+    const userClient = clients.find(c => {
+      const cid = c.id || c._id;
+      return String(cid).trim() === String(user.clientId).trim();
+    });
+    const nameFromDirectory =
+      userClient && (userClient.name || userClient.Name || '');
+    const nameFromUser =
+      user.name ||
+      user.fullName ||
+      user.Name ||
+      user.email ||
+      '';
+
+    setFormData(prev => ({
+      ...prev,
+      clientId: user.clientId,
+      clientName: nameFromDirectory || nameFromUser || prev.clientName || '',
+    }));
+
+    if (__DEV__ && clients.length > 0 && !userClient) {
+      console.warn('⚠️ [ADD ENQUIRY] Client user clientId not in clients list; using profile name.', {
+        userClientId: user.clientId,
+      });
+    }
+  }, [
+    isClient,
+    user?.clientId,
+    user?.name,
+    user?.fullName,
+    user?.Name,
+    user?.email,
+    clients,
+  ]);
 
   // Ensure status is always "Enquiry Created" for client users
   useEffect(() => {
@@ -227,60 +219,55 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     const newErrors = {};
 
     if (!formData.title.trim()) {
-      newErrors.title = 'Name is required';
+      newErrors.title = 'Name of the piece is required';
     }
 
     if (!formData.clientId && !formData.clientName.trim()) {
       newErrors.clientId = 'Client is required';
     }
 
-    // For client users, status is always "Enquiry Created" (set automatically)
-    // For other users, status is required
-    if (!isClient && !formData.status) {
-      newErrors.status = 'Status is required';
+    if (!isClient) {
+      const st = String(formData.status || '').trim();
+      if (!st) {
+        newErrors.status = 'Status is required';
+      }
     }
 
-    if (!formData.metalQuality) {
-      newErrors.metalQuality = 'Metal Quality is required';
-    }
-
-    // Metal Color is optional - no validation needed
-
-    if (!formData.quantity.trim()) {
-      newErrors.quantity = 'Quantity is required';
+    if (isClient && !formData.metalQuality) {
+      newErrors.metalQuality = 'Metal quality is required';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  // Lighter validation for intermediate wizard steps
   const validateCurrentStep = () => {
-    // Step 1: only project type selection (always valid because we default to "coral")
-    if (currentStep === 1) {
-      return true;
-    }
-
     const stepErrors = {};
 
-    if (currentStep === 2) {
-      if (!formData.title.trim()) {
-        stepErrors.title = 'Name is required';
-      }
+    if (isClient) {
+      if (!formData.title.trim()) stepErrors.title = 'Name of the piece is required';
       if (!formData.clientId && !formData.clientName.trim()) {
         stepErrors.clientId = 'Client is required';
       }
-    } else if (currentStep === 3) {
-      if (!formData.quantity.trim()) {
-        stepErrors.quantity = 'Quantity is required';
+      if (!formData.metalQuality) stepErrors.metalQuality = 'Metal quality is required';
+    } else if (currentStep === 1) {
+      return true;
+    } else if (currentStep === 2) {
+      if (!formData.title.trim()) stepErrors.title = 'Name of the piece is required';
+      if (!formData.clientId && !formData.clientName.trim()) {
+        stepErrors.clientId = 'Client is required';
       }
-    } else if (currentStep === 4) {
-      // On the last step, run full validation
-      return validateForm();
     }
 
     setErrors(prev => ({ ...prev, ...stepErrors }));
     return Object.keys(stepErrors).length === 0;
+  };
+
+  const buildRemarksForApi = () => {
+    if (isClient && formData.remark?.trim()) {
+      return formData.remark.trim();
+    }
+    return null;
   };
 
   const renderDropdown = (label, value, options, onSelect, isVisible, onToggle) => {
@@ -389,7 +376,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       // Prepare enquiry data according to API structure (without images)
       const enquiryData = {
         Name: formData.title || '',
-        ClientId: formData.clientId || user.id,
+        ClientId: isClient
+          ? formData.clientId || user.clientId || user.id
+          : formData.clientId || user.id,
         AssignedTo: isClient ? null : (formData.assignedTo || null), // Client users can't assign
         Status: enquiryStatus,
         Priority: mappedPriority,
@@ -412,13 +401,18 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           Exact: null,
         },
         Stamping: formData.stamping || null,
-        Remarks: formData.description || '',
+        Remarks: buildRemarksForApi() || '',
         ShippingDate: null,
         CoralCode: null,
         CadCode: null,
         Category: formData.category || 'Ring',
         Budget: formData.budget && formData.budget.trim() ? formData.budget.trim() : null,
-        SpecialRemarks: formData.specialRemarks && formData.specialRemarks.trim() ? formData.specialRemarks.trim() : null,
+        SpecialRemarks:
+          !isClient && formData.remark && formData.remark.trim()
+            ? formData.remark.trim()
+            : formData.specialRemarks && formData.specialRemarks.trim()
+              ? formData.specialRemarks.trim()
+              : null,
         ApprovedDate: formData.approvedDate && formData.approvedDate.trim() ? formData.approvedDate : null,
         // Do NOT include ReferenceImages here - they will be uploaded in Step 2
       };
@@ -458,10 +452,14 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
         'Name': createResult?.Name || createResult?.name || enquiryData.Name,
       });
 
-      // Navigate to Step 2 with enquiry ID and form data
-      navigation.navigate('AddEnquiryStep2', { 
-        formData,
-        enquiryId, // Pass the enquiry ID to Step 2
+      const formDataForUpload = {
+        ...formData,
+        description: buildRemarksForApi() || '',
+      };
+
+      navigation.navigate('AddEnquiryStep2', {
+        formData: formDataForUpload,
+        enquiryId,
         isEditMode: false,
       });
     } catch (error) {
@@ -477,19 +475,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     { label: 'Normal', value: 'Normal' },
     { label: 'High', value: 'High' },
     { label: 'Super High', value: 'Super High' },
-  ];
-
-  const categoryOptions = [
-    { label: 'Necklace', value: 'Necklace' },
-    { label: 'Ring', value: 'Ring' },
-    { label: 'Earring', value: 'Earring' },
-    { label: 'Bracelet', value: 'Bracelet' },
-    { label: 'Pendant', value: 'Pendant' },
-    { label: 'Hoops', value: 'Hoops' },
-    { label: 'Chain', value: 'Chain' },
-    { label: 'Bangle', value: 'Bangle' },
-    { label: 'Belt Buckle', value: 'Belt Buckle' },
-    { label: 'Custom', value: 'Custom' },
   ];
 
   const metalColorOptions = [
@@ -513,8 +498,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   // Stone type options from API - add "None" option at the beginning for optional field
   const stoneTypeOptions = [{ label: 'None', value: '' }, ...(stoneTypesData || [])];
-
-  const totalSteps = 4;
 
   const goToNextStep = () => {
     if (currentStep < totalSteps) {
@@ -543,68 +526,73 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   const handleSelectProjectType = (type) => {
     setProjectType(type);
     if (isClient) {
-      // Client users keep "Enquiry Created" status as per existing logic
       return;
     }
     if (type === 'coral') {
       handleStatusChange('Coral');
+    } else if (type === 'cad') {
+      handleStatusChange('CAD');
     } else if (type === 'approvedCad') {
       handleStatusChange('Approved Cad');
     }
   };
 
-  const renderStep1Type = () => (
+  const renderAdminStep1Type = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepQuestion}>What would you like to create?</Text>
-      <View style={styles.projectTileRow}>
+      <Text style={styles.stepQuestion}>Choose enquiry status</Text>
+      <Text style={styles.stepHint}>
+        Pick Coral, CAD, or Approved CAD. Assign To options match the status you choose.
+      </Text>
+      <View style={styles.projectTileRowWrap}>
         <TouchableOpacity
           activeOpacity={0.85}
           style={[
             styles.projectTile,
+            styles.projectTileThird,
             projectType === 'coral' && styles.projectTileActive,
           ]}
           onPress={() => handleSelectProjectType('coral')}
         >
-          <IconComponent name="waves" size={32} color={colors.primary} />
+          <IconComponent name="waves" size={28} color={colors.primary} />
           <Text style={styles.projectTileTitle}>Coral</Text>
-          <Text style={styles.projectTileSubtitle}>
-            Start a new custom coral jewellery design.
-          </Text>
+          <Text style={styles.projectTileSubtitle}>Coral design track</Text>
         </TouchableOpacity>
 
-        {isAdminLike && (
-          <TouchableOpacity
-            activeOpacity={0.85}
-            style={[
-              styles.projectTile,
-              projectType === 'approvedCad' && styles.projectTileActive,
-            ]}
-            onPress={() => handleSelectProjectType('approvedCad')}
-          >
-            <IconComponent name="description" size={32} color={colors.primary} />
-            <Text style={styles.projectTileTitle}>Approved CAD</Text>
-            <Text style={styles.projectTileSubtitle}>
-              Review and finalise an approved CAD layout.
-            </Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={[
+            styles.projectTile,
+            styles.projectTileThird,
+            projectType === 'cad' && styles.projectTileActive,
+          ]}
+          onPress={() => handleSelectProjectType('cad')}
+        >
+          <IconComponent name="architecture" size={28} color={colors.primary} />
+          <Text style={styles.projectTileTitle}>CAD</Text>
+          <Text style={styles.projectTileSubtitle}>CAD workflow</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={[
+            styles.projectTile,
+            styles.projectTileThird,
+            projectType === 'approvedCad' && styles.projectTileActive,
+          ]}
+          onPress={() => handleSelectProjectType('approvedCad')}
+        >
+          <IconComponent name="description" size={28} color={colors.primary} />
+          <Text style={styles.projectTileTitle}>Approved CAD</Text>
+          <Text style={styles.projectTileSubtitle}>Approved CAD track</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
 
+  /** Client picker — staff only; clients are auto-bound to the logged-in account */
   const renderClientTiles = () => {
     if (isClient) {
-      return (
-        <View style={styles.dropdownContainer}>
-          <Text style={styles.dropdownLabel}>Client*</Text>
-          <View style={[styles.dropdown, styles.disabledDropdown]}>
-            <Text style={[styles.dropdownText, styles.disabledText]}>
-              {formData.clientName || 'Loading...'}
-            </Text>
-            <IconComponent name="lock" size={20} color={colors.textSecondary} />
-          </View>
-        </View>
-      );
+      return null;
     }
 
     return (
@@ -628,14 +616,14 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     );
   };
 
-  const renderStep2Details = () => (
+  const renderAdminStep2Fields = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepQuestion}>Tell us about this piece.</Text>
+      <Text style={styles.stepQuestion}>Enquiry details</Text>
       <View style={styles.formRow}>
         <View style={[styles.formField, styles.fullWidthField]}>
           <Input
             label="Name of the Piece*"
-            placeholder="Name of the Piece"
+            placeholder="Name of the piece"
             value={formData.title}
             onChangeText={(value) => handleInputChange('title', value)}
             error={errors.title}
@@ -649,32 +637,16 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       </View>
       <View style={styles.formRow}>
         <View style={[styles.formField, styles.fullWidthField]}>
-          <Input
-            label="Remarks"
-            placeholder="Add any notes for this project"
-            value={formData.description}
-            onChangeText={(value) => handleInputChange('description', value)}
-            multiline
-            numberOfLines={4}
-          />
+          {renderDropdown(
+            'Assign To',
+            formData.assignedTo,
+            assignedToOptions,
+            (value) => handleInputChange('assignedTo', value),
+            showAssignedToDropdown,
+            () => setShowAssignedToDropdown(!showAssignedToDropdown)
+          )}
         </View>
       </View>
-      <View style={styles.formRow}>
-        <View style={[styles.formField, styles.fullWidthField]}>
-          <Input
-            label="Budget"
-            placeholder="Enter budget amount"
-            value={formData.budget}
-            onChangeText={(value) => handleInputChange('budget', value)}
-          />
-        </View>
-      </View>
-    </View>
-  );
-
-  const renderStep3Logistics = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepQuestion}>Set the pace and person.</Text>
       <View style={styles.formRow}>
         <View style={[styles.formField, styles.fullWidthField]}>
           <View style={styles.priorityContainer}>
@@ -705,39 +677,75 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
           </View>
         </View>
       </View>
-
-      {!isClient && (
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            {renderDropdown(
-              'Assigned To',
-              formData.assignedTo,
-              assignedToOptions,
-              (value) => handleInputChange('assignedTo', value),
-              showAssignedToDropdown,
-              () => setShowAssignedToDropdown(!showAssignedToDropdown)
-            )}
-          </View>
-        </View>
-      )}
-
       <View style={styles.formRow}>
-        <View style={styles.formField}>
+        <View style={[styles.formField, styles.fullWidthField]}>
           <Input
-            label="Quantity"
-            placeholder="Quantity"
-            value={formData.quantity}
-            onChangeText={(value) => handleInputChange('quantity', value)}
-            keyboardType="numeric"
-            error={errors.quantity}
+            label="Remark"
+            placeholder="Internal remark (optional)"
+            value={formData.remark}
+            onChangeText={(value) => handleInputChange('remark', value)}
+            multiline
+            numberOfLines={3}
           />
         </View>
-        <View style={styles.formField}>
+      </View>
+    </View>
+  );
+
+  const renderClientStepFields = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepQuestion}>Your enquiry</Text>
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
           <Input
-            label="Stamping"
-            placeholder="Stamping"
-            value={formData.stamping}
-            onChangeText={(value) => handleInputChange('stamping', value)}
+            label="Name of the Piece*"
+            placeholder="Name of the piece"
+            value={formData.title}
+            onChangeText={(value) => handleInputChange('title', value)}
+            error={errors.title}
+          />
+        </View>
+      </View>
+      {renderChipRow(
+        'Stone type',
+        formData.stoneType,
+        stoneTypeOptions,
+        (val) => handleInputChange('stoneType', val),
+      )}
+      {renderChipRow(
+        'Metal quality*',
+        formData.metalQuality,
+        metalQualityOptions,
+        (val) => handleInputChange('metalQuality', val),
+      )}
+      {errors.metalQuality ? (
+        <Text style={styles.errorText}>{errors.metalQuality}</Text>
+      ) : null}
+      {renderChipRow(
+        'Metal color',
+        formData.metalColor,
+        metalColorOptions,
+        (val) => handleInputChange('metalColor', val),
+      )}
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
+          <Input
+            label="Remark"
+            placeholder="Any other notes"
+            value={formData.remark}
+            onChangeText={(value) => handleInputChange('remark', value)}
+            multiline
+            numberOfLines={3}
+          />
+        </View>
+      </View>
+      <View style={styles.formRow}>
+        <View style={[styles.formField, styles.fullWidthField]}>
+          <Input
+            label="Budget"
+            placeholder="Budget (optional)"
+            value={formData.budget}
+            onChangeText={(value) => handleInputChange('budget', value)}
           />
         </View>
       </View>
@@ -775,60 +783,16 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     </View>
   );
 
-  const renderStep4Materials = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepQuestion}>Define the metal specifications.</Text>
-      {renderChipRow(
-        'Metal Quality*',
-        formData.metalQuality,
-        metalQualityOptions,
-        (val) => handleInputChange('metalQuality', val),
-      )}
-      {errors.metalQuality && (
-        <Text style={styles.errorText}>{errors.metalQuality}</Text>
-      )}
-
-      {renderChipRow(
-        'Metal Color',
-        formData.metalColor,
-        metalColorOptions,
-        (val) => handleInputChange('metalColor', val),
-      )}
-
-      {renderChipRow(
-        'Stone Type',
-        formData.stoneType,
-        stoneTypeOptions,
-        (val) => handleInputChange('stoneType', val),
-      )}
-
-      {!isClient && (
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Input
-              label="Special Remarks"
-              placeholder="Special Remarks"
-              value={formData.specialRemarks}
-              onChangeText={(value) => handleInputChange('specialRemarks', value)}
-              multiline
-              numberOfLines={4}
-            />
-          </View>
-        </View>
-      )}
-    </View>
-  );
-
   const renderStepContent = () => {
-    if (currentStep === 1) return renderStep1Type();
-    if (currentStep === 2) return renderStep2Details();
-    if (currentStep === 3) return renderStep3Logistics();
-    return renderStep4Materials();
+    if (isClient) {
+      return renderClientStepFields();
+    }
+    if (currentStep === 1) return renderAdminStep1Type();
+    return renderAdminStep2Fields();
   };
 
-  const mainActionLabel = currentStep === totalSteps
-    ? 'Submit Project'
-    : 'Next';
+  const mainActionLabel =
+    currentStep === totalSteps ? 'Create enquiry' : 'Next';
 
   const onPrimaryPress = () => {
     if (!validateCurrentStep()) {
@@ -854,66 +818,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
       <View style={styles.form}>
         {renderStepContent()}
-
-        {/* Date Picker Modal for Approved Date - Hidden for clients */}
-        {!isClient && showApprovedDatePicker && Platform.OS === 'ios' && (
-          <Modal
-            transparent={true}
-            animationType="slide"
-            visible={showApprovedDatePicker}
-            onRequestClose={() => setShowApprovedDatePicker(false)}>
-            <TouchableOpacity
-              style={styles.modalOverlay}
-              activeOpacity={1}
-              onPress={() => setShowApprovedDatePicker(false)}>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={(e) => e.stopPropagation()}
-                style={styles.datePickerContainer}>
-                <View style={styles.datePickerHeader}>
-                  <TouchableOpacity
-                    onPress={() => setShowApprovedDatePicker(false)}
-                    style={styles.datePickerCancel}>
-                    <Text style={styles.datePickerCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.datePickerTitle}>Select Approved Date</Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      const formattedDate = tempApprovedDate.toISOString().split('T')[0];
-                      handleInputChange('approvedDate', formattedDate);
-                      setShowApprovedDatePicker(false);
-                    }}
-                    style={styles.datePickerDone}>
-                    <Text style={styles.datePickerDoneText}>Done</Text>
-                  </TouchableOpacity>
-                </View>
-                <DateTimePicker
-                  value={tempApprovedDate}
-                  mode="date"
-                  display="spinner"
-                  onChange={(event, date) => {
-                    if (date) setTempApprovedDate(date);
-                  }}
-                  style={styles.datePicker}
-                />
-              </TouchableOpacity>
-            </TouchableOpacity>
-          </Modal>
-        )}
-        {!isClient && showApprovedDatePicker && Platform.OS === 'android' && (
-          <DateTimePicker
-            value={tempApprovedDate}
-            mode="date"
-            display="default"
-            onChange={(event, date) => {
-              setShowApprovedDatePicker(false);
-              if (event.type === 'set' && date) {
-                const formattedDate = date.toISOString().split('T')[0];
-                handleInputChange('approvedDate', formattedDate);
-              }
-            }}
-          />
-        )}
 
         <View style={styles.footerActions}>
           {currentStep > 1 && (
@@ -1011,8 +915,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
+  projectTileRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  projectTileThird: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 100,
+    maxWidth: '100%',
+  },
+  stepHint: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    marginBottom: 16,
+    lineHeight: 20,
+  },
   projectTile: {
-    flex: 1,
     backgroundColor: colors.backgroundSecondary,
     borderRadius: 16,
     padding: 16,

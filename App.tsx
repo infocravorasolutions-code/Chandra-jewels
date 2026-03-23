@@ -18,6 +18,7 @@ import { AlertProvider } from './src/context/AlertContext';
 import UsersProvider from './src/components/providers/UsersProvider';
 import PushNotificationsInitializer from './src/components/providers/PushNotificationsInitializer';
 import SocketConnectionManager from './src/components/providers/SocketConnectionManager';
+import ChatListSocketSync from './src/components/providers/ChatListSocketSync';
 import { isFirstLaunch } from './src/utils/firstLaunch';
 
 const AppContent = () => {
@@ -58,6 +59,7 @@ const AppContent = () => {
           <AlertProvider>
             <PushNotificationsInitializer />
             <SocketConnectionManager />
+            <ChatListSocketSync />
             <AppNavigator showOnboarding={showOnboarding} onOnboardingComplete={() => setShowOnboarding(false)} />
           </AlertProvider>
         </UsersProvider>

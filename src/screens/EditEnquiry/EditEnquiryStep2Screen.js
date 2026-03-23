@@ -22,6 +22,18 @@ import { formatDate } from '../../utils';
 const EditEnquiryStep2Screen = ({ route, navigation }) => {
   const { formData, enquiry } = route.params;
   const { user } = useAuth();
+  const roleLower = user?.role?.toLowerCase();
+  const isClient =
+    roleLower === 'client' ||
+    roleLower === 'cl' ||
+    user?.roleId === 4 ||
+    user?.roleNumber === 4;
+
+  const clientIdForApi =
+    formData.clientId ||
+    (isClient ? user?.clientId : null) ||
+    enquiry.clientId ||
+    enquiry.ClientId;
   const [selectedImages, setSelectedImages] = useState([]);
   
   // Redux mutations
@@ -204,7 +216,7 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
       const enquiryData = {
         Id: enquiry.id,
         Name: formData.title,
-        ClientId: formData.clientId || enquiry.clientId || enquiry.ClientId,
+        ClientId: clientIdForApi,
         AssignedTo: formData.assignedTo || enquiry.AssignedTo || enquiry.assignedTo || null,
         Status: formData.status || enquiry.Status || enquiry.status || 'Enquiry Created',
         Priority: priorityForAPI,
@@ -283,13 +295,13 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
         Stamping: formData.stamping || null,
         StyleNumber: formData.styleNumber || null,
         GatiOrderNumber: formData.gatiOrderNumber || null,
-        ClientId: formData.clientId || enquiry.clientId || enquiry.ClientId,
+        ClientId: clientIdForApi,
         AssignedTo: formData.assignedTo || enquiry.AssignedTo || enquiry.assignedTo,
         Status: formData.status || enquiry.Status || enquiry.status,
         CoralCode: enquiry.CoralCode || enquiry.coralCode,
         CadCode: enquiry.CadCode || enquiry.cadCode,
         clientName: enquiry.clientName,
-        clientId: formData.clientId || enquiry.clientId,
+        clientId: clientIdForApi,
         createdAt: enquiry.createdAt,
         status: enquiry.status,
         budget: formData.budget && formData.budget.trim() ? parseFloat(formData.budget) || null : (enquiry.budget || null),
@@ -349,10 +361,12 @@ const EditEnquiryStep2Screen = ({ route, navigation }) => {
           <BodyText style={styles.summaryLabel}>Category:</BodyText>
           <BodyText style={styles.summaryValue}>{formData.category}</BodyText>
         </View>
-        <View style={styles.summaryRow}>
-          <BodyText style={styles.summaryLabel}>Priority:</BodyText>
-          <BodyText style={styles.summaryValue}>{formData.priority}</BodyText>
-        </View>
+        {!isClient && (
+          <View style={styles.summaryRow}>
+            <BodyText style={styles.summaryLabel}>Priority:</BodyText>
+            <BodyText style={styles.summaryValue}>{formData.priority}</BodyText>
+          </View>
+        )}
         {formData.budget && (
           <View style={styles.summaryRow}>
             <BodyText style={styles.summaryLabel}>Budget:</BodyText>

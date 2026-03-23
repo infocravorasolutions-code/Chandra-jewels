@@ -1443,10 +1443,10 @@ const EnquiryListScreen = ({ navigation }) => {
     // Show loader if we are currently refreshing or fetching
     if (refreshing || isFetching || isInitialLoading) {
       return (
-        <View style={{ padding: 40, alignItems: 'center' }}>
+        <View style={styles.emptyStateLoader}>
           <AnimatedLogoLoader size={60} />
-          <Text style={{ marginTop: 16, color: colors.textSecondary, fontSize: fonts.sm }}>
-            Updating list...
+          <Text style={styles.emptyStateLoaderText}>
+            {isInitialLoading ? 'Loading enquiries…' : 'Updating enquiries…'}
           </Text>
         </View>
       );
@@ -1609,7 +1609,15 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Safety check - don't render if user is not loaded
   if (!user) {
-    return <AnimatedLogoLoader size={60} />;
+    return (
+      <SafeAreaView style={styles.container}>
+        <TopNavbar navigation={navigation} />
+        <View style={styles.fullPageLoaderWrap}>
+          <AnimatedLogoLoader size={60} />
+          <Text style={styles.fullPageLoaderSubtext}>Loading…</Text>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   const onRefresh = async () => {
@@ -2058,10 +2066,19 @@ const EnquiryListScreen = ({ navigation }) => {
     </Modal>
   );
 
-  // Show full screen loader only on initial load (when no data yet)
+  // Full-screen loading while first fetch has no rows yet (all roles)
   const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
   if (isInitialLoading && displayEnquiriesLength === 0) {
-    return <AnimatedLogoLoader size={80} />;
+    return (
+      <SafeAreaView style={styles.container}>
+        <TopNavbar navigation={navigation} />
+        <View style={styles.fullPageLoaderWrap}>
+          <AnimatedLogoLoader size={80} />
+          <Text style={styles.fullPageLoaderSubtext}>Loading enquiries…</Text>
+          <Text style={styles.fullPageLoaderHint}>Please wait while we fetch your list</Text>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -2102,77 +2119,81 @@ const EnquiryListScreen = ({ navigation }) => {
       {/* Filter chips - moved outside FlatList to remove gap */}
       {renderStatusChips()}
       {user?.role === 'admin' && renderClientChips()}
-      {isFetching && (
-        <View style={styles.inlineLoader}>
-          {/* <ActivityIndicator size="small" color={colors.primary} /> */}
-          {/* <Text style={styles.inlineLoaderText}>Updating results...</Text> */}
-        </View>
-      )}
 
-      <FlatList
-        ref={flatListRef}
-        data={(displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries : []).filter(enquiry => enquiry && enquiry.id)}
-        renderItem={renderEnquiryItem}
-        keyExtractor={(item, index) => {
-          // Use stable IDs - fallback to index only if absolutely necessary
-          if (item?.id) return String(item.id);
-          if (item?._id) return String(item._id);
-          // Last resort: use index (not ideal but better than Math.random())
-          if (__DEV__) {
-            console.warn('Enquiry item missing ID, using index:', index, item);
+      <View style={styles.listWrapper}>
+        <FlatList
+          ref={flatListRef}
+          data={(displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries : []).filter(enquiry => enquiry && enquiry.id)}
+          renderItem={renderEnquiryItem}
+          keyExtractor={(item, index) => {
+            // Use stable IDs - fallback to index only if absolutely necessary
+            if (item?.id) return String(item.id);
+            if (item?._id) return String(item._id);
+            // Last resort: use index (not ideal but better than Math.random())
+            if (__DEV__) {
+              console.warn('Enquiry item missing ID, using index:', index, item);
+            }
+            return `enquiry-${index}`;
+          }}
+          ListHeaderComponent={null}
+          ListFooterComponent={renderListFooter}
+          ListEmptyComponent={renderEmpty}
+          contentContainerStyle={[
+            styles.flatListContent,
+            isTablet && styles.flatListContentTablet,
+            (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length === 0) && styles.flatListContentEmpty
+          ]}
+          style={styles.flatList}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-          return `enquiry-${index}`;
-        }}
-        ListHeaderComponent={null}
-        ListFooterComponent={renderListFooter}
-        ListEmptyComponent={renderEmpty}
-        contentContainerStyle={[
-          styles.flatListContent,
-          isTablet && styles.flatListContentTablet,
-          (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length === 0) && styles.flatListContentEmpty
-        ]}
-        style={styles.flatList}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        onScroll={handleScroll}
-        onMomentumScrollBegin={() => {
-          onEndReachedDuringMomentumRef.current = false;
-        }}
-        onScrollEndDrag={(event) => {
-          const offsetY = event.nativeEvent.contentOffset.y;
-          saveScrollPosition(offsetY);
-        }}
-        onMomentumScrollEnd={(event) => {
-          const offsetY = event.nativeEvent.contentOffset.y;
-          saveScrollPosition(offsetY);
-        }}
-        scrollEventThrottle={16}
-        onEndReached={() => {
-          // FlatList can fire onEndReached multiple times during the same momentum scroll.
-          if (onEndReachedDuringMomentumRef.current) return;
-          onEndReachedDuringMomentumRef.current = true;
-          handleLoadMore();
-        }}
-        onEndReachedThreshold={0.1} // Lower threshold to load more aggressively and display all enquiries
-        numColumns={isTablet ? 3 : 2}
-        columnWrapperStyle={isTablet ? styles.rowTablet : styles.row}
-        showsVerticalScrollIndicator={false}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={isTablet ? 15 : 10}
-        windowSize={isTablet ? 15 : 10}
-        initialNumToRender={isTablet ? 15 : 10}
-        updateCellsBatchingPeriod={50}
-        getItemLayout={(data, index) => {
-          const numCols = isTablet ? 3 : 2;
-          const cardHeight = isTablet ? 260 : 280;
-          return {
-            length: cardHeight,
-            offset: cardHeight * Math.floor(index / numCols),
-            index,
-          };
-        }}
-      />
+          onScroll={handleScroll}
+          onMomentumScrollBegin={() => {
+            onEndReachedDuringMomentumRef.current = false;
+          }}
+          onScrollEndDrag={(event) => {
+            const offsetY = event.nativeEvent.contentOffset.y;
+            saveScrollPosition(offsetY);
+          }}
+          onMomentumScrollEnd={(event) => {
+            const offsetY = event.nativeEvent.contentOffset.y;
+            saveScrollPosition(offsetY);
+          }}
+          scrollEventThrottle={16}
+          onEndReached={() => {
+            // FlatList can fire onEndReached multiple times during the same momentum scroll.
+            if (onEndReachedDuringMomentumRef.current) return;
+            onEndReachedDuringMomentumRef.current = true;
+            handleLoadMore();
+          }}
+          onEndReachedThreshold={0.1} // Lower threshold to load more aggressively and display all enquiries
+          numColumns={isTablet ? 3 : 2}
+          columnWrapperStyle={isTablet ? styles.rowTablet : styles.row}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={isTablet ? 15 : 10}
+          windowSize={isTablet ? 15 : 10}
+          initialNumToRender={isTablet ? 15 : 10}
+          updateCellsBatchingPeriod={50}
+          getItemLayout={(data, index) => {
+            const numCols = isTablet ? 3 : 2;
+            const cardHeight = isTablet ? 260 : 280;
+            return {
+              length: cardHeight,
+              offset: cardHeight * Math.floor(index / numCols),
+              index,
+            };
+          }}
+        />
+
+        {isFetching && displayEnquiriesLength > 0 && !isLoadingMore && (
+          <View style={styles.listFetchOverlay} pointerEvents="auto">
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.listFetchOverlayText}>Loading enquiries…</Text>
+            <Text style={styles.listFetchOverlayHint}>Updating your list</Text>
+          </View>
+        )}
+      </View>
 
       {renderFilterModal()}
       {renderSortModal()}
@@ -2279,6 +2300,66 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  fullPageLoaderWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+  },
+  fullPageLoaderSubtext: {
+    marginTop: 20,
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  fullPageLoaderHint: {
+    marginTop: 8,
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  emptyStateLoader: {
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 220,
+  },
+  emptyStateLoaderText: {
+    marginTop: 16,
+    color: colors.textSecondary,
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    textAlign: 'center',
+  },
+  listWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
+  listFetchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+    paddingHorizontal: 24,
+  },
+  listFetchOverlayText: {
+    marginTop: 16,
+    fontSize: fonts.base,
+    fontFamily: fonts.medium,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  listFetchOverlayHint: {
+    marginTop: 6,
+    fontSize: fonts.sm,
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
   inlineLoader: {
     flexDirection: 'row',

@@ -24,8 +24,8 @@ import Video from 'react-native-video';
 import ImageZoom from 'react-native-image-pan-zoom';
 import { WebView } from 'react-native-webview';
 
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useGetClientsQuery, useGetEnquiryByIdQuery, useGetChatsQuery, api } from '../../store/api';
 import { useDispatch } from 'react-redux';
@@ -70,7 +70,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const authResult = useAuth();
   const user = authResult?.user;
   const alert = useAlert();
-  
+  const insets = useSafeAreaInsets();
+
   // Early return if critical dependencies are missing
   if (!route) {
     if (__DEV__) {
@@ -158,7 +159,53 @@ const ChatDetailScreen = ({ route, navigation }) => {
   
   // Get the specific chatId to use (prioritize direct chatId, then routeChat._id)
   const specificChatId = chatId || routeChat?._id || routeChat?.id;
-  
+
+  /** Avoid "GO_BACK was not handled" when ChatDetail is root or stack has no history (deep link, notification). */
+  const handleNavigateBack = useCallback(() => {
+    if (!navigation) return;
+    try {
+      if (typeof navigation.canGoBack === 'function' && navigation.canGoBack()) {
+        navigation.goBack();
+        return;
+      }
+    } catch (e) {
+      if (__DEV__) {
+        console.warn('[ChatDetailScreen] canGoBack/goBack failed:', e?.message);
+      }
+    }
+    try {
+      navigation.navigate('MainTabs', { screen: 'Chats' });
+    } catch (e2) {
+      if (__DEV__) {
+        console.warn('[ChatDetailScreen] navigate MainTabs failed, resetting:', e2?.message);
+      }
+      try {
+        navigation.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [
+              {
+                name: 'MainTabs',
+                state: {
+                  routes: [
+                    { name: 'Dashboard' },
+                    { name: 'Enquiries' },
+                    { name: 'Chats' },
+                  ],
+                  index: 2,
+                },
+              },
+            ],
+          })
+        );
+      } catch (e3) {
+        if (__DEV__) {
+          console.warn('[ChatDetailScreen] reset failed:', e3?.message);
+        }
+      }
+    }
+  }, [navigation]);
+
   // Use the custom chat hook - this handles everything!
   // Pass routeChat as initialChat so it can be used immediately for message loading
   // Hooks must be called unconditionally - use default values for safety
@@ -461,6 +508,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }, [user, chat?._id, chat?.id, refetchMessages, alert]);
 
   const [newMessage, setNewMessage] = useState('');
+  /** Android: RN KeyboardAvoidingView height + adjustResize often fails; lift UI by keyboard frame height. */
+  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
   const [textInputHeight, setTextInputHeight] = useState(36); // Initial height for single line
   const [showMediaModal, setShowMediaModal] = useState(false);
   const [showReadReceiptModal, setShowReadReceiptModal] = useState(false);
@@ -1125,24 +1174,46 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }, [messages]);
 
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
-      // Only scroll to bottom when keyboard shows if user is near bottom
-      // Use the ref to check if user is at bottom (more reliable)
+    const onShow = (e) => {
+      if (Platform.OS === 'android' && e?.endCoordinates) {
+        const { height, screenY } = e.endCoordinates;
+        const windowHeight = Dimensions.get('window').height;
+        const overlapFromBottom = Math.max(0, windowHeight - screenY);
+        const h = typeof height === 'number' ? height : 0;
+        setAndroidKeyboardInset(Math.round(Math.max(h, overlapFromBottom)));
+      }
       if (isUserAtBottomRef.current && enrichedMessages.length > 0) {
         setTimeout(() => {
-          scrollViewRef.current?.scrollToIndex({ 
-            index: enrichedMessages.length - 1, 
+          scrollViewRef.current?.scrollToIndex({
+            index: enrichedMessages.length - 1,
             animated: true,
-            viewPosition: 1 
+            viewPosition: 1,
           });
         }, 100);
       }
-    });
+    };
+    const onHide = () => {
+      if (Platform.OS === 'android') {
+        setAndroidKeyboardInset(0);
+      }
+    };
+
+    const showSub = Keyboard.addListener('keyboardDidShow', onShow);
+    const hideSub = Keyboard.addListener('keyboardDidHide', onHide);
 
     return () => {
-      keyboardDidShowListener?.remove();
+      showSub.remove();
+      hideSub.remove();
     };
-  }, []);
+  }, [enrichedMessages.length]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setAndroidKeyboardInset(0);
+      };
+    }, [])
+  );
 
   const sendMessage = async () => {
     // Detailed validation with logging
@@ -3870,21 +3941,27 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
         <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
           <ChatHeader
             title={title}
             clientName={clientName}
             isLoadingEnquiry={isLoadingEnquiry}
-            onBack={() => navigation?.goBack?.()}
+            onBack={handleNavigateBack}
             onInfo={() => alert.info('Chat Info', `Chat: ${title}\nClient: ${clientName}`)}
             isValidClientName={isValidClientName}
           />
 
         <KeyboardAvoidingView
-          style={styles.keyboardContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          enabled={Platform.OS === 'ios'}
+          style={[
+            styles.keyboardContainer,
+            Platform.OS === 'android' && androidKeyboardInset > 0 && {
+              paddingBottom: androidKeyboardInset,
+            },
+          ]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
 
           {loading && enrichedMessages.length === 0 ? (
@@ -3903,6 +3980,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
               renderItem={({ item, index }) => renderMessage(item, index)}
               style={styles.messagesContainer}
               contentContainerStyle={styles.messagesContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               onScroll={handleScroll}
               onScrollBeginDrag={handleScrollBeginDrag}
               onScrollEndDrag={handleScrollEndDrag}
@@ -3994,7 +4073,16 @@ const ChatDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          <View style={styles.inputContainer}>
+          <View
+            style={[
+              styles.inputContainer,
+              {
+                paddingBottom:
+                  Platform.OS === 'android' && androidKeyboardInset > 0
+                    ? 12
+                    : Math.max(insets.bottom, 12),
+              },
+            ]}>
             {/* Reply Preview */}
             {replyingTo && (
               <View style={styles.replyPreviewBar}>
@@ -5477,9 +5565,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-    minHeight: 48,
+     paddingHorizontal: 16,
+    paddingVertical: 0,
+    minHeight: 10,
     // Remove maxHeight constraint - let it expand dynamically based on textInputHeight
     justifyContent: 'flex-start', // Top alignment for multiline
     overflow: 'hidden', // Ensure content doesn't overflow container

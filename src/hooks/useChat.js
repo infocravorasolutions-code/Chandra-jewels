@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useDispatch } from 'react-redux';
 import { useAuth } from '../context/AuthContext';
 import socketService from '../services/socketService';
 import { useGetChatMessagesQuery, useUploadChatMediaMutation } from '../store/api';
 import { API_BASE_URL, FILE_BASE_URL } from '../config/apiConfig';
+import { patchChatListsForLocalOutgoingMessage } from '../utils/chatListRealtimeCache';
 
 /**
  * Custom hook for managing chat functionality
@@ -15,6 +17,7 @@ import { API_BASE_URL, FILE_BASE_URL } from '../config/apiConfig';
  * @returns {object} Chat state and methods
  */
 export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) => {
+  const dispatch = useDispatch();
   const { user } = useAuth();
   // Initialize chat state with initialChat or chatId if provided (for immediate message loading)
   const [chat, setChat] = useState(() => {
@@ -1960,6 +1963,22 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       console.log('✅ [useChat] Message sent successfully via WebSocket');
     }
 
+    try {
+      patchChatListsForLocalOutgoingMessage(dispatch, {
+        userId: user?.id ?? user?._id,
+        chatId: actualChatId,
+        enquiryId,
+        messageBody: messageText.trim(),
+        messageType: 'text',
+        chatType,
+        chat,
+      });
+    } catch (e) {
+      if (__DEV__) {
+        console.warn('[useChat] patchChatListsForLocalOutgoingMessage failed', e);
+      }
+    }
+
     // Refetch as backup after delay
     setTimeout(() => {
       try {
@@ -1973,7 +1992,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     }, 2000);
 
     return true;
-  }, [chat, chatIdForQuery, user, enquiryId, chatType]);
+  }, [chat, chatIdForQuery, user, enquiryId, chatType, dispatch]);
 
   // Send media
   const sendMedia = useCallback(async (file) => {
@@ -2157,6 +2176,22 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
             }
           }
         }, 1500);
+
+        try {
+          patchChatListsForLocalOutgoingMessage(dispatch, {
+            userId: user?.id ?? user?._id,
+            chatId: chatIdForQuery,
+            enquiryId,
+            messageBody: mediaName,
+            messageType: messageType || 'image',
+            chatType,
+            chat,
+          });
+        } catch (e) {
+          if (__DEV__) {
+            console.warn('[useChat] patchChatListsForLocalOutgoingMessage (media) failed', e);
+          }
+        }
       } else {
         // Mark optimistic message as failed
         setMessages(prev => prev.map(msg => {
@@ -2186,7 +2221,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       
       return false;
     }
-  }, [chatIdForQuery, user, uploadChatMedia]);
+  }, [chatIdForQuery, user, uploadChatMedia, dispatch, enquiryId, chatType, chat]);
 
   // Send typing indicator
   const sendTyping = useCallback((isTyping) => {

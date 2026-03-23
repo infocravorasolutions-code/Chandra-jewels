@@ -24,6 +24,13 @@ import { formatDate } from '../../utils';
 
 const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const { user } = useAuth();
+  const roleLower = user?.role?.toLowerCase();
+  const isClient =
+    roleLower === 'client' ||
+    roleLower === 'cl' ||
+    user?.roleId === 4 ||
+    user?.roleNumber === 4;
+
   const enquiryToEdit = route.params?.enquiry || null;
   const enquiryIdFromRoute = route.params?.enquiryId || null;
   
@@ -53,12 +60,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   });
   const users = useMemo(() => Array.isArray(usersData) ? usersData : [], [usersData]);
   
-  // Create client options for dropdown - memoized to prevent recreation on every render
-  const clientOptions = useMemo(() => clients.map(client => ({
-    label: client.name || 'Unknown Client',
-    value: client.id || client._id,
-  })), [clients]);
-
   // Get status options from API (cached) - moved earlier so we can use it in getInitialFormData
   const statusOptionsFromAPI = useStatusOptions();
   
@@ -386,14 +387,12 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   const [showMetalColorDropdown, setShowMetalColorDropdown] = useState(false);
   const [showMetalQualityDropdown, setShowMetalQualityDropdown] = useState(false);
   const [showStoneTypeDropdown, setShowStoneTypeDropdown] = useState(false);
-  const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showAssignedToDropdown, setShowAssignedToDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [tempDate, setTempDate] = useState(new Date());
   const [showApprovedDatePicker, setShowApprovedDatePicker] = useState(false);
   const [tempApprovedDate, setTempApprovedDate] = useState(new Date());
-  const [currentStep, setCurrentStep] = useState(1); // 1: details, 2: logistics, 3: materials
 
 
   // Update form data when enquiry changes or when fetched data arrives
@@ -411,6 +410,39 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       setFormData(initialData);
     }
   }, [finalEnquiryToEdit?.id, finalEnquiryToEdit?._id, enquiryId, fetchingEnquiry, clientsData?.length, statusOptions, users]);
+
+  // Client role: keep ClientId/Name in form for API; field is hidden in UI
+  useEffect(() => {
+    if (!isClient || !user?.clientId) {
+      return;
+    }
+    const userClient = clients.find(c => {
+      const cid = c.id || c._id;
+      return String(cid).trim() === String(user.clientId).trim();
+    });
+    const nameFromDirectory =
+      userClient && (userClient.name || userClient.Name || '');
+    const nameFromUser =
+      user.name ||
+      user.fullName ||
+      user.Name ||
+      user.email ||
+      '';
+
+    setFormData(prev => ({
+      ...prev,
+      clientId: user.clientId,
+      clientName: nameFromDirectory || nameFromUser || prev.clientName || '',
+    }));
+  }, [
+    isClient,
+    user?.clientId,
+    user?.name,
+    user?.fullName,
+    user?.Name,
+    user?.email,
+    clients,
+  ]);
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -461,8 +493,11 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       newErrors.title = 'Title is required';
     }
 
-    if (!formData.clientId && !formData.clientName.trim()) {
+    if (!isClient && !formData.clientId && !formData.clientName.trim()) {
       newErrors.clientId = 'Client is required';
+    }
+    if (isClient && !formData.clientId && !user?.clientId) {
+      newErrors.clientId = 'Client account is not linked to this login';
     }
 
     if (formData.quantity && formData.quantity.trim() && isNaN(parseInt(formData.quantity))) {
@@ -669,7 +704,9 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       const enquiryData = {
         Id: enquiryIdToUpdate,
         Name: formData.title,
-        ClientId: formData.clientId || finalEnquiryToEdit?.clientId || finalEnquiryToEdit?.ClientId,
+        ClientId: isClient
+          ? formData.clientId || user.clientId || finalEnquiryToEdit?.clientId || finalEnquiryToEdit?.ClientId
+          : formData.clientId || finalEnquiryToEdit?.clientId || finalEnquiryToEdit?.ClientId,
         AssignedTo: formData.assignedTo || finalEnquiryToEdit?.AssignedTo || finalEnquiryToEdit?.assignedTo || null,
         Status: formData.status || finalEnquiryToEdit?.Status || finalEnquiryToEdit?.status || 'Enquiry Created',
         Priority: priorityForAPI,
@@ -841,442 +878,6 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
   // Stone type options from API - add "None" option at the beginning for optional field
   const stoneTypeOptions = [{ label: 'None', value: '' }, ...(stoneTypesData || [])];
 
-  const totalSteps = 3;
-
-  const validateCurrentStep = () => {
-    // Step 1: basic details
-    if (currentStep === 1) {
-      const stepErrors = {};
-      if (!formData.title.trim()) {
-        stepErrors.title = 'Title is required';
-      }
-      if (!formData.clientId && !formData.clientName.trim()) {
-        stepErrors.clientId = 'Client is required';
-      }
-      setErrors(prev => ({ ...prev, ...stepErrors }));
-      return Object.keys(stepErrors).length === 0;
-    }
-
-    // Step 2: basic numeric checks
-    if (currentStep === 2) {
-      const stepErrors = {};
-      if (formData.quantity && formData.quantity.trim() && isNaN(parseInt(formData.quantity))) {
-        stepErrors.quantity = 'Quantity must be a number';
-      }
-      setErrors(prev => ({ ...prev, ...stepErrors }));
-      return Object.keys(stepErrors).length === 0;
-    }
-
-    // Step 3: run full validation to preserve existing behaviour
-    if (currentStep === 3) {
-      return validateForm();
-    }
-
-    return true;
-  };
-
-  const goToNextStep = () => {
-    if (currentStep < totalSteps) {
-      setCurrentStep(prev => prev + 1);
-    }
-  };
-
-  const goToPrevStep = () => {
-    if (currentStep > 1) {
-      setCurrentStep(prev => prev - 1);
-    }
-  };
-
-  const renderProgress = () => {
-    const progress = currentStep / totalSteps;
-    return (
-      <View style={styles.progressBarContainer}>
-        <View style={[styles.progressBarFill, { flex: progress }]} />
-        <View style={{ flex: 1 - progress }} />
-      </View>
-    );
-  };
-
-  const renderStep1Details = () => (
-    <View>
-      {/* Row 1: Name and Client */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          <Input
-            label="Name*"
-            placeholder="Name*"
-            value={formData.title}
-            onChangeText={(value) => handleInputChange('title', value)}
-            error={errors.title}
-          />
-        </View>
-        <View style={styles.formField}>
-          {renderDropdown(
-            'Client*',
-            formData.clientId,
-            clientOptions,
-            (clientId) => {
-              const selectedClient = clients.find(c => (c.id || c._id) === clientId);
-              handleInputChange('clientId', clientId);
-              handleInputChange('clientName', selectedClient?.name || '');
-            },
-            showClientDropdown,
-            () => setShowClientDropdown(!showClientDropdown)
-          )}
-          {errors.clientId && (
-            <Text style={styles.errorText}>{errors.clientId}</Text>
-          )}
-        </View>
-      </View>
-
-      {/* Row 2: Priority and Category */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          <View style={styles.priorityContainer}>
-            <Text style={styles.priorityLabel}>Priority</Text>
-            <View style={styles.priorityOptions}>
-              {priorityOptions.map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.priorityOption,
-                    formData.priority === option.value && styles.priorityOptionActive,
-                  ]}
-                  onPress={() => handleInputChange('priority', option.value)}>
-                  <Text
-                    style={[
-                      styles.priorityOptionText,
-                      formData.priority === option.value && styles.priorityOptionTextActive,
-                    ]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </View>
-        <View style={styles.formField}>
-          {renderDropdown(
-            'Category',
-            formData.category,
-            categoryOptions,
-            (value) => handleInputChange('category', value),
-            showCategoryDropdown,
-            () => setShowCategoryDropdown(!showCategoryDropdown)
-          )}
-        </View>
-      </View>
-    </View>
-  );
-
-  const renderStep2Logistics = () => (
-    <View>
-      {/* Row 3: Stamping and Quantity */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          <Input
-            label="Stamping"
-            placeholder="Stamping"
-            value={formData.stamping}
-            onChangeText={(value) => handleInputChange('stamping', value)}
-          />
-        </View>
-        <View style={styles.formField}>
-          <Input
-            label="Quantity"
-            placeholder="Quantity"
-            value={formData.quantity}
-            onChangeText={(value) => handleInputChange('quantity', value)}
-            keyboardType="numeric"
-            error={errors.quantity}
-          />
-        </View>
-      </View>
-
-      {/* Row 4: Status and Assigned To */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          {renderDropdown(
-            'Status*',
-            formData.status,
-            statusOptions,
-            (value) => handleStatusChange(value),
-            showStatusDropdown,
-            () => setShowStatusDropdown(!showStatusDropdown),
-            [] // No users needed for status
-          )}
-        </View>
-        <View style={styles.formField}>
-          {renderDropdown(
-            'Assigned To',
-            formData.assignedTo,
-            assignedToOptions,
-            (value) => handleInputChange('assignedTo', value),
-            showAssignedToDropdown,
-            () => setShowAssignedToDropdown(!showAssignedToDropdown),
-            users // Pass users list to find name if ID doesn't match options
-          )}
-        </View>
-      </View>
-
-      {/* Row 5: Stone Type (full width) */}
-      <View style={styles.formRow}>
-        <View style={[styles.formField, styles.fullWidthField]}>
-          {renderDropdown(
-            'Stone Type',
-            formData.stoneType,
-            stoneTypeOptions,
-            (value) => handleInputChange('stoneType', value),
-            showStoneTypeDropdown,
-            () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
-          )}
-        </View>
-      </View>
-
-      {/* Row 6: Gati Order and Style Number */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          <Input
-            label="Gati Order"
-            placeholder="Gati Order"
-            value={formData.GatiOrderNumber}
-            onChangeText={(value) => handleInputChange('GatiOrderNumber', value)}
-          />
-        </View>
-        <View style={styles.formField}>
-          <Input
-            label="Style Number"
-            placeholder="Style Number"
-            value={formData.styleNumber}
-            onChangeText={(value) => handleInputChange('styleNumber', value)}
-          />
-        </View>
-      </View>
-
-      {/* Row 10: Shipping Date */}
-      <View style={styles.formRow}>
-        <View style={[styles.formField, styles.fullWidthField]}>
-          <Text style={styles.label}>Shipping Date</Text>
-          <TouchableOpacity
-            style={styles.dateInputButton}
-            onPress={() => {
-              if (formData.deadline) {
-                try {
-                  setTempDate(new Date(formData.deadline));
-                } catch (e) {
-                  setTempDate(new Date());
-                }
-              } else {
-                setTempDate(new Date());
-              }
-              setShowDatePicker(true);
-            }}
-            activeOpacity={0.7}>
-            <Text style={[
-              styles.dateInputText,
-              !formData.deadline && styles.dateInputPlaceholder,
-            ]}>
-              {formData.deadline || 'Select Shipping Date'}
-            </Text>
-            <IconComponent 
-              name="calendar-today" 
-              size={20} 
-              color={colors.primary} 
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Row 10.5: Budget (full width) */}
-      <View style={styles.formRow}>
-        <View style={[styles.formField, styles.fullWidthField]}>
-          <Input
-            label="Budget"
-            placeholder="Enter budget amount"
-            value={formData.budget}
-            onChangeText={(value) => handleInputChange('budget', value)}
-          />
-        </View>
-      </View>
-    </View>
-  );
-
-  const renderStep3Materials = () => (
-    <View>
-      {/* Row 7: Metal Quality and Metal Color */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          {renderDropdown(
-            'Metal Quality*',
-            formData.metalQuality,
-            metalQualityOptions,
-            (value) => handleInputChange('metalQuality', value),
-            showMetalQualityDropdown,
-            () => setShowMetalQualityDropdown(!showMetalQualityDropdown)
-          )}
-        </View>
-        <View style={styles.formField}>
-          {renderDropdown(
-            'Metal Color*',
-            formData.metalColor,
-            metalColorOptions,
-            (value) => handleInputChange('metalColor', value),
-            showMetalColorDropdown,
-            () => setShowMetalColorDropdown(!showMetalColorDropdown)
-          )}
-        </View>
-      </View>
-
-      {/* Row 8: Metal Weight - From, To, Exact */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          <Input
-            label="Metal Weight - From"
-            placeholder="From (gms)"
-            value={formData.metalWeightFrom}
-            onChangeText={(value) => handleInputChange('metalWeightFrom', value)}
-            keyboardType="decimal-pad"
-          />
-        </View>
-        <View style={styles.formField}>
-          <Input
-            label="Metal Weight - To"
-            placeholder="To (gms)"
-            value={formData.metalWeightTo}
-            onChangeText={(value) => handleInputChange('metalWeightTo', value)}
-            keyboardType="decimal-pad"
-          />
-        </View>
-        <View style={styles.formField}>
-          <Input
-            label="Metal Weight - Exact"
-            placeholder="Exact (gms)"
-            value={formData.metalWeightExact}
-            onChangeText={(value) => handleInputChange('metalWeightExact', value)}
-            keyboardType="decimal-pad"
-          />
-        </View>
-      </View>
-
-      {/* Row 9: Diamond Weight - From, To, Exact */}
-      <View style={styles.formRow}>
-        <View style={styles.formField}>
-          <Input
-            label="Diamond Weight - From"
-            placeholder="From (ct)"
-            value={formData.diamondWeightFrom}
-            onChangeText={(value) => handleInputChange('diamondWeightFrom', value)}
-            keyboardType="decimal-pad"
-          />
-        </View>
-        <View style={styles.formField}>
-          <Input
-            label="Diamond Weight - To"
-            placeholder="To (ct)"
-            value={formData.diamondWeightTo}
-            onChangeText={(value) => handleInputChange('diamondWeightTo', value)}
-            keyboardType="decimal-pad"
-          />
-        </View>
-        <View style={styles.formField}>
-          <Input
-            label="Diamond Weight - Exact"
-            placeholder="Exact (ct)"
-            value={formData.diamondWeightExact}
-            onChangeText={(value) => handleInputChange('diamondWeightExact', value)}
-            keyboardType="decimal-pad"
-          />
-        </View>
-      </View>
-
-      {/* Row 11: Remarks (full width textarea) */}
-      <View style={styles.formRow}>
-        <View style={[styles.formField, styles.fullWidthField]}>
-          <Input
-            label="Remarks"
-            placeholder="Remarks"
-            value={formData.description}
-            onChangeText={(value) => handleInputChange('description', value)}
-            multiline
-            numberOfLines={4}
-            error={errors.description}
-          />
-        </View>
-      </View>
-
-      {/* Row 12: Special Remarks (full width textarea) - Hidden for clients */}
-      {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Input
-              label="Special Remarks"
-              placeholder="Special Remarks"
-              value={formData.specialRemarks}
-              onChangeText={(value) => handleInputChange('specialRemarks', value)}
-              multiline
-              numberOfLines={4}
-            />
-          </View>
-        </View>
-      )}
-
-      {/* Row 13: Approved Date (full width) - Hidden for clients */}
-      {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
-        <View style={styles.formRow}>
-          <View style={[styles.formField, styles.fullWidthField]}>
-            <Text style={styles.label}>Approved Date</Text>
-            <TouchableOpacity
-              style={styles.dateInputButton}
-              onPress={() => {
-                if (formData.approvedDate) {
-                  try {
-                    setTempApprovedDate(new Date(formData.approvedDate));
-                  } catch (e) {
-                    setTempApprovedDate(new Date());
-                  }
-                } else {
-                  setTempApprovedDate(new Date());
-                }
-                setShowApprovedDatePicker(true);
-              }}
-              activeOpacity={0.7}>
-              <Text style={[
-                styles.dateInputText,
-                !formData.approvedDate && styles.dateInputPlaceholder,
-              ]}>
-                {formData.approvedDate || 'Select Approved Date'}
-              </Text>
-              <IconComponent 
-                name="calendar-today" 
-                size={20} 
-                color={colors.primary} 
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-    </View>
-  );
-
-  const renderStepContent = () => {
-    if (currentStep === 1) return renderStep1Details();
-    if (currentStep === 2) return renderStep2Logistics();
-    return renderStep3Materials();
-  };
-
-  const mainActionLabel = currentStep === totalSteps ? 'Save' : 'Next';
-
-  const onPrimaryPress = () => {
-    if (!validateCurrentStep()) {
-      return;
-    }
-    if (currentStep === totalSteps) {
-      handleNext();
-    } else {
-      goToNextStep();
-    }
-  };
-
   if (fetchingEnquiry) {
     return (
       <View style={styles.container}>
@@ -1293,13 +894,368 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
       <View style={styles.header}>
         <Heading level={3}>Edit Enquiry</Heading>
         <CustomText variant="caption" color="secondary">
-          {`Step ${currentStep} of ${totalSteps}`}
+          Update enquiry information
         </CustomText>
-        {renderProgress()}
       </View>
 
       <View style={styles.form}>
-        {renderStepContent()}
+        {/* Row 1: Name and Client (client picker staff only) */}
+        <View style={styles.formRow}>
+          <View
+            style={[
+              styles.formField,
+              isClient && styles.fullWidthField,
+            ]}>
+            <Input
+              label="Name*"
+              placeholder="Name*"
+              value={formData.title}
+              onChangeText={(value) => handleInputChange('title', value)}
+              error={errors.title}
+            />
+          </View>
+          {!isClient && (
+            <View style={styles.formField}>
+              <View style={styles.dropdownContainer}>
+                <Text style={styles.dropdownLabel}>Client</Text>
+                <View style={[styles.dropdown, styles.disabledDropdown]}>
+                  <Text
+                    style={[styles.dropdownText, styles.disabledText]}
+                    numberOfLines={2}
+                  >
+                    {formData.clientName?.trim() || '—'}
+                  </Text>
+                  <IconComponent name="lock" size={20} color={colors.textSecondary} />
+                </View>
+                {/* <Text style={styles.readOnlyHint}>Client cannot be changed when editing</Text> */}
+              </View>
+            </View>
+          )}
+        </View>
+        {isClient && errors.clientId ? (
+          <Text style={styles.errorText}>{errors.clientId}</Text>
+        ) : null}
+
+        {/* Row 2: Priority (staff only) and Category */}
+        <View style={styles.formRow}>
+          {!isClient && (
+            <View style={styles.formField}>
+              <View style={styles.priorityContainer}>
+                <Text style={styles.priorityLabel}>Priority</Text>
+                <View style={styles.priorityOptions}>
+                  {priorityOptions.map(option => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.priorityOption,
+                        formData.priority === option.value && styles.priorityOptionActive,
+                      ]}
+                      onPress={() => handleInputChange('priority', option.value)}>
+                      <Text
+                        style={[
+                          styles.priorityOptionText,
+                          formData.priority === option.value && styles.priorityOptionTextActive,
+                        ]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </View>
+          )}
+          <View style={[styles.formField, isClient && styles.fullWidthField]}>
+            {renderDropdown(
+              'Category',
+              formData.category,
+              categoryOptions,
+              (value) => handleInputChange('category', value),
+              showCategoryDropdown,
+              () => setShowCategoryDropdown(!showCategoryDropdown)
+            )}
+          </View>
+        </View>
+
+        {/* Row 3: Stamping and Quantity */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Stamping"
+              placeholder="Stamping"
+              value={formData.stamping}
+              onChangeText={(value) => handleInputChange('stamping', value)}
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Quantity"
+              placeholder="Quantity"
+              value={formData.quantity}
+              onChangeText={(value) => handleInputChange('quantity', value)}
+              keyboardType="numeric"
+              error={errors.quantity}
+            />
+          </View>
+        </View>
+
+        {/* Row 4: Status and Assigned To */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Status*',
+              formData.status,
+              statusOptions,
+              (value) => handleStatusChange(value),
+              showStatusDropdown,
+              () => setShowStatusDropdown(!showStatusDropdown),
+              [] // No users needed for status
+            )}
+          </View>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Assigned To',
+              formData.assignedTo,
+              assignedToOptions,
+              (value) => handleInputChange('assignedTo', value),
+              showAssignedToDropdown,
+              () => setShowAssignedToDropdown(!showAssignedToDropdown),
+              users // Pass users list to find name if ID doesn't match options
+            )}
+          </View>
+        </View>
+
+        {/* Row 5: Stone Type (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            {renderDropdown(
+              'Stone Type',
+              formData.stoneType,
+              stoneTypeOptions,
+              (value) => handleInputChange('stoneType', value),
+              showStoneTypeDropdown,
+              () => setShowStoneTypeDropdown(!showStoneTypeDropdown)
+            )}
+          </View>
+        </View>
+
+        {/* Row 6: Gati Order and Style Number */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Gati Order"
+              placeholder="Gati Order"
+              value={formData.GatiOrderNumber}
+              onChangeText={(value) => handleInputChange('GatiOrderNumber', value)}
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Style Number"
+              placeholder="Style Number"
+              value={formData.styleNumber}
+              onChangeText={(value) => handleInputChange('styleNumber', value)}
+            />
+          </View>
+        </View>
+
+        {/* Row 7: Metal Quality and Metal Color */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Metal Quality*',
+              formData.metalQuality,
+              metalQualityOptions,
+              (value) => handleInputChange('metalQuality', value),
+              showMetalQualityDropdown,
+              () => setShowMetalQualityDropdown(!showMetalQualityDropdown)
+            )}
+          </View>
+          <View style={styles.formField}>
+            {renderDropdown(
+              'Metal Color*',
+              formData.metalColor,
+              metalColorOptions,
+              (value) => handleInputChange('metalColor', value),
+              showMetalColorDropdown,
+              () => setShowMetalColorDropdown(!showMetalColorDropdown)
+            )}
+          </View>
+        </View>
+
+        {/* Row 8: Metal Weight - From, To, Exact */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Metal Weight - From"
+              placeholder="From (gms)"
+              value={formData.metalWeightFrom}
+              onChangeText={(value) => handleInputChange('metalWeightFrom', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Metal Weight - To"
+              placeholder="To (gms)"
+              value={formData.metalWeightTo}
+              onChangeText={(value) => handleInputChange('metalWeightTo', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Metal Weight - Exact"
+              placeholder="Exact (gms)"
+              value={formData.metalWeightExact}
+              onChangeText={(value) => handleInputChange('metalWeightExact', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+
+        {/* Row 9: Diamond Weight - From, To, Exact */}
+        <View style={styles.formRow}>
+          <View style={styles.formField}>
+            <Input
+              label="Diamond Weight - From"
+              placeholder="From (ct)"
+              value={formData.diamondWeightFrom}
+              onChangeText={(value) => handleInputChange('diamondWeightFrom', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Diamond Weight - To"
+              placeholder="To (ct)"
+              value={formData.diamondWeightTo}
+              onChangeText={(value) => handleInputChange('diamondWeightTo', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.formField}>
+            <Input
+              label="Diamond Weight - Exact"
+              placeholder="Exact (ct)"
+              value={formData.diamondWeightExact}
+              onChangeText={(value) => handleInputChange('diamondWeightExact', value)}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+
+        {/* Row 10: Shipping Date */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Text style={styles.label}>Shipping Date</Text>
+            <TouchableOpacity
+              style={styles.dateInputButton}
+              onPress={() => {
+                if (formData.deadline) {
+                  try {
+                    setTempDate(new Date(formData.deadline));
+                  } catch (e) {
+                    setTempDate(new Date());
+                  }
+                } else {
+                  setTempDate(new Date());
+                }
+                setShowDatePicker(true);
+              }}
+              activeOpacity={0.7}>
+              <Text style={[
+                styles.dateInputText,
+                !formData.deadline && styles.dateInputPlaceholder,
+              ]}>
+                {formData.deadline || 'Select Shipping Date'}
+              </Text>
+              <IconComponent 
+                name="calendar-today" 
+                size={20} 
+                color={colors.primary} 
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Row 10.5: Budget (full width) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Budget"
+              placeholder="Enter budget amount"
+              value={formData.budget}
+              onChangeText={(value) => handleInputChange('budget', value)}
+            />
+          </View>
+        </View>
+
+        {/* Row 11: Remarks (full width textarea) */}
+        <View style={styles.formRow}>
+          <View style={[styles.formField, styles.fullWidthField]}>
+            <Input
+              label="Remarks"
+              placeholder="Remarks"
+              value={formData.description}
+              onChangeText={(value) => handleInputChange('description', value)}
+              multiline
+              numberOfLines={4}
+              error={errors.description}
+            />
+          </View>
+        </View>
+
+        {/* Row 12: Special Remarks (full width textarea) - Hidden for clients */}
+        {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
+          <View style={styles.formRow}>
+            <View style={[styles.formField, styles.fullWidthField]}>
+              <Input
+                label="Special Remarks"
+                placeholder="Special Remarks"
+                value={formData.specialRemarks}
+                onChangeText={(value) => handleInputChange('specialRemarks', value)}
+                multiline
+                numberOfLines={4}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Row 13: Approved Date (full width) - Hidden for clients */}
+        {user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
+          <View style={styles.formRow}>
+            <View style={[styles.formField, styles.fullWidthField]}>
+              <Text style={styles.label}>Approved Date</Text>
+              <TouchableOpacity
+                style={styles.dateInputButton}
+                onPress={() => {
+                  if (formData.approvedDate) {
+                    try {
+                      setTempApprovedDate(new Date(formData.approvedDate));
+                    } catch (e) {
+                      setTempApprovedDate(new Date());
+                    }
+                  } else {
+                    setTempApprovedDate(new Date());
+                  }
+                  setShowApprovedDatePicker(true);
+                }}
+                activeOpacity={0.7}>
+                <Text style={[
+                  styles.dateInputText,
+                  !formData.approvedDate && styles.dateInputPlaceholder,
+                ]}>
+                  {formData.approvedDate || 'Select Approved Date'}
+                </Text>
+                <IconComponent 
+                  name="calendar-today" 
+                  size={20} 
+                  color={colors.primary} 
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Date Picker Modal */}
         {showDatePicker && Platform.OS === 'ios' && (
@@ -1420,22 +1376,13 @@ const EditEnquiryStep1Screen = ({ route, navigation }) => {
             }}
           />
         )}
-        <View style={styles.footerActions}>
-          {currentStep > 1 && (
-            <Button
-              title="Back"
-              onPress={goToPrevStep}
-              style={styles.backButton}
-              disabled={isUpdating}
-            />
-          )}
-          <Button
-            title={isUpdating ? "Saving..." : mainActionLabel}
-            onPress={onPrimaryPress}
-            style={styles.nextButton}
-            disabled={isUpdating}
-          />
-        </View>
+
+        <Button
+          title={isUpdating ? "Saving..." : "Save"}
+          onPress={handleNext}
+          style={styles.nextButton}
+          disabled={isUpdating}
+        />
       </View>
     </ScrollView>
   );
@@ -1454,17 +1401,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-  },
-  progressBarContainer: {
-    flexDirection: 'row',
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-    backgroundColor: colors.border,
-    marginTop: 12,
-  },
-  progressBarFill: {
-    backgroundColor: colors.primary,
   },
   form: {
     padding: 20,
@@ -1538,6 +1474,21 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
   },
+  disabledDropdown: {
+    backgroundColor: colors.backgroundSecondary,
+    opacity: 0.85,
+  },
+  disabledText: {
+    color: colors.textSecondary,
+    flex: 1,
+    paddingRight: 8,
+  },
+  readOnlyHint: {
+    marginTop: 6,
+    fontSize: fonts.sm,
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+  },
   priorityContainer: {
     marginBottom: 16,
   },
@@ -1589,17 +1540,6 @@ const styles = StyleSheet.create({
   },
   nextButton: {
     marginTop: 24,
-    flex: 1,
-  },
-  backButton: {
-    marginTop: 24,
-    marginRight: 12,
-    flex: 1,
-  },
-  footerActions: {
-    marginTop: 16,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
   },
   errorText: {
     color: colors.error,

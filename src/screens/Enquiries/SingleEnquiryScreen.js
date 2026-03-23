@@ -2938,11 +2938,7 @@ const SingleEnquiryScreen = ({ route, navigation }) => {
         Actions
       </Text>
 
-      <Button
-        title="Edit Enquiry"
-        onPress={handleEditEnquiry}
-        style={[styles.actionButton, styles.editButton]}
-      />
+      {/* Edit / update enquiry is staff-only — clients use reference upload below */}
 
       {/* Reference upload for clients */}
       <View style={styles.adminActionsRow}>

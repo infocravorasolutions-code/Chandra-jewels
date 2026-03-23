@@ -13,7 +13,6 @@ import {
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import Video from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import IconComponent from '../../components/common/Icon';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -22,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useUsers } from '../../features/users/usersHooks';
 import { getUserName } from '../../utils/userUtils';
 import SuccessAnimation from '../../components/common/SuccessAnimation';
+import EnquirySummaryCard from '../../components/enquiry/EnquirySummaryCard';
 
 const AddEnquiryStep2Screen = ({ route, navigation }) => {
   const { formData, enquiry: enquiryToEdit, isEditMode, enquiryId } = route.params;
@@ -552,26 +552,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   };
 
   const renderFormSummary = () => {
-    // Helper function to format weight values
-    const formatWeight = (from, to, exact) => {
-      if (exact) return `${exact} g`;
-      if (from && to) return `${from} - ${to} g`;
-      if (from) return `From ${from} g`;
-      if (to) return `Up to ${to} g`;
-      return 'Not specified';
-    };
-
-    // Helper function to format date
-    const formatDate = (dateString) => {
-      if (!dateString) return 'Not specified';
-      try {
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      } catch {
-        return dateString;
-      }
-    };
-
     const handleOpenChat = () => {
       if (enquiryId) {
         navigation.navigate('ChatGroups', {
@@ -579,7 +559,6 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
           enquiry: enquiryToEdit,
         });
       } else if (formData.clientId) {
-        // If enquiry not created yet, we can still navigate but chat might not exist
         navigation.navigate('ChatGroups', {
           clientId: formData.clientId,
         });
@@ -589,170 +568,13 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
     };
 
     return (
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryHeader}>
-          <Text style={styles.sectionTitle}>
-            Enquiry Summary
-          </Text>
-          {(enquiryId || formData.clientId) && (
-            <TouchableOpacity
-              style={styles.chatButton}
-              onPress={handleOpenChat}
-              activeOpacity={0.7}
-            >
-              <IconComponent name="chat" size={20} color={colors.primary} />
-              <Text style={styles.chatButtonText}>
-                Have more instructions? Chat with us
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        
-        {formData.title && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Title</Text>
-            <Text style={styles.summaryValue}>{formData.title}</Text>
-          </View>
-        )}
-
-        {formData.clientName && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Client</Text>
-            <Text style={styles.summaryValue}>{formData.clientName}</Text>
-          </View>
-        )}
-
-        {formData.category && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Category</Text>
-            <Text style={styles.summaryValue}>{formData.category}</Text>
-          </View>
-        )}
-
-        {formData.priority && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Priority</Text>
-            <Text style={styles.summaryValue}>
-              {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
-            </Text>
-          </View>
-        )}
-
-        {formData.status && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Status</Text>
-            <Text style={styles.summaryValue}>{formData.status}</Text>
-          </View>
-        )}
-
-        {formData.assignedTo && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Assigned To</Text>
-            <Text style={styles.summaryValue}>
-              {formData.assignedToName || getUserName(formData.assignedTo) || 'Not assigned'}
-            </Text>
-          </View>
-        )}
-
-        {formData.quantity && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Quantity</Text>
-            <Text style={styles.summaryValue}>{formData.quantity}</Text>
-          </View>
-        )}
-
-        {formData.budget && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Budget</Text>
-            <Text style={styles.summaryValue}>
-              {formData.budget ? formData.budget : 'Not specified'}
-            </Text>
-          </View>
-        )}
-
-        {formData.stoneType && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Stone Type</Text>
-            <Text style={styles.summaryValue}>{formData.stoneType}</Text>
-          </View>
-        )}
-
-        {(formData.metalColor || formData.metalQuality) && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Metal</Text>
-            <Text style={styles.summaryValue}>
-              {formData.metalColor || 'N/A'} {formData.metalQuality ? `(${formData.metalQuality})` : ''}
-            </Text>
-          </View>
-        )}
-
-        {(formData.metalWeightFrom || formData.metalWeightTo || formData.metalWeightExact) && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Metal Weight</Text>
-            <Text style={styles.summaryValue}>
-              {formatWeight(formData.metalWeightFrom, formData.metalWeightTo, formData.metalWeightExact)}
-            </Text>
-          </View>
-        )}
-
-        {(formData.diamondWeightFrom || formData.diamondWeightTo || formData.diamondWeightExact) && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Diamond Weight</Text>
-            <Text style={styles.summaryValue}>
-              {formatWeight(formData.diamondWeightFrom, formData.diamondWeightTo, formData.diamondWeightExact)}
-            </Text>
-          </View>
-        )}
-
-        {formData.stamping && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Stamping</Text>
-            <Text style={styles.summaryValue}>{formData.stamping}</Text>
-          </View>
-        )}
-
-        {formData.styleNumber && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Style Number</Text>
-            <Text style={styles.summaryValue}>{formData.styleNumber}</Text>
-          </View>
-        )}
-
-        {formData.GatiOrderNumber && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Gati Order Number</Text>
-            <Text style={styles.summaryValue}>{formData.GatiOrderNumber}</Text>
-          </View>
-        )}
-
-        {formData.deadline && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Shipping Date</Text>
-            <Text style={styles.summaryValue}>{formatDate(formData.deadline)}</Text>
-          </View>
-        )}
-
-        {formData.description && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Description</Text>
-            <Text style={styles.descriptionText}>{formData.description}</Text>
-          </View>
-        )}
-
-        {formData.specialRemarks && user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Special Remarks</Text>
-            <Text style={styles.descriptionText}>{formData.specialRemarks}</Text>
-          </View>
-        )}
-
-        {formData.approvedDate && user?.role?.toLowerCase() !== 'client' && user?.roleId !== 4 && user?.roleNumber !== 4 && (
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Approved Date</Text>
-            <Text style={styles.summaryValue}>{formatDate(formData.approvedDate)}</Text>
-          </View>
-        )}
-      </View>
+      <EnquirySummaryCard
+        formData={formData}
+        user={user}
+        getUserName={getUserName}
+        onChatPress={handleOpenChat}
+        showChat={!!(enquiryId || formData.clientId)}
+      />
     );
   };
 
@@ -850,15 +672,19 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   return (
     <ScrollView style={styles.container}>
             <View style={styles.header}>
-              <Text style={styles.headerTitle}>{isEditMode ? 'Update References' : 'Upload References'}</Text>
+              <Text style={styles.headerTitle}>
+                {isEditMode ? 'Update References' : 'Complete enquiry'}
+              </Text>
               <Text style={styles.headerSubtitle}>
-                {isEditMode ? 'Update reference materials (optional)' : 'Step 2 of 2 - Add Reference Materials'}
+                {isEditMode
+                  ? 'Update reference materials (optional)'
+                  : 'Add reference images or videos (optional), review instructions, then check your summary and submit'}
               </Text>
             </View>
 
-      {renderFormSummary()}
       {renderImageUpload()}
       {renderInstructions()}
+      <View style={styles.summarySection}>{renderFormSummary()}</View>
 
             <View style={styles.footer}>
               <TouchableOpacity
@@ -931,55 +757,6 @@ const styles = StyleSheet.create({
     fontSize: fonts.sm,
     fontFamily: fonts.regular,
     color: colors.textSecondary,
-  },
-  summaryCard: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 8,
-  },
-  summaryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  chatButton: {
-    alignItems: 'center',
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    maxWidth: 120,
-  },
-  chatButtonText: {
-    fontSize: fonts.xs,
-    fontFamily: fonts.regular,
-    color: colors.textSecondary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  summaryItem: {
-    marginBottom: 10,
-  },
-  summaryLabel: {
-    fontSize: fonts.sm,
-    fontFamily: fonts.medium,
-    color: colors.textSecondary,
-    marginBottom: 2,
-  },
-  summaryValue: {
-    fontSize: fonts.base,
-    fontFamily: fonts.regular,
-    color: colors.textPrimary,
-  },
-  descriptionText: {
-    fontSize: fonts.sm,
-    fontFamily: fonts.regular,
-    color: colors.textSecondary,
-    marginTop: 4,
-    fontStyle: 'italic',
   },
   imageCard: {
     margin: 16,
@@ -1068,6 +845,11 @@ const styles = StyleSheet.create({
   },
   instructionsCard: {
     margin: 16,
+    marginBottom: 8,
+  },
+  summarySection: {
+    marginTop: 8,
+    marginBottom: 24,
   },
   instructionItem: {
     flexDirection: 'row',

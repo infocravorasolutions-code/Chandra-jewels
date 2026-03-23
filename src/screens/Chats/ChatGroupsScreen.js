@@ -28,7 +28,6 @@ const ChatGroupsScreen = ({ route, navigation }) => {
   // Fetch all users for sender name lookup
   const { users: usersList } = useUsers();
   const usersListRef = useRef([]); // Store all users list for sender name lookup
-  const hasRefetchedOnMountRef = useRef(false); // Track if we've already refetched on mount
   
   // Store users list in ref
   useEffect(() => {
@@ -93,29 +92,25 @@ const ChatGroupsScreen = ({ route, navigation }) => {
   
   // Ensure chats is always an array
   const chats = Array.isArray(chatsData) ? chatsData : [];
-  
-  // Refetch chats data on first mount to update unread count
-  useEffect(() => {
-    if (currentEnquiryId && refetch && !hasRefetchedOnMountRef.current) {
-      // Small delay to ensure component is fully mounted
-      const timer = setTimeout(() => {
-        if (__DEV__) {
-          console.log('🔄 [ChatGroupsScreen] Refetching chats on mount to update unread count', {
-            enquiryId: currentEnquiryId,
-          });
-        }
-        refetch();
-        hasRefetchedOnMountRef.current = true; // Mark as refetched
-      }, 300);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [currentEnquiryId, refetch]); // Only run when enquiryId changes (first mount or when enquiry changes)
-  
-  // Reset refetch flag when enquiryId changes (new enquiry)
-  useEffect(() => {
-    hasRefetchedOnMountRef.current = false;
-  }, [currentEnquiryId]);
+
+  // Newest activity first (matches main Chats tab behaviour)
+  const sortedChats = useMemo(() => {
+    if (!Array.isArray(chats) || chats.length === 0) return chats;
+    return [...chats].sort((a, b) => {
+      try {
+        const ta = new Date(
+          a.lastMessageTime || a.LastMessage?.Timestamp || a.updatedAt || 0
+        ).getTime();
+        const tb = new Date(
+          b.lastMessageTime || b.LastMessage?.Timestamp || b.updatedAt || 0
+        ).getTime();
+        return tb - ta;
+      } catch {
+        return 0;
+      }
+    });
+  }, [chats]);
+
   
   if (__DEV__) {
     console.log('ChatGroupsScreen - Chats data:', {
@@ -369,7 +364,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
     );
   };
 
-  if (isLoading && chats.length === 0) {
+  if (isLoading && sortedChats.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
         <AnimatedLogoLoader size={80} />
@@ -420,7 +415,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
           />
         }
       >
-        {chats.length === 0 ? (
+        {sortedChats.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Icon name="chat-bubble-outline" size={64} color={colors.textLight} />
             <Text style={styles.emptyText}>No chat groups found</Text>
@@ -430,7 +425,7 @@ const ChatGroupsScreen = ({ route, navigation }) => {
           </View>
         ) : (
           <>
-            {chats
+            {sortedChats
               .filter(chat => chat && (chat.id || chat._id)) // Filter out invalid chats
               .map((chat, index) => {
                 try {
