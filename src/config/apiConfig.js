@@ -22,7 +22,7 @@ export const USE_CUSTOM_URL = false;
 export const USE_PHYSICAL_DEVICE = false;
 
 // Custom IP address for physical device (only used if USE_PHYSICAL_DEVICE is true)
-export const PHYSICAL_DEVICE_IP = '192.168.1.6'; // Change to your computer's IP
+export const PHYSICAL_DEVICE_IP = '192.168.0.109'; // Change to your computer's IP
 
 // ==================== URL CONFIGURATION ====================
 

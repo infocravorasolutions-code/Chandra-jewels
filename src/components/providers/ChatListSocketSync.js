@@ -21,10 +21,9 @@ const ChatListSocketSync = () => {
   const handleNewMessage = useCallback(
     (message) => {
       const uidRaw = user?.id ?? user?._id;
-      if (uidRaw == null || String(uidRaw).trim() === '') return;
-      const uid = String(uidRaw).trim();
-      const patchedMain = patchAllGetChatsCachesForNewMessage(dispatch, message, uid);
-      const patchedEnquiry = patchGetChatsByEnquiryV2ForNewMessage(dispatch, message, uid);
+      if (uidRaw == null) return;
+      const patchedMain = patchAllGetChatsCachesForNewMessage(dispatch, message, uidRaw);
+      const patchedEnquiry = patchGetChatsByEnquiryV2ForNewMessage(dispatch, message, uidRaw);
       if (!patchedMain && !patchedEnquiry) {
         invalidateAllChatListQueries(dispatch);
       }
@@ -35,8 +34,8 @@ const ChatListSocketSync = () => {
   const handleMessagesRead = useCallback(
     (data) => {
       const uidRaw = user?.id ?? user?._id;
-      if (uidRaw == null || String(uidRaw).trim() === '') return;
-      const patched = patchAllCachesForMessagesRead(dispatch, data, String(uidRaw).trim());
+      if (uidRaw == null) return;
+      const patched = patchAllCachesForMessagesRead(dispatch, data, uidRaw);
       if (!patched) {
         invalidateAllChatListQueries(dispatch);
       }

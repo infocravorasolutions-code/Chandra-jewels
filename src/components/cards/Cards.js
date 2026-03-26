@@ -948,7 +948,11 @@ export const CompactEnquiryCard = ({
       <View style={cardContentStyle}>
         {/* Name, Priority and Status - Header section */}
         <View style={styles.compactHeaderSection}>
-          <Text style={styles.compactName} numberOfLines={2}>
+          <Text
+            style={styles.compactName}
+            numberOfLines={2}
+            ellipsizeMode="tail"
+          >
             {enquiry.title || enquiry.Name || 'Untitled Enquiry'}
           </Text>
           <View style={styles.compactBadgesRow}>
@@ -1140,7 +1144,11 @@ export const EnquiryCard = ({
       </View>
 
       {/* Description */}
-      <Text style={styles.enquiryDescription} numberOfLines={2}>
+      <Text
+        style={styles.enquiryDescription}
+        numberOfLines={2}
+        ellipsizeMode="tail"
+      >
         {enquiry.description || 'No description available'}
       </Text>
 
@@ -1398,8 +1406,11 @@ const styles = StyleSheet.create({
     fontSize: fonts.lg,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    marginBottom: 4,
+    marginBottom: 0,
     lineHeight: 22,
+    // Keep height stable when title is short vs 2 lines.
+    minHeight: 44,
+    includeFontPadding: false,
   },
   enquiryClient: {
     fontSize: fonts.sm,
@@ -1449,6 +1460,9 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 20,
     marginBottom: 16,
+    includeFontPadding: false,
+    // Stabilize height when description is short (1 line vs 2 lines).
+    minHeight: 40,
   },
   
   // Details Row
@@ -1629,7 +1643,11 @@ const styles = StyleSheet.create({
     fontSize: fonts.sm,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
-    marginBottom: 4,
+    // Keep card height stable even when name is short (1 line vs 2 lines).
+    lineHeight: 18,
+    minHeight: 36, // ~2 lines at the configured lineHeight
+    marginBottom: 0,
+    includeFontPadding: false,
   },
   compactNameTablet: {
     fontSize: fonts.base,

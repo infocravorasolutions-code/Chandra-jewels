@@ -53,8 +53,69 @@ if (__DEV__) {
 }
 
 const { width } = Dimensions.get('window');
-const PAGE_SIZE = 10;
-const PREFETCH_TARGET = PAGE_SIZE * 4;
+/** Items per API request (first load and each “Load more”). Not tied to screen size / grid columns. */
+const PAGE_SIZE = 20;
+
+/**
+ * Collapse status strings so master-list labels match row CurrentStatus values.
+ * (e.g. chip "Enquiry Created" vs API "Pending" — see store/api normalisation.)
+ */
+const canonicalStatusForFilter = (raw) => {
+  const n = String(raw || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[\s_\-]+/g, '');
+
+  if (!n) return '';
+
+  if (n.includes('designapproval') || (n.includes('approval') && n.includes('pending'))) {
+    return 'design_approval_pending';
+  }
+  if (n.includes('approved') && n.includes('cad')) {
+    return 'approved_cad';
+  }
+  if (n.includes('orderplacement')) {
+    return 'order_placement';
+  }
+  if (n.includes('production')) {
+    return 'production';
+  }
+  if (n.includes('completed')) {
+    return 'completed';
+  }
+  if (n.includes('rejected')) {
+    return 'rejected';
+  }
+  if (n === 'pending' || (n.includes('enquiry') && n.includes('created'))) {
+    return 'enquiry_created';
+  }
+  if (n === 'coral') {
+    return 'coral';
+  }
+  if (n.includes('cad')) {
+    return 'cad';
+  }
+
+  return n;
+};
+
+/** Extra `status` query values (same param as RTK getEnquiries) for legacy DB labels. */
+const expandStatusesForSearchApi = (status) => {
+  const original = String(status || '').trim();
+  if (!original) {
+    return [];
+  }
+  if (canonicalStatusForFilter(original) === 'enquiry_created') {
+    return [...new Set([
+      original,
+      'Enquiry Created',
+      'ENQUIRY CREATED',
+      'Pending',
+      'pending',
+    ])];
+  }
+  return [original];
+};
 
 const EnquiryListScreen = ({ navigation }) => {
   const dispatch = useDispatch();
@@ -104,7 +165,6 @@ const EnquiryListScreen = ({ navigation }) => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [isPrefetching, setIsPrefetching] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [pagination, setPaginationState] = useState({
     total: 0,
@@ -113,8 +173,8 @@ const EnquiryListScreen = ({ navigation }) => {
     totalPages: 1,
   });
   const requestIdRef = useRef(0);
-  const prefetchingPageRef = useRef(null);
   const hasLoadedOnceRef = useRef(false);
+  const fetchEnquiriesRef = useRef(null);
   const lastAppendPageRequestedRef = useRef(null);
   const onEndReachedDuringMomentumRef = useRef(false);
   const [clientNameOverrides, setClientNameOverrides] = useState({});
@@ -172,8 +232,7 @@ const EnquiryListScreen = ({ navigation }) => {
       }
       // Handle array values (for multi-select status)
       if (Array.isArray(value)) {
-        // For status field, try comma-separated format (most common backend format for OR logic)
-        // Backend should interpret CurrentStatus=CAD,Coral as OR condition
+        // Multiple `status` params — same pattern as store/api.js getEnquiries (OR filter).
         if (key === 'status') {
           const validStatuses = value
             .filter(item => item && item !== 'all' && item !== 'All')
@@ -181,11 +240,12 @@ const EnquiryListScreen = ({ navigation }) => {
             .filter(item => item);
 
           if (validStatuses.length > 0) {
-            // Send multiple parameters with same key for OR logic
-            // Backend should interpret multiple CurrentStatus= parameters as OR condition
-            // This creates: CurrentStatus=Coral&CurrentStatus=CAD
-            validStatuses.forEach(status => {
-              params.append('CurrentStatus', status);
+            const expanded = [
+              ...new Set(validStatuses.flatMap(s => expandStatusesForSearchApi(s))),
+            ];
+            // Backend /api/enquiries/search expects `status=`, not CurrentStatus= (see store/api.js getEnquiries).
+            expanded.forEach(v => {
+              params.append('status', v);
             });
           }
         } else {
@@ -197,9 +257,13 @@ const EnquiryListScreen = ({ navigation }) => {
           });
         }
       } else {
-        // Map status to CurrentStatus for backend compatibility
-        const paramKey = key === 'status' ? 'CurrentStatus' : key;
-        params.append(paramKey, String(value));
+        if (key === 'status') {
+          expandStatusesForSearchApi(String(value)).forEach(v => {
+            params.append('status', v);
+          });
+        } else {
+          params.append(key, String(value));
+        }
       }
     });
 
@@ -236,7 +300,6 @@ const EnquiryListScreen = ({ navigation }) => {
     pageToLoad = 1,
     append = false,
     suppressInlineLoader = false,
-    recursionDepth = 0,
     showFooterLoader = append, // for append calls, default to showing footer loader
   } = {}) => {
     const requestId = ++requestIdRef.current;
@@ -245,8 +308,6 @@ const EnquiryListScreen = ({ navigation }) => {
     if (append) {
       if (showFooterLoader) {
         setIsLoadingMore(true);
-      } else {
-        setIsPrefetching(true);
       }
     } else {
       if (!hasLoadedOnceRef.current) {
@@ -254,7 +315,6 @@ const EnquiryListScreen = ({ navigation }) => {
       } else if (!suppressInlineLoader) {
         setIsFetching(true);
       }
-      prefetchingPageRef.current = null;
     }
 
     try {
@@ -291,6 +351,7 @@ const EnquiryListScreen = ({ navigation }) => {
 
       const payload = await response.json();
       if (requestId !== requestIdRef.current) {
+        shouldStopLoading = false;
         return;
       }
 
@@ -326,16 +387,19 @@ const EnquiryListScreen = ({ navigation }) => {
       // Frontend filtering workaround: If backend doesn't filter by multiple statuses correctly,
       // filter the results on the frontend
       let filteredData = normalized;
-      if (filters.status && Array.isArray(filters.status) && filters.status.length > 0) {
-        // Normalize selected statuses for comparison (remove spaces, lowercase)
-        const normalizeForComparison = (status) => {
-          return String(status).toLowerCase().trim().replace(/\s+/g, '');
-        };
+      const statusFilterList =
+        !filters.status || filters.status === 'all' || filters.status === 'All'
+          ? []
+          : Array.isArray(filters.status)
+            ? filters.status.filter(Boolean)
+            : [filters.status];
 
-        const selectedStatusesNormalized = filters.status.map(s => normalizeForComparison(s));
+      if (statusFilterList.length > 0) {
+        const selectedCanonical = [
+          ...new Set(statusFilterList.map(s => canonicalStatusForFilter(s)).filter(Boolean)),
+        ];
 
         filteredData = normalized.filter(item => {
-          // Get status from various possible fields
           const itemStatusRaw = (
             item?.CurrentStatus ||
             item?.Status ||
@@ -343,40 +407,22 @@ const EnquiryListScreen = ({ navigation }) => {
             item?.CurrentStatusName ||
             ''
           );
-
-          const itemStatusNormalized = normalizeForComparison(itemStatusRaw);
-
-          // Check if item status matches any of the selected statuses (exact match after normalization)
-          const matches = selectedStatusesNormalized.some(selectedStatus => {
-            // Exact match after normalization
-            if (itemStatusNormalized === selectedStatus) {
-              return true;
-            }
-
-            // Also check if one contains the other (for partial matches like "Approved Cad" contains "Cad")
-            // But be more strict - only if one is clearly a subset
-            if (itemStatusNormalized.includes(selectedStatus) && selectedStatus.length >= 3) {
-              return true;
-            }
-            if (selectedStatus.includes(itemStatusNormalized) && itemStatusNormalized.length >= 3) {
-              return true;
-            }
-
+          const itemCanon = canonicalStatusForFilter(itemStatusRaw);
+          if (!itemCanon) {
             return false;
-          });
-
-          return matches;
+          }
+          return selectedCanonical.some(sel => sel === itemCanon);
         });
 
         if (__DEV__) {
           console.log('🔍 [ENQUIRY LIST] Frontend Status Filter Applied:', {
             totalBeforeFilter: normalized.length,
             totalAfterFilter: filteredData.length,
-            selectedStatuses: filters.status,
-            selectedStatusesNormalized: selectedStatusesNormalized,
+            selectedStatuses: statusFilterList,
+            selectedCanonical,
             sampleItemStatuses: normalized.slice(0, 5).map(e => ({
               raw: e?.CurrentStatus || e?.Status || 'N/A',
-              normalized: normalizeForComparison(e?.CurrentStatus || e?.Status || '')
+              canonical: canonicalStatusForFilter(e?.CurrentStatus || e?.Status || ''),
             })),
             filteredStatuses: filteredData.map(e => e?.CurrentStatus || e?.Status || 'N/A').slice(0, 5),
           });
@@ -426,28 +472,6 @@ const EnquiryListScreen = ({ navigation }) => {
         ? currentPageSafe * responseLimit < totalFromServer
         : inferredHasMore;
       setHasMore(computedHasMore);
-
-      // Recursively fetch more pages if filtered results are sparse to prevent flickering
-      // This fixes the issue where "Load more" button flickers when many items are filtered out
-      if (append && filteredData.length < 5 && computedHasMore && recursionDepth < 5) {
-        shouldStopLoading = false;
-        if (__DEV__) {
-          console.log('🔄 [ENQUIRY LIST] Recursively fetching next page to fill list:', {
-            currentPage: pageToLoad,
-            nextPage: pageToLoad + 1,
-            filteredCount: filteredData.length,
-            recursionDepth
-          });
-        }
-        return fetchEnquiries({
-          pageToLoad: pageToLoad + 1,
-          append: true,
-          suppressInlineLoader,
-          recursionDepth: recursionDepth + 1,
-          // recursion is an internal fill operation — keep it silent to avoid footer flicker
-          showFooterLoader: false,
-        });
-      }
     } catch (error) {
       if (__DEV__) {
         console.error('Failed to fetch enquiries:', error);
@@ -460,7 +484,6 @@ const EnquiryListScreen = ({ navigation }) => {
       if (shouldStopLoading) {
         if (append) {
           setIsLoadingMore(false);
-          setIsPrefetching(false);
         } else if (!hasLoadedOnceRef.current) {
           setIsInitialLoading(false);
           hasLoadedOnceRef.current = true;
@@ -469,15 +492,17 @@ const EnquiryListScreen = ({ navigation }) => {
         }
       }
     }
-  }, [buildQueryString]);
+  }, [buildQueryString, filters]);
+
+  fetchEnquiriesRef.current = fetchEnquiries;
 
   useEffect(() => {
     if (!user) {
       return;
     }
 
-    fetchEnquiries({ pageToLoad: 1, append: false }).catch(() => { });
-  }, [user, fetchEnquiries]);
+    fetchEnquiriesRef.current?.({ pageToLoad: 1, append: false }).catch(() => { });
+  }, [user]);
 
   // Convert status filter to a stable string for dependency comparison
   const statusFilterKey = useMemo(() => {
@@ -494,14 +519,15 @@ const EnquiryListScreen = ({ navigation }) => {
     }
 
     // Trigger fetch when filters change
-    fetchEnquiries({ pageToLoad: 1, append: false }).catch(() => { });
+    fetchEnquiriesRef.current?.({ pageToLoad: 1, append: false }).catch(() => { });
   }, [
     statusFilterKey,
     filters.priority,
     filters.clientId,
     searchQuery,
+    sortBy,
+    sortOrder,
     user,
-    fetchEnquiries
   ]);
 
   // Track previous filter values to detect changes
@@ -855,44 +881,6 @@ const EnquiryListScreen = ({ navigation }) => {
       return [];
     }
   }, [enrichedEnquiries]);
-
-  useEffect(() => {
-    if (isInitialLoading || isFetching || isLoadingMore) {
-      return;
-    }
-
-    if (!hasMore) {
-      prefetchingPageRef.current = null;
-      return;
-    }
-
-    if (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length >= PREFETCH_TARGET) {
-      return;
-    }
-
-    const nextPage = (pagination?.page || 1) + 1;
-    if (prefetchingPageRef.current === nextPage) {
-      return;
-    }
-
-    prefetchingPageRef.current = nextPage;
-
-    fetchEnquiries({ pageToLoad: nextPage, append: true, showFooterLoader: false })
-      .catch(() => { })
-      .finally(() => {
-        if (prefetchingPageRef.current === nextPage) {
-          prefetchingPageRef.current = null;
-        }
-      });
-  }, [
-    fetchEnquiries,
-    displayEnquiries.length,
-    hasMore,
-    isLoadingMore,
-    isInitialLoading,
-    isFetching,
-    pagination?.page,
-  ]);
 
   // Get all clients from API (not just from current enquiries)
   // Store both name and ID to prevent duplicates and enable proper key generation
@@ -1443,10 +1431,10 @@ const EnquiryListScreen = ({ navigation }) => {
     // Show loader if we are currently refreshing or fetching
     if (refreshing || isFetching || isInitialLoading) {
       return (
-        <View style={styles.emptyStateLoader}>
+        <View style={{ padding: 40, alignItems: 'center' }}>
           <AnimatedLogoLoader size={60} />
-          <Text style={styles.emptyStateLoaderText}>
-            {isInitialLoading ? 'Loading enquiries…' : 'Updating enquiries…'}
+          <Text style={{ marginTop: 16, color: colors.textSecondary, fontSize: fonts.sm }}>
+            Updating list...
           </Text>
         </View>
       );
@@ -1609,15 +1597,7 @@ const EnquiryListScreen = ({ navigation }) => {
 
   // Safety check - don't render if user is not loaded
   if (!user) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <TopNavbar navigation={navigation} />
-        <View style={styles.fullPageLoaderWrap}>
-          <AnimatedLogoLoader size={60} />
-          <Text style={styles.fullPageLoaderSubtext}>Loading…</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <AnimatedLogoLoader size={60} />;
   }
 
   const onRefresh = async () => {
@@ -2066,19 +2046,15 @@ const EnquiryListScreen = ({ navigation }) => {
     </Modal>
   );
 
-  // Full-screen loading while first fetch has no rows yet (all roles)
+  // Show full screen loader only on initial load (when no data yet)
   const displayEnquiriesLength = displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries.length : 0;
+  const shouldShowScreenApiLoader =
+    !isInitialLoading &&
+    !isLoadingMore &&
+    (isFetching || refreshing);
+
   if (isInitialLoading && displayEnquiriesLength === 0) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <TopNavbar navigation={navigation} />
-        <View style={styles.fullPageLoaderWrap}>
-          <AnimatedLogoLoader size={80} />
-          <Text style={styles.fullPageLoaderSubtext}>Loading enquiries…</Text>
-          <Text style={styles.fullPageLoaderHint}>Please wait while we fetch your list</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <AnimatedLogoLoader size={80} />;
   }
 
   return (
@@ -2120,80 +2096,82 @@ const EnquiryListScreen = ({ navigation }) => {
       {renderStatusChips()}
       {user?.role === 'admin' && renderClientChips()}
 
-      <View style={styles.listWrapper}>
-        <FlatList
-          ref={flatListRef}
-          data={(displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries : []).filter(enquiry => enquiry && enquiry.id)}
-          renderItem={renderEnquiryItem}
-          keyExtractor={(item, index) => {
-            // Use stable IDs - fallback to index only if absolutely necessary
-            if (item?.id) return String(item.id);
-            if (item?._id) return String(item._id);
-            // Last resort: use index (not ideal but better than Math.random())
-            if (__DEV__) {
-              console.warn('Enquiry item missing ID, using index:', index, item);
-            }
-            return `enquiry-${index}`;
-          }}
-          ListHeaderComponent={null}
-          ListFooterComponent={renderListFooter}
-          ListEmptyComponent={renderEmpty}
-          contentContainerStyle={[
-            styles.flatListContent,
-            isTablet && styles.flatListContentTablet,
-            (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length === 0) && styles.flatListContentEmpty
-          ]}
-          style={styles.flatList}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      <FlatList
+        ref={flatListRef}
+        data={(displayEnquiries && Array.isArray(displayEnquiries) ? displayEnquiries : []).filter(enquiry => enquiry && enquiry.id)}
+        renderItem={renderEnquiryItem}
+        keyExtractor={(item, index) => {
+          // Use stable IDs - fallback to index only if absolutely necessary
+          if (item?.id) return String(item.id);
+          if (item?._id) return String(item._id);
+          // Last resort: use index (not ideal but better than Math.random())
+          if (__DEV__) {
+            console.warn('Enquiry item missing ID, using index:', index, item);
           }
-          onScroll={handleScroll}
-          onMomentumScrollBegin={() => {
-            onEndReachedDuringMomentumRef.current = false;
-          }}
-          onScrollEndDrag={(event) => {
-            const offsetY = event.nativeEvent.contentOffset.y;
-            saveScrollPosition(offsetY);
-          }}
-          onMomentumScrollEnd={(event) => {
-            const offsetY = event.nativeEvent.contentOffset.y;
-            saveScrollPosition(offsetY);
-          }}
-          scrollEventThrottle={16}
-          onEndReached={() => {
-            // FlatList can fire onEndReached multiple times during the same momentum scroll.
-            if (onEndReachedDuringMomentumRef.current) return;
-            onEndReachedDuringMomentumRef.current = true;
-            handleLoadMore();
-          }}
-          onEndReachedThreshold={0.1} // Lower threshold to load more aggressively and display all enquiries
-          numColumns={isTablet ? 3 : 2}
-          columnWrapperStyle={isTablet ? styles.rowTablet : styles.row}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={isTablet ? 15 : 10}
-          windowSize={isTablet ? 15 : 10}
-          initialNumToRender={isTablet ? 15 : 10}
-          updateCellsBatchingPeriod={50}
-          getItemLayout={(data, index) => {
-            const numCols = isTablet ? 3 : 2;
-            const cardHeight = isTablet ? 260 : 280;
-            return {
-              length: cardHeight,
-              offset: cardHeight * Math.floor(index / numCols),
-              index,
-            };
-          }}
-        />
+          return `enquiry-${index}`;
+        }}
+        ListHeaderComponent={null}
+        ListFooterComponent={renderListFooter}
+        ListEmptyComponent={renderEmpty}
+        contentContainerStyle={[
+          styles.flatListContent,
+          isTablet && styles.flatListContentTablet,
+          (!displayEnquiries || !Array.isArray(displayEnquiries) || displayEnquiries.length === 0) && styles.flatListContentEmpty
+        ]}
+        style={styles.flatList}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        onScroll={handleScroll}
+        onMomentumScrollBegin={() => {
+          onEndReachedDuringMomentumRef.current = false;
+        }}
+        onScrollEndDrag={(event) => {
+          const offsetY = event.nativeEvent.contentOffset.y;
+          saveScrollPosition(offsetY);
+        }}
+        onMomentumScrollEnd={(event) => {
+          const offsetY = event.nativeEvent.contentOffset.y;
+          saveScrollPosition(offsetY);
+        }}
+        scrollEventThrottle={16}
+        onEndReached={() => {
+          if (onEndReachedDuringMomentumRef.current) {
+            return;
+          }
+          onEndReachedDuringMomentumRef.current = true;
+          handleLoadMore();
+        }}
+        onEndReachedThreshold={0.25}
+        numColumns={isTablet ? 3 : 2}
+        columnWrapperStyle={isTablet ? styles.rowTablet : styles.row}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={isTablet ? 15 : 10}
+        windowSize={isTablet ? 15 : 10}
+        initialNumToRender={isTablet ? 15 : 10}
+        updateCellsBatchingPeriod={50}
+        getItemLayout={(data, index) => {
+          const numCols = isTablet ? 3 : 2;
+          const cardHeight = isTablet ? 260 : 280;
+          return {
+            length: cardHeight,
+            offset: cardHeight * Math.floor(index / numCols),
+            index,
+          };
+        }}
+      />
 
-        {isFetching && displayEnquiriesLength > 0 && !isLoadingMore && (
-          <View style={styles.listFetchOverlay} pointerEvents="auto">
+      {shouldShowScreenApiLoader && (
+        <View style={styles.screenLoaderOverlay}>
+          <View style={styles.screenLoaderCard}>
             <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.listFetchOverlayText}>Loading enquiries…</Text>
-            <Text style={styles.listFetchOverlayHint}>Updating your list</Text>
+            <Text style={styles.screenLoaderText}>
+              {refreshing ? 'Refreshing enquiries...' : 'Loading enquiries...'}
+            </Text>
           </View>
-        )}
-      </View>
+        </View>
+      )}
 
       {renderFilterModal()}
       {renderSortModal()}
@@ -2301,76 +2279,30 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  fullPageLoaderWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingBottom: 48,
-  },
-  fullPageLoaderSubtext: {
-    marginTop: 20,
-    fontSize: fonts.base,
-    fontFamily: fonts.medium,
-    color: colors.textPrimary,
-    textAlign: 'center',
-  },
-  fullPageLoaderHint: {
-    marginTop: 8,
-    fontSize: fonts.sm,
-    fontFamily: fonts.regular,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  emptyStateLoader: {
-    paddingVertical: 48,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 220,
-  },
-  emptyStateLoaderText: {
-    marginTop: 16,
-    color: colors.textSecondary,
-    fontSize: fonts.sm,
-    fontFamily: fonts.medium,
-    textAlign: 'center',
-  },
-  listWrapper: {
-    flex: 1,
-    position: 'relative',
-  },
-  listFetchOverlay: {
+  screenLoaderOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
     alignItems: 'center',
-    zIndex: 20,
-    paddingHorizontal: 24,
+    justifyContent: 'center',
+    zIndex: 30,
   },
-  listFetchOverlayText: {
-    marginTop: 16,
-    fontSize: fonts.base,
+  screenLoaderCard: {
+    minWidth: 180,
+    borderRadius: 14,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  screenLoaderText: {
+    marginTop: 10,
+    color: colors.textSecondary,
+    fontSize: fonts.sm,
     fontFamily: fonts.medium,
-    color: colors.textPrimary,
     textAlign: 'center',
-  },
-  listFetchOverlayHint: {
-    marginTop: 6,
-    fontSize: fonts.sm,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  inlineLoader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    gap: 8,
-  },
-  inlineLoaderText: {
-    color: colors.textSecondary,
-    fontSize: fonts.sm,
   },
   filterChipText: {
     color: colors.textWhite,

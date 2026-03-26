@@ -239,6 +239,50 @@ const ChatDetailScreen = ({ route, navigation }) => {
   // Get original chat data if available (for accessing ClientId from _originalData)
   const originalChatData = chat?._originalData || routeChat?._originalData || chat || routeChat;
 
+  /** Normalized reply payload for socket + optimistic messages (includes media keys for thread UI). */
+  const buildReplyToPayload = useCallback((target) => {
+    if (!target) return null;
+    const mType = target.messageType || target.MessageType || 'text';
+    const mediaKey = target.mediaKey || target.MediaKey;
+    const mediaUrl = target.mediaUrl || target.MediaUrl;
+    const mediaName = target.mediaName || target.MediaName;
+    const rawText = (target.text || target.Message || target.message || '').trim();
+    const typeLabel =
+      mType === 'image'
+        ? 'Photo'
+        : mType === 'video'
+          ? 'Video'
+          : mType === 'audio'
+            ? 'Voice message'
+            : mType === 'file'
+              ? mediaName || 'File'
+              : '';
+    const text =
+      rawText ||
+      typeLabel ||
+      (mediaName && mType !== 'text' ? String(mediaName) : '') ||
+      'Message';
+    return {
+      _id: target._id || target.id,
+      id: target._id || target.id,
+      text,
+      Message: text,
+      message: text,
+      senderName: target.senderName || target.SenderName || 'Unknown',
+      SenderName: target.senderName || target.SenderName || 'Unknown',
+      messageType: mType,
+      MessageType: mType,
+      mediaUrl,
+      MediaUrl: mediaUrl,
+      mediaKey,
+      MediaKey: mediaKey,
+      mediaName,
+      MediaName: mediaName,
+      audioDuration: target.audioDuration || target.AudioDuration,
+      myMessage: checkIsMyMessage(target, user),
+    };
+  }, [user]);
+
   // Track last edit time to prevent refetch immediately after editing
   const lastEditTimeRef = useRef(0);
   
@@ -530,17 +574,23 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [recordingPath, setRecordingPath] = useState(null);
   const recordingTimerRef = useRef(null);
   const audioRecorderPlayerRef = useRef(new AudioRecorderPlayer());
-  // WhatsApp-like recording UX state
-  const [showRecordingOverlay, setShowRecordingOverlay] = useState(false);
+  // WhatsApp-like recording UX state (hold to record; slide left to cancel; slide up to lock)
   const [isLocked, setIsLocked] = useState(false);
-  const [swipeY, setSwipeY] = useState(0);
+  const isRecordingRef = useRef(false);
+  const isLockedRef = useRef(false);
+  const [slideOffsetX, setSlideOffsetX] = useState(0);
   const [shouldCancel, setShouldCancel] = useState(false);
   const recordingStartTimeRef = useRef(null);
+  const recordingTimeRef = useRef(0);
   const panResponderRef = useRef(null);
+  const startRecordingRef = useRef(async () => {});
+  const stopRecordingRef = useRef(async () => {});
+  const startLockPulseRef = useRef(() => {});
   const waveformAnim = useRef(new Animated.Value(0)).current;
   const micButtonPulseAnim = useRef(new Animated.Value(1)).current;
-  // Audio playback state
-  const [playingAudioId, setPlayingAudioId] = useState(null);
+  // Voice note playback: WhatsApp-style pause/resume on same bubble
+  const [voicePlayback, setVoicePlayback] = useState({ id: null, paused: false });
+  const voicePlaybackRef = useRef({ id: null, paused: false });
   const [audioProgress, setAudioProgress] = useState({});
   const [audioDuration, setAudioDuration] = useState({});
   // Message action menu state
@@ -1253,19 +1303,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
     // Get reply target before clearing state
     // IMPORTANT: You can reply to ANY message - your own or others (like WhatsApp)
-    const replyToMessage = replyingTo ? {
-      _id: replyingTo._id || replyingTo.id,
-      id: replyingTo._id || replyingTo.id,
-      text: replyingTo.text || replyingTo.Message || replyingTo.message || '',
-      Message: replyingTo.text || replyingTo.Message || replyingTo.message || '',
-      senderName: replyingTo.senderName || replyingTo.SenderName || 'Unknown',
-      SenderName: replyingTo.senderName || replyingTo.SenderName || 'Unknown',
-      messageType: replyingTo.messageType || replyingTo.MessageType || 'text',
-      MessageType: replyingTo.messageType || replyingTo.MessageType || 'text',
-      mediaUrl: replyingTo.mediaUrl || replyingTo.MediaUrl,
-      MediaUrl: replyingTo.mediaUrl || replyingTo.MediaUrl,
-      myMessage: isMyMessage(replyingTo),
-    } : null;
+    const previousReply = replyingTo;
+    const replyToMessage = buildReplyToPayload(replyingTo);
     
     if (__DEV__ && replyToMessage) {
       console.log('📤 [Send] Sending message with reply:', {
@@ -1312,7 +1351,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       
       alert.error('Error', errorMessage);
       setNewMessage(messageText); // Restore message on error
-      setReplyingTo(replyToMessage); // Restore reply on error
+      if (previousReply) setReplyingTo(previousReply); // Restore full reply target on error
     } else {
       // Scroll to bottom after sending
       setTimeout(() => {
@@ -1403,6 +1442,51 @@ const ChatDetailScreen = ({ route, navigation }) => {
   };
 
   // Voice recording functions
+  const VOICE_CANCEL_DX = -72;
+  const VOICE_LOCK_DY = -72;
+
+  const probeAudioDurationSeconds = useCallback(async (uri) => {
+    if (!uri || isRecording) return null;
+    const player = audioRecorderPlayerRef.current;
+    try {
+      try {
+        await player.stopPlayer();
+      } catch (_) {
+        /* noop */
+      }
+      player.removePlayBackListener();
+      await player.startPlayer(uri);
+      return await new Promise((resolve) => {
+        const timeout = setTimeout(async () => {
+          try {
+            await player.stopPlayer();
+            player.removePlayBackListener();
+          } catch (_) {
+            /* noop */
+          }
+          resolve(null);
+        }, 2500);
+        player.addPlayBackListener((e) => {
+          const d = Math.floor((e.duration || 0) / 1000);
+          if (d > 0) {
+            clearTimeout(timeout);
+            player.stopPlayer().catch(() => {});
+            player.removePlayBackListener();
+            resolve(d);
+          }
+        });
+      });
+    } catch {
+      try {
+        await player.stopPlayer();
+        player.removePlayBackListener();
+      } catch (_) {
+        /* noop */
+      }
+      return null;
+    }
+  }, [isRecording]);
+
   const requestAudioPermission = useCallback(async () => {
     if (Platform.OS === 'android') {
       try {
@@ -1443,15 +1527,19 @@ const ChatDetailScreen = ({ route, navigation }) => {
       const uri = await audioRecorderPlayer.startRecorder(path);
       audioRecorderPlayer.addRecordBackListener((e) => {
         const timeInSeconds = Math.floor(e.currentPosition / 1000);
+        recordingTimeRef.current = timeInSeconds;
         setRecordingTime(timeInSeconds);
       });
 
       setRecordingPath(uri);
       setIsRecording(true);
+      isRecordingRef.current = true;
+      recordingTimeRef.current = 0;
       setRecordingTime(0);
       setShouldCancel(false);
-      setSwipeY(0);
+      setSlideOffsetX(0);
       setIsLocked(false);
+      isLockedRef.current = false;
       recordingStartTimeRef.current = Date.now();
 
       // Start waveform animation with staggered effect
@@ -1479,9 +1567,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
       }
       alert.error('Error', 'Failed to start recording. Please try again.');
     }
-  }, [requestAudioPermission, alert, waveformAnim, isLocked]);
+  }, [requestAudioPermission, alert, waveformAnim]);
 
   const stopRecording = useCallback(async (shouldSend = false) => {
+    let pathToDelete = recordingPath;
     try {
       const audioRecorderPlayer = audioRecorderPlayerRef.current;
       const result = await audioRecorderPlayer.stopRecorder();
@@ -1496,34 +1585,44 @@ const ChatDetailScreen = ({ route, navigation }) => {
       }
 
       setIsRecording(false);
+      isRecordingRef.current = false;
       setIsLocked(false);
-      setSwipeY(0);
+      isLockedRef.current = false;
+      setSlideOffsetX(0);
       setShouldCancel(false);
-      const finalTime = recordingTime;
 
-      if (shouldSend && recordingPath && finalTime > 0) {
+      const recordedPath =
+        typeof result === 'string' && result.length > 0 ? result : recordingPath;
+      pathToDelete = recordedPath || recordingPath;
+      const finalTime = Math.max(recordingTimeRef.current || 0, recordingTime);
+
+      if (shouldSend && pathToDelete && finalTime > 0) {
         // Send voice note
         const minutes = Math.floor(finalTime / 60);
         const seconds = finalTime % 60;
         const durationString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        
+
         const audioFile = {
-          uri: recordingPath,
+          uri: pathToDelete,
           type: Platform.OS === 'ios' ? 'audio/m4a' : 'audio/mp3',
           name: `voice_note_${Date.now()}.${Platform.OS === 'ios' ? 'm4a' : 'mp3'}`,
           messageType: 'audio',
           audioDuration: durationString,
         };
 
-        const sent = await sendMedia(audioFile);
+        const prevReply = replyingTo;
+        const replyPayload = buildReplyToPayload(prevReply);
+        setReplyingTo(null);
+        const sent = await sendMedia(audioFile, replyPayload);
         if (!sent) {
           alert.error('Error', 'Failed to send voice note. Please try again.');
+          if (prevReply) setReplyingTo(prevReply);
         }
-      } else if (recordingPath) {
+      } else if (pathToDelete) {
         // Delete recording if cancelled
         try {
-          if (Platform.OS === 'android' && await RNFS.exists(recordingPath)) {
-            await RNFS.unlink(recordingPath);
+          if (Platform.OS === 'android' && await RNFS.exists(pathToDelete)) {
+            await RNFS.unlink(pathToDelete);
           }
         } catch (error) {
           if (__DEV__) {
@@ -1533,6 +1632,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       }
 
       setRecordingPath(null);
+      recordingTimeRef.current = 0;
       setRecordingTime(0);
       recordingStartTimeRef.current = null;
     } catch (error) {
@@ -1540,62 +1640,91 @@ const ChatDetailScreen = ({ route, navigation }) => {
         console.error('Error stopping recording:', error);
       }
       setIsRecording(false);
+      isRecordingRef.current = false;
       setIsLocked(false);
+      isLockedRef.current = false;
       setRecordingPath(null);
+      recordingTimeRef.current = 0;
       setRecordingTime(0);
     }
-  }, [recordingPath, recordingTime, sendMedia, alert, waveformAnim]);
+  }, [recordingPath, recordingTime, sendMedia, alert, waveformAnim, replyingTo, buildReplyToPayload]);
 
-  // PanResponder for WhatsApp-like mic button interaction
+  const startLockPulse = useCallback(() => {
+    micButtonPulseAnim.stopAnimation();
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(micButtonPulseAnim, {
+          toValue: 1.1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(micButtonPulseAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [micButtonPulseAnim]);
+
+  useEffect(() => {
+    startRecordingRef.current = startRecording;
+  }, [startRecording]);
+
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording;
+  }, [stopRecording]);
+
+  useEffect(() => {
+    startLockPulseRef.current = startLockPulse;
+  }, [startLockPulse]);
+
+  // Single PanResponder instance so the finger that started recording keeps the gesture (WhatsApp-style).
   useEffect(() => {
     panResponderRef.current = PanResponder.create({
-      onStartShouldSetPanResponder: () => !isRecording && !isLocked,
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // Only respond to vertical movement when recording
-        return isRecording && !isLocked && Math.abs(gestureState.dy) > 10;
-      },
-      onPanResponderGrant: (evt) => {
-        if (!isRecording && !isLocked) {
-          startRecording();
+      onStartShouldSetPanResponder: () => !isRecordingRef.current && !isLockedRef.current,
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        isRecordingRef.current &&
+        !isLockedRef.current &&
+        (Math.abs(gestureState.dx) > 12 || Math.abs(gestureState.dy) > 12),
+      onPanResponderGrant: () => {
+        if (!isRecordingRef.current && !isLockedRef.current) {
+          startRecordingRef.current();
         }
       },
-      onPanResponderMove: (evt, gestureState) => {
-        if (isRecording && !isLocked) {
-          const dy = gestureState.dy;
-          setSwipeY(dy);
-          // Show cancel if swiped up more than 50px
-          setShouldCancel(dy < -50);
+      onPanResponderMove: (_, gestureState) => {
+        if (!isRecordingRef.current || isLockedRef.current) return;
+        const { dx, dy } = gestureState;
+        setSlideOffsetX(Math.min(0, dx));
+        setShouldCancel(dx < VOICE_CANCEL_DX * 0.65);
+        if (dy < VOICE_LOCK_DY && Math.abs(dx) < 56) {
+          isLockedRef.current = true;
+          setIsLocked(true);
+          startLockPulseRef.current();
         }
       },
-      onPanResponderRelease: (evt, gestureState) => {
-        if (isRecording && !isLocked) {
-          if (shouldCancel || gestureState.dy < -50) {
-            // Swiped up to cancel
-            stopRecording(false);
+      onPanResponderRelease: (_, gestureState) => {
+        if (isRecordingRef.current && !isLockedRef.current) {
+          const cancel = gestureState.dx < VOICE_CANCEL_DX;
+          const elapsed = recordingTimeRef.current;
+          if (cancel) {
+            stopRecordingRef.current(false);
           } else {
-            // Released normally - send if recording for more than 0.5 seconds
-            if (recordingTime >= 0.5) {
-        stopRecording(true);
-      } else {
-        stopRecording(false);
-      }
+            stopRecordingRef.current(elapsed >= 0.5);
           }
         }
-        setSwipeY(0);
+        setSlideOffsetX(0);
         setShouldCancel(false);
       },
     });
-  }, [isRecording, isLocked, recordingTime, startRecording, stopRecording, shouldCancel]);
+  }, []);
 
+  /** Locked recording: tap send to finish. Do not start recording on tap (WhatsApp is hold-only). */
   const handleMicPress = useCallback(() => {
     if (isRecording && isLocked) {
-      // If locked, tap to stop and send
       stopRecording(true);
-    } else if (!isRecording && !isLocked) {
-      // Start recording on press (for accessibility)
-      startRecording();
     }
-  }, [isRecording, isLocked, stopRecording, startRecording]);
+  }, [isRecording, isLocked, stopRecording]);
 
   // Message action menu functions
   const handleMessageLongPress = useCallback((message) => {
@@ -2341,24 +2470,43 @@ const ChatDetailScreen = ({ route, navigation }) => {
         let messageType = 'file';
         const fileName = file.name || '';
         const fileType = file.type || '';
-        
+
         if (fileType.startsWith('image/') || fileName.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
           messageType = 'image';
         } else if (fileType.startsWith('video/') || fileName.match(/\.(mp4|mov|avi|mkv|webm|3gp)$/i)) {
           messageType = 'video';
+        } else if (
+          fileType.startsWith('audio/') ||
+          fileName.match(/\.(m4a|mp3|wav|aac|ogg|flac|amr|opus|webm|aiff|caf)$/i)
+        ) {
+          messageType = 'audio';
         }
 
-        // Send file via the hook
-        const sent = await sendMedia({
-          uri: file.uri,
-          type: file.type || 'application/octet-stream',
-          name: file.name || `file_${Date.now()}`,
-          size: file.size || 0,
-          messageType: messageType,
-        });
+        let audioDurationStr = null;
+        if (messageType === 'audio') {
+          const secs = await probeAudioDurationSeconds(file.uri);
+          if (secs != null && secs > 0) {
+            audioDurationStr = `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;
+          }
+        }
+
+        const prevReply = replyingTo;
+        setReplyingTo(null);
+        const sent = await sendMedia(
+          {
+            uri: file.uri,
+            type: file.type || 'application/octet-stream',
+            name: file.name || `file_${Date.now()}`,
+            size: file.size || 0,
+            messageType: messageType,
+            ...(audioDurationStr ? { audioDuration: audioDurationStr } : {}),
+          },
+          buildReplyToPayload(prevReply)
+        );
 
         if (!sent) {
           alert.error('Error', 'Failed to send file. Please try again.');
+          if (prevReply) setReplyingTo(prevReply);
         }
       }
     } catch (error) {
@@ -2370,6 +2518,62 @@ const ChatDetailScreen = ({ route, navigation }) => {
         'Error',
         error.message || 'Failed to select file. Please try again.'
       );
+    }
+  };
+
+  const handleAudioPicker = async () => {
+    setShowMediaModal(false);
+
+    if (Platform.OS === 'android') {
+      const hasPermission = await requestStoragePermission();
+      if (!hasPermission) {
+        alert.error('Permission Denied', 'Storage permission is required to select audio');
+        return;
+      }
+    }
+
+    try {
+      const result = await DocumentPicker.pick({
+        type: [DocumentPicker.types.audio],
+        allowMultiSelection: false,
+      });
+
+      if (!result?.length) return;
+
+      const file = result[0];
+      const maxSize = 50 * 1024 * 1024;
+      if (file.size && file.size > maxSize) {
+        alert.warning('File Too Large', 'Audio exceeds 50 MB limit.');
+        return;
+      }
+
+      let audioDurationStr = null;
+      const secs = await probeAudioDurationSeconds(file.uri);
+      if (secs != null && secs > 0) {
+        audioDurationStr = `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;
+      }
+
+      const prevReply = replyingTo;
+      setReplyingTo(null);
+      const sent = await sendMedia(
+        {
+          uri: file.uri,
+          type: file.type?.startsWith('audio/') ? file.type : 'audio/mpeg',
+          name: file.name || `audio_${Date.now()}.m4a`,
+          size: file.size || 0,
+          messageType: 'audio',
+          ...(audioDurationStr ? { audioDuration: audioDurationStr } : {}),
+        },
+        buildReplyToPayload(prevReply)
+      );
+
+      if (!sent) {
+        alert.error('Error', 'Failed to send audio. Please try again.');
+        if (prevReply) setReplyingTo(prevReply);
+      }
+    } catch (error) {
+      if (DocumentPicker.isCancel(error)) return;
+      alert.error('Error', error.message || 'Failed to select audio.');
     }
   };
 
@@ -2419,17 +2623,22 @@ const ChatDetailScreen = ({ route, navigation }) => {
         messageType = 'video';
       }
 
-      // Send media via the hook
-      const sent = await sendMedia({
-        uri: asset.uri,
-        type: asset.type || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
-        name: asset.fileName || asset.uri.split('/').pop() || `${mediaType}_${Date.now()}.${mediaType === 'video' ? 'mp4' : 'jpg'}`,
-        size: asset.fileSize || 0,
-        messageType: messageType,
-      });
+      const prevReply = replyingTo;
+      setReplyingTo(null);
+      const sent = await sendMedia(
+        {
+          uri: asset.uri,
+          type: asset.type || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
+          name: asset.fileName || asset.uri.split('/').pop() || `${mediaType}_${Date.now()}.${mediaType === 'video' ? 'mp4' : 'jpg'}`,
+          size: asset.fileSize || 0,
+          messageType: messageType,
+        },
+        buildReplyToPayload(prevReply)
+      );
 
       if (!sent) {
         alert.error('Error', 'Failed to send media. Please try again.');
+        if (prevReply) setReplyingTo(prevReply);
       } else {
         
       }
@@ -2937,6 +3146,69 @@ const ChatDetailScreen = ({ route, navigation }) => {
     }
   }, [viewerOriginalUrl, viewerMediaUrl, viewerMediaKey, viewerDocumentName, isRefreshingUrl, fetchFreshPresignedUrl, alert]);
 
+  const handleVoiceNotePlayback = useCallback(async (message) => {
+    const messageId = message.id || message._id;
+    const mKey = message.mediaKey || message.MediaKey;
+    const mUrl = message.mediaUrl || message.MediaUrl;
+    const audioUrl = mUrl || getMediaUrl(mKey);
+    if (!audioUrl) return;
+
+    const player = audioRecorderPlayerRef.current;
+    const prev = voicePlaybackRef.current;
+
+    if (prev.id === messageId) {
+      if (prev.paused) {
+        try {
+          await player.resumePlayer();
+        } catch (e) {
+          if (__DEV__) console.warn('[voice] resume failed', e);
+        }
+        voicePlaybackRef.current = { id: messageId, paused: false };
+        setVoicePlayback({ id: messageId, paused: false });
+      } else {
+        try {
+          await player.pausePlayer();
+        } catch (e) {
+          if (__DEV__) console.warn('[voice] pause failed', e);
+        }
+        voicePlaybackRef.current = { id: messageId, paused: true };
+        setVoicePlayback({ id: messageId, paused: true });
+      }
+      return;
+    }
+
+    try {
+      await player.stopPlayer();
+    } catch (_) {
+      /* noop */
+    }
+    player.removePlayBackListener();
+
+    voicePlaybackRef.current = { id: messageId, paused: false };
+    setVoicePlayback({ id: messageId, paused: false });
+
+    try {
+      await player.startPlayer(audioUrl);
+    } catch (e) {
+      if (__DEV__) console.warn('[voice] start failed', e);
+      voicePlaybackRef.current = { id: null, paused: false };
+      setVoicePlayback({ id: null, paused: false });
+      return;
+    }
+
+    player.addPlayBackListener((e) => {
+      const currentPosition = Math.floor(e.currentPosition / 1000);
+      const duration = Math.floor(e.duration / 1000);
+      setAudioProgress((p) => ({ ...p, [messageId]: currentPosition }));
+      setAudioDuration((d) => ({ ...d, [messageId]: duration }));
+      if (e.duration > 0 && e.currentPosition >= e.duration) {
+        voicePlaybackRef.current = { id: null, paused: false };
+        setVoicePlayback({ id: null, paused: false });
+        player.stopPlayer().catch(() => {});
+        player.removePlayBackListener();
+      }
+    });
+  }, [getMediaUrl]);
 
   // Memoize renderMessage to prevent unnecessary re-renders
   const renderMessage = useCallback((message, index) => {
@@ -3033,6 +3305,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
             MediaUrl: replyToData.MediaUrl || replyToData.mediaUrl || replyToData.media?.url,
             mediaKey: replyToData.MediaKey || replyToData.mediaKey || replyToData.media?.key,
             MediaKey: replyToData.MediaKey || replyToData.mediaKey || replyToData.media?.key,
+            audioDuration: replyToData.AudioDuration || replyToData.audioDuration,
+            AudioDuration: replyToData.AudioDuration || replyToData.audioDuration,
           };
         } else if (!repliedMessage && typeof replyTo === 'object' && (replyTo.Message || replyTo.message || replyTo.text)) {
           // Fallback: create from replyTo object even if it doesn't have all fields
@@ -3048,6 +3322,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
             MessageType: replyTo.MessageType || replyTo.messageType || 'text',
             mediaUrl: replyTo.MediaUrl || replyTo.mediaUrl || replyTo.media?.url,
             MediaUrl: replyTo.MediaUrl || replyTo.mediaUrl || replyTo.media?.url,
+            mediaKey: replyTo.MediaKey || replyTo.mediaKey || replyTo.media?.key,
+            MediaKey: replyTo.MediaKey || replyTo.mediaKey || replyTo.media?.key,
+            audioDuration: replyTo.AudioDuration || replyTo.audioDuration,
+            AudioDuration: replyTo.AudioDuration || replyTo.audioDuration,
           };
         }
         
@@ -3071,7 +3349,34 @@ const ChatDetailScreen = ({ route, navigation }) => {
     
     // Store message position for accurate scrolling
     const messageId = String(message._id || message.id || '').trim();
-    
+
+    const repliedThumbUri = repliedMessage
+      ? (repliedMessage.mediaUrl ||
+          repliedMessage.MediaUrl ||
+          ((repliedMessage.mediaKey || repliedMessage.MediaKey)
+            ? getMediaUrl(repliedMessage.mediaKey || repliedMessage.MediaKey)
+            : null))
+      : null;
+    const repliedType = repliedMessage
+      ? (repliedMessage.messageType || repliedMessage.MessageType || 'text')
+      : 'text';
+    const repliedPreviewText = repliedMessage
+      ? (() => {
+          const raw = (repliedMessage.text || repliedMessage.Message || repliedMessage.message || '').trim();
+          if (raw) return raw;
+          if (repliedType === 'image') return 'Photo';
+          if (repliedType === 'video') return 'Video';
+          if (repliedType === 'audio') {
+            return (
+              repliedMessage.audioDuration ||
+              repliedMessage.AudioDuration ||
+              'Voice message'
+            );
+          }
+          return 'Message';
+        })()
+      : '';
+
     return (
       <View 
         key={message.id} 
@@ -3201,14 +3506,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     {repliedMessage.senderName || 'Unknown'}
                   </Text>
                   {/* Show media thumbnail if replying to image/video */}
-                  {(repliedMessage.messageType === 'image' || repliedMessage.messageType === 'video') && repliedMessage.mediaUrl ? (
+                  {(repliedType === 'image' || repliedType === 'video') && repliedThumbUri ? (
                     <View style={styles.replyPreviewMedia}>
                       <Image
-                        source={{ uri: repliedMessage.mediaUrl }}
+                        source={{ uri: repliedThumbUri }}
                         style={styles.replyPreviewThumbnail}
                         resizeMode="cover"
                       />
-                      <Text 
+                      <Text
                         style={[
                           styles.replyPreviewText,
                           myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
@@ -3216,11 +3521,31 @@ const ChatDetailScreen = ({ route, navigation }) => {
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {repliedMessage.text || repliedMessage.Message || repliedMessage.message || (repliedMessage.messageType === 'image' ? 'Photo' : 'Video')}
+                        {repliedPreviewText}
+                      </Text>
+                    </View>
+                  ) : repliedType === 'audio' ? (
+                    <View style={styles.replyPreviewMedia}>
+                      <View style={styles.replyPreviewAudioThumb}>
+                        <Icon
+                          name="mic"
+                          size={18}
+                          color={myMessage ? colors.textWhite : colors.primary}
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.replyPreviewText,
+                          myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {repliedPreviewText}
                       </Text>
                     </View>
                   ) : (
-                    <Text 
+                    <Text
                       style={[
                         styles.replyPreviewText,
                         myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
@@ -3228,7 +3553,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {repliedMessage.text || repliedMessage.Message || repliedMessage.message || 'Message'}
+                      {repliedPreviewText}
                     </Text>
                   )}
                 </View>
@@ -3371,45 +3696,15 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     styles.voiceNotePlayButton,
                     myMessage ? styles.voiceNotePlayButtonMy : styles.voiceNotePlayButtonOther
                   ]}
-                  onPress={async () => {
-                    const messageId = message.id || message._id;
-                    const audioUrl = mediaUrl || getMediaUrl(mediaKey);
-                    const audioRecorderPlayer = audioRecorderPlayerRef.current;
-                    
-                    if (playingAudioId === messageId) {
-                      // Pause
-                      await audioRecorderPlayer.pausePlayer();
-                      setPlayingAudioId(null);
-                    } else {
-                      // Stop any currently playing audio
-                      if (playingAudioId) {
-                        await audioRecorderPlayer.stopPlayer();
-                      }
-                      
-                      // Start playing this audio
-                      setPlayingAudioId(messageId);
-                      await audioRecorderPlayer.startPlayer(audioUrl);
-                      
-                      // Set up playback listener
-                      audioRecorderPlayer.addPlayBackListener((e) => {
-                        const currentPosition = Math.floor(e.currentPosition / 1000);
-                        const duration = Math.floor(e.duration / 1000);
-                        setAudioProgress(prev => ({ ...prev, [messageId]: currentPosition }));
-                        setAudioDuration(prev => ({ ...prev, [messageId]: duration }));
-                        
-                        // Auto-stop when finished
-                        if (e.currentPosition >= e.duration) {
-                          setPlayingAudioId(null);
-                          audioRecorderPlayer.stopPlayer();
-                          audioRecorderPlayer.removePlayBackListener();
-                        }
-                      });
-                    }
-                  }}
+                  onPress={() => handleVoiceNotePlayback(message)}
                   activeOpacity={0.7}
                 >
                   <Icon 
-                    name={playingAudioId === (message.id || message._id) ? "pause" : "play-arrow"} 
+                    name={
+                      voicePlayback.id === (message.id || message._id) && !voicePlayback.paused
+                        ? 'pause'
+                        : 'play-arrow'
+                    } 
                     size={20} 
                     color={myMessage ? colors.textWhite : colors.primary} 
                   />
@@ -3421,7 +3716,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   <View style={styles.voiceNoteWaveform}>
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((index) => {
                       const messageId = message.id || message._id;
-                      const isPlaying = playingAudioId === messageId;
+                      const isPlaying = voicePlayback.id === messageId && !voicePlayback.paused;
                       
                       // Parse duration from message or use playback duration
                       let duration = 0;
@@ -3470,7 +3765,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     ]}>
                       {(() => {
                         const messageId = message.id || message._id;
-                        if (playingAudioId === messageId && audioProgress[messageId] !== undefined) {
+                        if (
+                          voicePlayback.id === messageId &&
+                          audioProgress[messageId] !== undefined
+                        ) {
                           const seconds = audioProgress[messageId];
                           return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
                         }
@@ -3566,14 +3864,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     ]}>
                       {repliedMessage.senderName || 'Unknown'}
                     </Text>
-                    {(repliedMessage.messageType === 'image' || repliedMessage.messageType === 'video') && repliedMessage.mediaUrl ? (
+                    {(repliedType === 'image' || repliedType === 'video') && repliedThumbUri ? (
                       <View style={styles.replyPreviewMedia}>
                         <Image
-                          source={{ uri: repliedMessage.mediaUrl }}
+                          source={{ uri: repliedThumbUri }}
                           style={styles.replyPreviewThumbnail}
                           resizeMode="cover"
                         />
-                        <Text 
+                        <Text
                           style={[
                             styles.replyPreviewText,
                             myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
@@ -3581,11 +3879,31 @@ const ChatDetailScreen = ({ route, navigation }) => {
                           numberOfLines={1}
                           ellipsizeMode="tail"
                         >
-                          {repliedMessage.text || repliedMessage.Message || repliedMessage.message || (repliedMessage.messageType === 'image' ? 'Photo' : 'Video')}
+                          {repliedPreviewText}
+                        </Text>
+                      </View>
+                    ) : repliedType === 'audio' ? (
+                      <View style={styles.replyPreviewMedia}>
+                        <View style={styles.replyPreviewAudioThumb}>
+                          <Icon
+                            name="mic"
+                            size={18}
+                            color={myMessage ? colors.textWhite : colors.primary}
+                          />
+                        </View>
+                        <Text
+                          style={[
+                            styles.replyPreviewText,
+                            myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
+                          ]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {repliedPreviewText}
                         </Text>
                       </View>
                     ) : (
-                      <Text 
+                      <Text
                         style={[
                           styles.replyPreviewText,
                           myMessage ? styles.replyPreviewTextMy : styles.replyPreviewTextOther,
@@ -3593,7 +3911,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {repliedMessage.text || repliedMessage.Message || repliedMessage.message || 'Message'}
+                        {repliedPreviewText}
                       </Text>
                     )}
                   </View>
@@ -3733,37 +4051,15 @@ const ChatDetailScreen = ({ route, navigation }) => {
                       styles.voiceNotePlayButton,
                       myMessage ? styles.voiceNotePlayButtonMy : styles.voiceNotePlayButtonOther
                     ]}
-                    onPress={async () => {
-                      const messageId = message.id || message._id;
-                      const audioUrl = mediaUrl || getMediaUrl(mediaKey);
-                      const audioRecorderPlayer = audioRecorderPlayerRef.current;
-                      
-                      if (playingAudioId === messageId) {
-                        await audioRecorderPlayer.pausePlayer();
-                        setPlayingAudioId(null);
-                      } else {
-                        if (playingAudioId) {
-                          await audioRecorderPlayer.stopPlayer();
-                        }
-                        setPlayingAudioId(messageId);
-                        await audioRecorderPlayer.startPlayer(audioUrl);
-                        audioRecorderPlayer.addPlayBackListener((e) => {
-                          const currentPosition = Math.floor(e.currentPosition / 1000);
-                          const duration = Math.floor(e.duration / 1000);
-                          setAudioProgress(prev => ({ ...prev, [messageId]: currentPosition }));
-                          setAudioDuration(prev => ({ ...prev, [messageId]: duration }));
-                          if (e.currentPosition >= e.duration) {
-                            setPlayingAudioId(null);
-                            audioRecorderPlayer.stopPlayer();
-                            audioRecorderPlayer.removePlayBackListener();
-                          }
-                        });
-                      }
-                    }}
+                    onPress={() => handleVoiceNotePlayback(message)}
                     activeOpacity={0.7}
                   >
                     <Icon 
-                      name={playingAudioId === (message.id || message._id) ? "pause" : "play-arrow"} 
+                      name={
+                        voicePlayback.id === (message.id || message._id) && !voicePlayback.paused
+                          ? 'pause'
+                          : 'play-arrow'
+                      } 
                       size={20} 
                       color={myMessage ? colors.textWhite : colors.primary} 
                     />
@@ -3774,7 +4070,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     <View style={styles.voiceNoteWaveform}>
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((index) => {
                         const messageId = message.id || message._id;
-                        const isPlaying = playingAudioId === messageId;
+                        const isPlaying = voicePlayback.id === messageId && !voicePlayback.paused;
                         
                         // Parse duration from message or use playback duration
                         let duration = 0;
@@ -3821,7 +4117,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
                       ]}>
                         {(() => {
                           const messageId = message.id || message._id;
-                          if (playingAudioId === messageId && audioProgress[messageId] !== undefined) {
+                          if (
+                            voicePlayback.id === messageId &&
+                            audioProgress[messageId] !== undefined
+                          ) {
                             const seconds = audioProgress[messageId];
                             return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
                           }
@@ -3896,7 +4195,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
         )}
       </View>
     );
-  }, [enrichedMessages, user, isMyMessage, handleReplyToMessage, handleShowReadReceipts, handleFilePress, getMediaUrl, scrollViewRef, highlightedMessageId, storeMessagePosition, scrollToMessage, setHighlightedMessageId, getSenderProfileData]);
+  }, [enrichedMessages, user, isMyMessage, handleReplyToMessage, handleShowReadReceipts, handleFilePress, getMediaUrl, scrollViewRef, highlightedMessageId, storeMessagePosition, scrollToMessage, setHighlightedMessageId, getSenderProfileData, voicePlayback, handleVoiceNotePlayback]);
 
   // Prepare header props
   const enquiryTitle = finalEnquiry?.title || finalEnquiry?.Name || finalEnquiry?.name || enquiry?.title || enquiry?.Name || enquiry?.name;
@@ -4083,36 +4382,52 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     : Math.max(insets.bottom, 12),
               },
             ]}>
-            {/* Reply Preview */}
-            {replyingTo && (
-              <View style={styles.replyPreviewBar}>
-                <View style={styles.replyPreviewBarContent}>
-                  <View style={styles.replyPreviewBarLeft}>
-                    <View style={[
-                      styles.replyPreviewBarLine,
-                      isMyMessage(replyingTo) ? styles.replyPreviewBarLineMy : styles.replyPreviewBarLineOther,
-                    ]} />
-                    <View style={styles.replyPreviewBarText}>
-                      <Text style={styles.replyPreviewBarName}>
-                        Replying to {replyingTo.senderName || 'Unknown'}
-                      </Text>
-                      <Text 
-                        style={styles.replyPreviewBarMessage}
-                        numberOfLines={1}
-                      >
-                        {replyingTo.text || replyingTo.Message || replyingTo.message || 'Message'}
-                      </Text>
+            {/* Reply Preview (text + media hint like WhatsApp) */}
+            {replyingTo && (() => {
+              const rp = replyingTo;
+              const rType = rp.messageType || rp.MessageType || 'text';
+              const rKey = rp.mediaKey || rp.MediaKey;
+              const rUrl = rp.mediaUrl || rp.MediaUrl;
+              const thumbUri = rUrl || (rKey ? getMediaUrl(rKey) : null);
+              const subtitle = buildReplyToPayload(rp)?.text || 'Message';
+              return (
+                <View style={styles.replyPreviewBar}>
+                  <View style={styles.replyPreviewBarContent}>
+                    <View style={styles.replyPreviewBarLeft}>
+                      <View style={[
+                        styles.replyPreviewBarLine,
+                        isMyMessage(rp) ? styles.replyPreviewBarLineMy : styles.replyPreviewBarLineOther,
+                      ]} />
+                      {(rType === 'image' || rType === 'video') && thumbUri ? (
+                        <Image
+                          source={{ uri: thumbUri }}
+                          style={styles.replyPreviewBarThumb}
+                          resizeMode="cover"
+                        />
+                      ) : rType === 'audio' ? (
+                        <View style={styles.replyPreviewBarAudioIcon}>
+                          <Icon name="mic" size={22} color={colors.primary} />
+                        </View>
+                      ) : null}
+                      <View style={styles.replyPreviewBarText}>
+                        <Text style={styles.replyPreviewBarName}>
+                          Replying to {rp.senderName || rp.SenderName || 'Unknown'}
+                        </Text>
+                        <Text style={styles.replyPreviewBarMessage} numberOfLines={1}>
+                          {subtitle}
+                        </Text>
+                      </View>
                     </View>
+                    <TouchableOpacity
+                      onPress={cancelReply}
+                      style={styles.replyPreviewBarClose}
+                    >
+                      <Icon name="close" size={20} color={colors.textSecondary} />
+                    </TouchableOpacity>
                   </View>
-                  <TouchableOpacity
-                    onPress={cancelReply}
-                    style={styles.replyPreviewBarClose}
-                  >
-                    <Icon name="close" size={20} color={colors.textSecondary} />
-                  </TouchableOpacity>
                 </View>
-              </View>
-            )}
+              );
+            })()}
             
             {/* Recording bar - shown when recording */}
             {isRecording ? (
@@ -4130,7 +4445,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
                       Tap mic to send
                     </Text>
                   ) : (
-                    <View style={styles.recordingBarSlideContainer}>
+                    <Animated.View
+                      style={[
+                        styles.recordingBarSlideContainer,
+                        { transform: [{ translateX: slideOffsetX * 0.35 }] },
+                      ]}
+                    >
                       <Icon name="chevron-left" size={16} color={colors.textSecondary} />
                       <Text style={styles.recordingBarSlideText}>
                         Slide to cancel
@@ -4138,7 +4458,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                       <Text style={styles.recordingBarReleaseHint}>
                         {' • Release to send'}
                       </Text>
-                    </View>
+                    </Animated.View>
                   )}
                 </View>
                 {/* Lock button appears after 1 second */}
@@ -4146,22 +4466,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   <TouchableOpacity
                     style={styles.recordingBarLockButton}
                     onPress={() => {
+                      isLockedRef.current = true;
                       setIsLocked(true);
-                      // Start pulse animation when locked
-                      Animated.loop(
-                        Animated.sequence([
-                          Animated.timing(micButtonPulseAnim, {
-                            toValue: 1.1,
-                            duration: 800,
-                            useNativeDriver: true,
-                          }),
-                          Animated.timing(micButtonPulseAnim, {
-                            toValue: 1,
-                            duration: 800,
-                            useNativeDriver: true,
-                          }),
-                        ])
-                      ).start();
+                      startLockPulse();
                     }}
                     activeOpacity={0.7}
                   >
@@ -4194,16 +4501,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     {...(panResponderRef.current?.panHandlers || {})}
                     style={styles.recordingBarMicButton}
                   >
-                    <TouchableOpacity 
-                      onPress={handleMicPress}
-                      activeOpacity={0.7}
-                    >
-                      <Icon 
-                        name="mic" 
-                        size={24} 
-                        color={colors.textWhite} 
-                      />
-                    </TouchableOpacity>
+                    <Icon name="mic" size={24} color={colors.textWhite} />
                   </View>
                 )}
               </View>
@@ -4269,21 +4567,9 @@ const ChatDetailScreen = ({ route, navigation }) => {
                   <Icon name="send" size={20} color={colors.textWhite} />
                 </TouchableOpacity>
               ) : (
-                  <View
-                    {...(panResponderRef.current?.panHandlers || {})}
-                    style={styles.micButton}
-                  >
-                <TouchableOpacity 
-                  onPress={handleMicPress}
-                      activeOpacity={0.7}
-                >
-                  <Icon 
-                        name="mic" 
-                    size={20} 
-                        color={colors.textSecondary} 
-                  />
-                </TouchableOpacity>
-                  </View>
+                <View {...(panResponderRef.current?.panHandlers || {})} style={styles.micButton}>
+                  <Icon name="mic" size={20} color={colors.textSecondary} />
+                </View>
             )}
             </View>
             )}
@@ -4378,6 +4664,18 @@ const ChatDetailScreen = ({ route, navigation }) => {
                     </View>
                     <Text style={styles.modalOptionText}>Video</Text>
                     <Text style={styles.modalOptionSubtext}>Choose from gallery</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.modalOption}
+                    onPress={handleAudioPicker}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.modalOptionIcon, { backgroundColor: colors.primary + '15' }]}>
+                      <Icon name="audiotrack" size={32} color={colors.primary} />
+                    </View>
+                    <Text style={styles.modalOptionText}>Audio</Text>
+                    <Text style={styles.modalOptionSubtext}>Voice note or music file</Text>
                   </TouchableOpacity>
 
                   {/* Document/File Picker */}
@@ -6514,6 +6812,15 @@ const styles = StyleSheet.create({
     marginRight: 8,
     backgroundColor: colors.backgroundSecondary,
   },
+  replyPreviewAudioThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 4,
+    marginRight: 8,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   swipeableContainer: {
     position: 'relative',
   },
@@ -6605,6 +6912,22 @@ const styles = StyleSheet.create({
   },
   replyPreviewBarLineOther: {
     backgroundColor: colors.primary,
+  },
+  replyPreviewBarThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 4,
+    marginRight: 8,
+    backgroundColor: colors.borderLight,
+  },
+  replyPreviewBarAudioIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 4,
+    marginRight: 8,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   replyPreviewBarText: {
     flex: 1,

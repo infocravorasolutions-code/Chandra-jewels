@@ -298,6 +298,49 @@ const ChatsScreen = ({ navigation }) => {
     }
   }, [chatsFromAPI2, chatsLoading2, page2]);
 
+  // If user has loaded more chats, the UI uses `allChats*` (accumulated state).
+  // RTK cache patches update `chatsFromAPI*` but may not automatically update `allChats*`,
+  // so merge updated first-page chats into the accumulated arrays to keep sender-side ordering correct.
+  useEffect(() => {
+    if (!useAccumulatedChats1) return;
+    if (!Array.isArray(chatsFromAPI1) || chatsFromAPI1.length === 0) return;
+    setAllChats1((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+
+      const keyOf = (c) => String(c?.id || c?._id || '').trim();
+      const map = new Map(prev.map((c) => [keyOf(c), c]));
+
+      chatsFromAPI1.forEach((apiChat) => {
+        const k = keyOf(apiChat);
+        if (!k || k === 'undefined' || k === 'null') return;
+        map.set(k, apiChat);
+      });
+
+      const merged = Array.from(map.values()).filter((c) => !!c);
+      return sortChatsByRecentActivity(merged);
+    });
+  }, [chatsFromAPI1, useAccumulatedChats1]);
+
+  useEffect(() => {
+    if (!useAccumulatedChats2) return;
+    if (!Array.isArray(chatsFromAPI2) || chatsFromAPI2.length === 0) return;
+    setAllChats2((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+
+      const keyOf = (c) => String(c?.id || c?._id || '').trim();
+      const map = new Map(prev.map((c) => [keyOf(c), c]));
+
+      chatsFromAPI2.forEach((apiChat) => {
+        const k = keyOf(apiChat);
+        if (!k || k === 'undefined' || k === 'null') return;
+        map.set(k, apiChat);
+      });
+
+      const merged = Array.from(map.values()).filter((c) => !!c);
+      return sortChatsByRecentActivity(merged);
+    });
+  }, [chatsFromAPI2, useAccumulatedChats2]);
+
   // Helper function to normalize chat data (same as RTK Query transformResponse)
   const normalizeChat = useCallback((chat) => {
     // Handle MongoDB ObjectId format for enquiryId

@@ -18,6 +18,13 @@ import { useGetUsersQuery, useCreateEnquiryMutation, useGetStoneTypesQuery } fro
 import { useClients } from '../../features/clients/clientsHooks';
 import { useAuth } from '../../context/AuthContext';
 
+/** Default remark text when client picks a track on step 1 */
+const CLIENT_REMARK_BY_PROJECT_TYPE = {
+  coral: 'I want a coral design for this',
+  cad: 'I want a cad design for this',
+  approvedCad: 'I want an approved CAD design for this',
+};
+
 const AddEnquiryStep1Screen = ({ route, navigation }) => {
   // This screen is only for creating new enquiries
   const isEditMode = false;
@@ -32,10 +39,10 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     user?.roleId === 4 ||
     user?.roleNumber === 4;
 
-  /** Client: fields only. Admin: type → fields. Summary is on the next screen (upload + instructions + summary). */
-  const totalSteps = isClient ? 1 : 2;
+  /** Client & admin: step 1 = status tiles, step 2 = details. Summary is on the next screen (upload + instructions + summary). */
+  const totalSteps = 2;
   const [currentStep, setCurrentStep] = useState(1);
-  /** Admin only: coral | cad | approvedCad — drives Status sent to API */
+  /** coral | cad | approvedCad — drives Status sent to API (client & admin) */
   const [projectType, setProjectType] = useState('coral');
   
   // Initialize form data for new enquiry
@@ -127,7 +134,10 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     const initialData = getInitialFormData();
     setFormData({
       ...initialData,
-      status: isClient ? 'Enquiry Created' : 'Coral',
+      status: 'Coral',
+      ...(isClient
+        ? { remark: CLIENT_REMARK_BY_PROJECT_TYPE.coral }
+        : {}),
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -169,13 +179,6 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     user?.email,
     clients,
   ]);
-
-  // Ensure status is always "Enquiry Created" for client users
-  useEffect(() => {
-    if (isClient && formData.status !== 'Enquiry Created') {
-      setFormData(prev => ({ ...prev, status: 'Enquiry Created' }));
-    }
-  }, [isClient, formData.status]);
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -226,11 +229,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       newErrors.clientId = 'Client is required';
     }
 
-    if (!isClient) {
-      const st = String(formData.status || '').trim();
-      if (!st) {
-        newErrors.status = 'Status is required';
-      }
+    const st = String(formData.status || '').trim();
+    if (!st) {
+      newErrors.status = 'Status is required';
     }
 
     if (isClient && !formData.metalQuality) {
@@ -245,6 +246,9 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
     const stepErrors = {};
 
     if (isClient) {
+      if (currentStep === 1) {
+        return true;
+      }
       if (!formData.title.trim()) stepErrors.title = 'Name of the piece is required';
       if (!formData.clientId && !formData.clientName.trim()) {
         stepErrors.clientId = 'Client is required';
@@ -370,8 +374,7 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
       
       const mappedPriority = priorityMap[formData.priority?.toLowerCase()] || priorityMap[formData.priority] || formData.priority || 'Normal';
 
-      // For client users, status is always "Enquiry Created"
-      const enquiryStatus = isClient ? 'Enquiry Created' : (formData.status || 'Enquiry Created');
+      const enquiryStatus = formData.status || 'Enquiry Created';
 
       // Prepare enquiry data according to API structure (without images)
       const enquiryData = {
@@ -525,23 +528,31 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
 
   const handleSelectProjectType = (type) => {
     setProjectType(type);
-    if (isClient) {
-      return;
-    }
     if (type === 'coral') {
       handleStatusChange('Coral');
+      if (isClient) {
+        handleInputChange('remark', CLIENT_REMARK_BY_PROJECT_TYPE.coral);
+      }
     } else if (type === 'cad') {
       handleStatusChange('CAD');
+      if (isClient) {
+        handleInputChange('remark', CLIENT_REMARK_BY_PROJECT_TYPE.cad);
+      }
     } else if (type === 'approvedCad') {
       handleStatusChange('Approved Cad');
+      if (isClient) {
+        handleInputChange('remark', CLIENT_REMARK_BY_PROJECT_TYPE.approvedCad);
+      }
     }
   };
 
-  const renderAdminStep1Type = () => (
+  const renderStep1TypeSelection = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepQuestion}>Choose enquiry status</Text>
       <Text style={styles.stepHint}>
-        Pick Coral, CAD, or Approved CAD. Assign To options match the status you choose.
+        {isClient
+          ? 'Pick Coral, CAD, or Approved CAD. A starting note is added to your remark — you can edit it on the next step.'
+          : 'Pick Coral, CAD, or Approved CAD. Assign To options match the status you choose.'}
       </Text>
       <View style={styles.projectTileRowWrap}>
         <TouchableOpacity
@@ -784,10 +795,12 @@ const AddEnquiryStep1Screen = ({ route, navigation }) => {
   );
 
   const renderStepContent = () => {
+    if (currentStep === 1) {
+      return renderStep1TypeSelection();
+    }
     if (isClient) {
       return renderClientStepFields();
     }
-    if (currentStep === 1) return renderAdminStep1Type();
     return renderAdminStep2Fields();
   };
 

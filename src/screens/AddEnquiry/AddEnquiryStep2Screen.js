@@ -684,7 +684,7 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
 
       {renderImageUpload()}
       {renderInstructions()}
-      <View style={styles.summarySection}>{renderFormSummary()}</View>
+      {/* <View style={styles.summarySection}>{renderFormSummary()}</View> */}
 
             <View style={styles.footer}>
               <TouchableOpacity

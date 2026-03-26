@@ -13,9 +13,10 @@
 -keepattributes *Annotation*
 -keepattributes Signature
 -keepattributes Exceptions
--keepattributes SourceFile,LineNumberTable
 -keepattributes EnclosingMethod
 -keepattributes InnerClasses
+
+# Reduce release APK size by not keeping debug line/source metadata.
 
 # Sentry ProGuard rules
 -keep class io.sentry.** { *; }
@@ -57,3 +58,6 @@
 -keep class android.app.Notification { *; }
 -keep class android.app.NotificationChannel { *; }
 -keep class android.app.NotificationManager { *; }
+
+# Suppress R8 missing-class failure for PDF box JPX/JP2 decoding
+-dontwarn com.gemalto.jp2.JP2Decoder

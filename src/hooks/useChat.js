@@ -976,12 +976,9 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
       }
 
       if (socketService.isConnected() && chatIdForQuery) {
-        // ⚠️ BACKEND ISSUE: joinChat on backend automatically marks chat as read
-        // This resets UnreadCount to 0. Backend should NOT auto-mark as read when joining.
-        // Backend fix needed: Remove auto-mark-as-read from joinChat handler
-        // See: services/chat.service.js and utils/socket.js (joinChat event handler)
+        // Backend joinChat marks all messages in this chat read for this user and emits messagesRead.
         if (__DEV__) {
-          console.log('🔌 [useChat] Joining chat room - NOTE: Backend may auto-mark as read', {
+          console.log('🔌 [useChat] Joining chat room', {
             chatId: chatIdForQuery,
             userId: user.id,
           });
@@ -1994,14 +1991,15 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
     return true;
   }, [chat, chatIdForQuery, user, enquiryId, chatType, dispatch]);
 
-  // Send media
-  const sendMedia = useCallback(async (file) => {
+  // Send media (optional replyTo same shape as sendMessage)
+  const sendMedia = useCallback(async (file, replyTo = null) => {
     if (!file || !chatIdForQuery || !user) {
       return false;
     }
 
     // Define tempMediaId outside try block so it's accessible in catch
     const tempMediaId = `temp-media-${Date.now()}-${Math.random()}`;
+    const replyToId = replyTo?._id || replyTo?.id || null;
 
     try {
       if (__DEV__) {
@@ -2009,6 +2007,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
           chatIdForQuery,
           userId: user?.id,
           file,
+          hasReply: !!replyToId,
         });
       }
 
@@ -2055,6 +2054,14 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         chatId: chatIdForQuery,
         status: 'sending',
         ...(audioDuration && { audioDuration }),
+        ...(replyToId
+          ? {
+              ReplyTo: replyTo || { _id: replyToId, id: replyToId },
+              replyTo: replyTo || { _id: replyToId, id: replyToId },
+              ParentMessageId: replyToId,
+              parentMessageId: replyToId,
+            }
+          : {}),
       };
       setMessages(prev => [...prev, optimisticMediaMessage]);
 
@@ -2133,7 +2140,7 @@ export const useChat = (enquiryId, chatType, chatId = null, initialChat = null) 
         userId: user.id,
         message: mediaName,
         messageType: messageType,
-        parentMessageId: null,
+        parentMessageId: replyToId,
         mediaUrl: finalMediaUrl,
         mediaName: mediaName,
         mediaKey: mediaKey,
