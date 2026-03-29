@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo, forwardRef, useImperativeHandle } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Platform,
   Text,
   Dimensions,
@@ -24,7 +23,7 @@ import Video from 'react-native-video';
 import ImageZoom from 'react-native-image-pan-zoom';
 import { WebView } from 'react-native-webview';
 
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useGetClientsQuery, useGetEnquiryByIdQuery, useGetChatsQuery, api } from '../../store/api';
@@ -64,13 +63,15 @@ try {
   }
 }
 
+const COMPOSER_INPUT_MIN_HEIGHT = 36;
+const COMPOSER_INPUT_MAX_HEIGHT = 120;
+
 const ChatDetailScreen = ({ route, navigation }) => {
   // Hooks must be called unconditionally at the top level
   const dispatch = useDispatch();
   const authResult = useAuth();
   const user = authResult?.user;
   const alert = useAlert();
-  const insets = useSafeAreaInsets();
 
   // Early return if critical dependencies are missing
   if (!route) {
@@ -231,7 +232,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
     nextCursor = null,
     updateMessage = () => {},
   } = chatHookResult || {};
-  
+
+  const sendTypingRef = useRef(sendTyping);
+  sendTypingRef.current = sendTyping;
+
   // Use routeChat if it has an _id and hook hasn't loaded yet, otherwise use hookChat
   // This ensures messages can load immediately using routeChat's chatId
   const chat = (hookChat?._id || hookChat?.id) ? hookChat : (routeChat?._id || routeChat?.id ? routeChat : hookChat);
@@ -551,10 +555,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
     };
   }, [user, chat?._id, chat?.id, refetchMessages, alert]);
 
-  const [newMessage, setNewMessage] = useState('');
-  /** Android: RN KeyboardAvoidingView height + adjustResize often fails; lift UI by keyboard frame height. */
-  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
-  const [textInputHeight, setTextInputHeight] = useState(36); // Initial height for single line
+  /** Lift composer above keyboard using frame height (iOS + Android). */
+  const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
+  /** Draft text lives in a ref so typing does not re-render the whole screen (was causing input flicker). */
+  const draftMessageRef = useRef('');
+  const hasComposerTextRef = useRef(false);
+  const [hasComposerText, setHasComposerText] = useState(false);
   const [showMediaModal, setShowMediaModal] = useState(false);
   const [showReadReceiptModal, setShowReadReceiptModal] = useState(false);
   const [showMediaViewerModal, setShowMediaViewerModal] = useState(false);
@@ -607,6 +613,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   const [pendingOperations, setPendingOperations] = useState(new Map()); // Track pending operations to prevent duplicates
   const scrollViewRef = useRef(null);
   const textInputRef = useRef(null);
+
   const typingTimeoutRef = useRef(null);
   const swipeAnimations = useRef({});
   const isUserScrollingRef = useRef(false);
@@ -1225,12 +1232,12 @@ const ChatDetailScreen = ({ route, navigation }) => {
 
   useEffect(() => {
     const onShow = (e) => {
-      if (Platform.OS === 'android' && e?.endCoordinates) {
+      if (e?.endCoordinates) {
         const { height, screenY } = e.endCoordinates;
         const windowHeight = Dimensions.get('window').height;
         const overlapFromBottom = Math.max(0, windowHeight - screenY);
         const h = typeof height === 'number' ? height : 0;
-        setAndroidKeyboardInset(Math.round(Math.max(h, overlapFromBottom)));
+        setKeyboardBottomInset(Math.round(Math.max(h, overlapFromBottom)));
       }
       if (isUserAtBottomRef.current && enrichedMessages.length > 0) {
         setTimeout(() => {
@@ -1243,9 +1250,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       }
     };
     const onHide = () => {
-      if (Platform.OS === 'android') {
-        setAndroidKeyboardInset(0);
-      }
+      setKeyboardBottomInset(0);
     };
 
     const showSub = Keyboard.addListener('keyboardDidShow', onShow);
@@ -1260,18 +1265,18 @@ const ChatDetailScreen = ({ route, navigation }) => {
   useFocusEffect(
     useCallback(() => {
       return () => {
-        setAndroidKeyboardInset(0);
+        setKeyboardBottomInset(0);
       };
     }, [])
   );
 
   const sendMessage = async () => {
+    const draftTrimmed = draftMessageRef.current.trim();
     // Detailed validation with logging
-    if (!newMessage.trim()) {
+    if (!draftTrimmed) {
       if (__DEV__) {
         console.warn('⚠️ [ChatDetailScreen] Cannot send: Message is empty', {
-          newMessage,
-          hasNewMessage: !!newMessage,
+          draftLength: draftMessageRef.current.length,
         });
       }
       return;
@@ -1291,7 +1296,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
       return;
     }
 
-    const messageText = newMessage.trim();
+    const messageText = draftTrimmed;
     
     if (__DEV__) {
       console.log('📤 [ChatDetailScreen] Preparing to send message', {
@@ -1316,8 +1321,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
       });
     }
     
-    setNewMessage('');
-    setTextInputHeight(36); // Reset height to initial size after sending
+    draftMessageRef.current = '';
+    hasComposerTextRef.current = false;
+    setHasComposerText(false);
+    textInputRef.current?.clear?.();
     setReplyingTo(null); // Clear reply after sending
     
     // When user sends a message, always scroll to bottom
@@ -1350,7 +1357,10 @@ const ChatDetailScreen = ({ route, navigation }) => {
       }
       
       alert.error('Error', errorMessage);
-      setNewMessage(messageText); // Restore message on error
+      draftMessageRef.current = messageText;
+      hasComposerTextRef.current = messageText.trim().length > 0;
+      setHasComposerText(hasComposerTextRef.current);
+      textInputRef.current?.setNativeProps?.({ text: messageText });
       if (previousReply) setReplyingTo(previousReply); // Restore full reply target on error
     } else {
       // Scroll to bottom after sending
@@ -1411,27 +1421,27 @@ const ChatDetailScreen = ({ route, navigation }) => {
     setReplyingTo(null);
   };
 
-  const handleTyping = (text) => {
-    setNewMessage(text);
-    
-    // Reset height if message is cleared
-    if (!text.trim()) {
-      setTextInputHeight(36);
+  const handleTyping = useCallback((text) => {
+    draftMessageRef.current = text;
+    const has = text.trim().length > 0;
+    if (has !== hasComposerTextRef.current) {
+      hasComposerTextRef.current = has;
+      setHasComposerText(has);
     }
-    
+
     // Send typing indicator
     if (text.trim() && chat) {
-      sendTyping(true);
-      
+      sendTypingRef.current(true);
+
       // Clear typing indicator after 2 seconds of no typing
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       typingTimeoutRef.current = setTimeout(() => {
-        sendTyping(false);
+        sendTypingRef.current(false);
       }, 2000);
     }
-  };
+  }, [chat]);
 
   const handleAttachFile = () => {
     setShowMediaModal(true);
@@ -4240,7 +4250,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.container}>
         <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
           <ChatHeader
@@ -4252,16 +4262,11 @@ const ChatDetailScreen = ({ route, navigation }) => {
             isValidClientName={isValidClientName}
           />
 
-        <KeyboardAvoidingView
-          enabled={Platform.OS === 'ios'}
+        <View
           style={[
             styles.keyboardContainer,
-            Platform.OS === 'android' && androidKeyboardInset > 0 && {
-              paddingBottom: androidKeyboardInset,
-            },
-          ]}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+            keyboardBottomInset > 0 && { paddingBottom: keyboardBottomInset },
+          ]}>
 
           {loading && enrichedMessages.length === 0 ? (
             <View style={styles.messagesContainer}>
@@ -4376,10 +4381,8 @@ const ChatDetailScreen = ({ route, navigation }) => {
             style={[
               styles.inputContainer,
               {
-                paddingBottom:
-                  Platform.OS === 'android' && androidKeyboardInset > 0
-                    ? 12
-                    : Math.max(insets.bottom, 12),
+                // Bottom inset comes from SafeAreaView edges; keep fixed inner padding for the composer bar.
+                paddingBottom: 12,
               },
             ]}>
             {/* Reply Preview (text + media hint like WhatsApp) */}
@@ -4519,50 +4522,14 @@ const ChatDetailScreen = ({ route, navigation }) => {
               </TouchableOpacity>
               
               <View style={styles.textInputContainer}>
-                <TextInput
+                <ComposerMultilineInput
                   ref={textInputRef}
-                  style={[styles.textInput, { 
-                    height: textInputHeight, // Dynamic height based on content
-                  }]}
-                  placeholder={replyingTo ? "Type a reply..." : "Type a message..."}
-                  placeholderTextColor={colors.textLight}
-                  value={newMessage}
+                  placeholder={replyingTo ? 'Type a reply...' : 'Type a message...'}
                   onChangeText={handleTyping}
-                  multiline
-                  maxLength={500}
-                  scrollEnabled={textInputHeight >= 120}
-                  blurOnSubmit={false}
-                  returnKeyType="default"
-                  onContentSizeChange={(event) => {
-                    // Dynamically adjust height based on content
-                    const { height } = event.nativeEvent.contentSize;
-                    
-                    // Calculate new height: content height + vertical padding (8px top + 8px bottom = 16px)
-                    const calculatedHeight = height + 16;
-                    
-                    // Clamp between min (36px for single line) and max (120px for ~6 lines) - like WhatsApp
-                    const newHeight = Math.max(36, Math.min(calculatedHeight, 120));
-                    
-                    // Update state if height changed (avoid unnecessary updates)
-                    if (Math.abs(newHeight - textInputHeight) > 1) {
-                      setTextInputHeight(newHeight);
-                      
-                      if (__DEV__) {
-                        console.log('[TextInput] Height changed:', {
-                          contentHeight: height,
-                          calculatedHeight: calculatedHeight,
-                          newHeight: newHeight,
-                          oldHeight: textInputHeight,
-                          messageLength: newMessage.length,
-                          willScroll: newHeight >= 120,
-                        });
-                      }
-                    }
-                  }}
                 />
               </View>
               
-              {newMessage.trim() ? (
+              {hasComposerText ? (
                 <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
                   <Icon name="send" size={20} color={colors.textWhite} />
                 </TouchableOpacity>
@@ -4574,7 +4541,7 @@ const ChatDetailScreen = ({ route, navigation }) => {
             </View>
             )}
           </View>
-        </KeyboardAvoidingView>
+        </View>
 
       {/* Lock overlay - shown when locked for hands-free recording */}
       {isRecording && isLocked && (
@@ -5866,7 +5833,7 @@ const styles = StyleSheet.create({
      paddingHorizontal: 16,
     paddingVertical: 0,
     minHeight: 10,
-    // Remove maxHeight constraint - let it expand dynamically based on textInputHeight
+    // Height range is applied on ComposerMultilineInput (min/max + scroll; avoids per-keystroke layout thrash).
     justifyContent: 'flex-start', // Top alignment for multiline
     overflow: 'hidden', // Ensure content doesn't overflow container
   },
@@ -7134,5 +7101,57 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
 });
+
+/**
+ * Memoized composer: text state is owned here (controlled), not by ChatDetailScreen.
+ * A full-screen re-render on the first character (send vs mic) used to desync iOS
+ * UITextView when the input was uncontrolled — symptoms like only "Aaa" or jumbled keys.
+ */
+const ComposerMultilineInput = memo(
+  forwardRef(function ComposerMultilineInput({ placeholder, onChangeText }, ref) {
+    const [text, setText] = useState('');
+    const inputRef = useRef(null);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        clear: () => {
+          setText('');
+        },
+        setNativeProps: (props) => {
+          if (props?.text !== undefined) {
+            setText(String(props.text));
+          }
+        },
+      }),
+      []
+    );
+
+    return (
+      <TextInput
+        ref={inputRef}
+        style={[
+          styles.textInput,
+          {
+            minHeight: COMPOSER_INPUT_MIN_HEIGHT,
+            maxHeight: COMPOSER_INPUT_MAX_HEIGHT,
+          },
+        ]}
+        placeholder={placeholder}
+        placeholderTextColor={colors.textLight}
+        value={text}
+        onChangeText={(t) => {
+          setText(t);
+          onChangeText?.(t);
+        }}
+        multiline
+        maxLength={500}
+        scrollEnabled
+        blurOnSubmit={false}
+        returnKeyType="default"
+      />
+    );
+  })
+);
 
 export default ChatDetailScreen;

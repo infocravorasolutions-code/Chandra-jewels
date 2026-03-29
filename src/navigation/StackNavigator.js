@@ -44,7 +44,8 @@ const StackNavigator = ({ isAuthenticated, showOnboarding, onOnboardingComplete 
           fontFamily: fonts.bold,
           fontSize: fonts.lg,
         },
-        headerBackTitleVisible: false,
+        // iOS default is "default" (chevron + previous screen title). "minimal" = icon only.
+        headerBackButtonDisplayMode: 'minimal',
       }}>
       {isAuthenticated ? (
         // Authenticated screens

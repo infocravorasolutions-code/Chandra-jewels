@@ -1409,6 +1409,14 @@ const ChatsScreen = ({ navigation }) => {
     
     const unreadCount = getUnreadCount();
 
+    const rawChatType = chat.Type || chat.type || '';
+    const chatTypeLabel =
+      rawChatType === 'admin-client'
+        ? 'Client'
+        : rawChatType === 'admin-designer'
+          ? 'Designer'
+          : null;
+
     const senderLabel = (() => {
       // Get last sender ID from multiple possible fields
       // Priority: Use normalized fields first (most reliable), then fall back to _originalData
@@ -1480,9 +1488,16 @@ const ChatsScreen = ({ navigation }) => {
 
           <View style={styles.chatContent}>
             <View style={styles.chatHeader}>
-              <Text style={styles.chatTitle} numberOfLines={1} ellipsizeMode="tail">
-                {chat.enquiryTitle || 'Untitled Chat'} - <Text style={{ fontSize: fonts.xs, fontFamily: fonts.regular }}>{(chat.Type || chat.type).split('-')[1]}</Text>
-              </Text>
+              <View style={styles.chatTitleBlock}>
+                <Text style={styles.chatTitle} numberOfLines={1} ellipsizeMode="tail">
+                  {chat.enquiryTitle || 'Untitled Chat'}
+                </Text>
+                {isAdmin && chatTypeLabel ? (
+                  <Text style={styles.chatTypeLabel} numberOfLines={1}>
+                    {chatTypeLabel}
+                  </Text>
+                ) : null}
+              </View>
               <Text style={styles.chatTime}>
                 {chat.lastMessageTime ? formatShortTime(chat.lastMessageTime) : ''}
               </Text>
@@ -1673,13 +1688,22 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 4,
   },
+  chatTitleBlock: {
+    flex: 1,
+    marginRight: 8,
+    paddingRight: 4,
+  },
   chatTitle: {
     fontSize: 14, // Smaller font size
     fontFamily: fonts.semibold || fonts.bold,
     color: colors.textPrimary,
-    flex: 1,
-    marginRight: 8,
-    paddingRight: 4,
+  },
+  chatTypeLabel: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginTop: 2,
   },
   chatTime: {
     color: colors.textLight,

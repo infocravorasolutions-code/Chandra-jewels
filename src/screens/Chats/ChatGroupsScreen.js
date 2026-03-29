@@ -173,6 +173,13 @@ const ChatGroupsScreen = ({ route, navigation }) => {
     );
   }
 
+  const roleLower = user?.role?.toLowerCase();
+  const isAdmin =
+    roleLower === 'admin' ||
+    roleLower === 'ad' ||
+    user?.roleId === 1 ||
+    user?.roleNumber === 1;
+
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     try {
@@ -247,11 +254,15 @@ const ChatGroupsScreen = ({ route, navigation }) => {
       '';
   
     // -------------------------------
-    // Build chat title
+    // Build chat title + type label (admins only; shown below title)
     // -------------------------------
-    const chatTitle = `${enquiryName} - ${
-      chatType === 'admin-client' ? 'Client' : 'Designer'
-    }`;
+    const chatTitle = enquiryName;
+    const chatTypeLabel =
+      chatType === 'admin-client'
+        ? 'Client'
+        : chatType === 'admin-designer'
+          ? 'Designer'
+          : null;
   
     // -------------------------------
     // Fix: Last Message
@@ -338,9 +349,16 @@ const ChatGroupsScreen = ({ route, navigation }) => {
   
         <View style={styles.chatContent}>
           <View style={styles.chatHeader}>
-            <Text style={styles.chatTitle} numberOfLines={1}>
-              {chatTitle}
-            </Text>
+            <View style={styles.chatTitleBlock}>
+              <Text style={styles.chatTitle} numberOfLines={1}>
+                {chatTitle}
+              </Text>
+              {isAdmin && chatTypeLabel ? (
+                <Text style={styles.chatTypeLabel} numberOfLines={1}>
+                  {chatTypeLabel}
+                </Text>
+              ) : null}
+            </View>
             {lastMessageTime ? (
               <Text style={styles.chatTime}>{lastMessageTime}</Text>
             ) : null}
@@ -538,14 +556,24 @@ const styles = StyleSheet.create({
   chatHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 4,
   },
-  chatTitle: {
+  chatTitleBlock: {
     flex: 1,
+    marginRight: 8,
+  },
+  chatTitle: {
     fontSize: fonts.base,
     fontFamily: fonts.bold,
     color: colors.textPrimary,
+  },
+  chatTypeLabel: {
+    fontSize: fonts.xs,
+    fontFamily: fonts.regular,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginTop: 2,
   },
   chatTime: {
     fontSize: fonts.xs,

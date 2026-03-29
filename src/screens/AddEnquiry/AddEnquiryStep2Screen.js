@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -16,12 +16,41 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
-import { useUploadReferenceImagesMutation, useUpdateEnquiryMutation } from '../../store/api';
+import {
+  useUploadReferenceImagesMutation,
+  useUpdateEnquiryMutation,
+  useGetChatsByEnquiryV2Query,
+} from '../../store/api';
 import { useAuth } from '../../context/AuthContext';
 import { useUsers } from '../../features/users/usersHooks';
-import { getUserName } from '../../utils/userUtils';
 import SuccessAnimation from '../../components/common/SuccessAnimation';
-import EnquirySummaryCard from '../../components/enquiry/EnquirySummaryCard';
+import {
+  EnquiryChatCta,
+  isEnquiryClientUser,
+} from '../../components/enquiry/EnquirySummaryCard';
+
+const normalizeEnquiryChat = (chat) => chat?._originalData || chat;
+
+const getEnquiryChatId = (chat) => {
+  if (!chat) return '';
+  const n = normalizeEnquiryChat(chat);
+  return String(n?._id || n?.id || chat._id || chat.id || '').trim();
+};
+
+const getEnquiryChatType = (chat) => {
+  if (!chat) return '';
+  const n = normalizeEnquiryChat(chat);
+  return n?.Type || chat?.type || chat?.Type || '';
+};
+
+/** Prefer admin-client thread; if only one chat exists, open it */
+const pickClientDirectChat = (chats) => {
+  if (!Array.isArray(chats) || chats.length === 0) return null;
+  const adminClient = chats.find((c) => getEnquiryChatType(c) === 'admin-client');
+  if (adminClient) return adminClient;
+  if (chats.length === 1) return chats[0];
+  return null;
+};
 
 const AddEnquiryStep2Screen = ({ route, navigation }) => {
   const { formData, enquiry: enquiryToEdit, isEditMode, enquiryId } = route.params;
@@ -31,6 +60,11 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
   
   // Fetch and cache users for name resolution
   useUsers();
+
+  const { data: chatsForEnquiry } = useGetChatsByEnquiryV2Query(
+    { enquiryId: String(enquiryId || '').trim() },
+    { skip: !enquiryId },
+  );
   
   // Handle system back button (Android) and swipe back gesture (iOS) to navigate to Enquiries list
   useEffect(() => {
@@ -551,32 +585,49 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
     }
   };
 
-  const renderFormSummary = () => {
-    const handleOpenChat = () => {
-      if (enquiryId) {
-        navigation.navigate('ChatGroups', {
-          enquiryId: enquiryId,
-          enquiry: enquiryToEdit,
-        });
-      } else if (formData.clientId) {
-        navigation.navigate('ChatGroups', {
-          clientId: formData.clientId,
-        });
-      } else {
-        Alert.alert('Info', 'Please complete the enquiry first to access chat');
-      }
-    };
+  const handleOpenChat = useCallback(() => {
+    const isClient = isEnquiryClientUser(user);
+    const enquiryPayload =
+      enquiryToEdit || (enquiryId ? { id: enquiryId, _id: enquiryId } : null);
 
-    return (
-      <EnquirySummaryCard
-        formData={formData}
-        user={user}
-        getUserName={getUserName}
-        onChatPress={handleOpenChat}
-        showChat={!!(enquiryId || formData.clientId)}
-      />
-    );
-  };
+    if (enquiryId) {
+      if (isClient) {
+        const chats = Array.isArray(chatsForEnquiry) ? chatsForEnquiry : [];
+        const direct = pickClientDirectChat(chats);
+        const cid = getEnquiryChatId(direct);
+        if (direct && cid) {
+          navigation.navigate('ChatDetail', {
+            chatId: cid,
+            chat: direct,
+            enquiry: enquiryPayload,
+            enquiryId,
+            chatType: getEnquiryChatType(direct),
+          });
+          return;
+        }
+      }
+      navigation.navigate('ChatGroups', {
+        enquiryId,
+        enquiry: enquiryPayload,
+      });
+      return;
+    }
+
+    if (formData.clientId) {
+      navigation.navigate('ChatGroups', {
+        clientId: formData.clientId,
+      });
+    } else {
+      Alert.alert('Info', 'Please complete the enquiry first to access chat');
+    }
+  }, [
+    user,
+    enquiryId,
+    enquiryToEdit,
+    formData.clientId,
+    chatsForEnquiry,
+    navigation,
+  ]);
 
   const renderImageUpload = () => (
     <View style={styles.imageCard}>
@@ -678,13 +729,17 @@ const AddEnquiryStep2Screen = ({ route, navigation }) => {
               <Text style={styles.headerSubtitle}>
                 {isEditMode
                   ? 'Update reference materials (optional)'
-                  : 'Add reference images or videos (optional), review instructions, then check your summary and submit'}
+                  : 'Add reference images or videos (optional), review instructions, then submit'}
               </Text>
             </View>
 
       {renderImageUpload()}
       {renderInstructions()}
-      {/* <View style={styles.summarySection}>{renderFormSummary()}</View> */}
+      <EnquiryChatCta
+        user={user}
+        onPress={handleOpenChat}
+        visible={!!(enquiryId || formData.clientId)}
+      />
 
             <View style={styles.footer}>
               <TouchableOpacity
@@ -846,10 +901,6 @@ const styles = StyleSheet.create({
   instructionsCard: {
     margin: 16,
     marginBottom: 8,
-  },
-  summarySection: {
-    marginTop: 8,
-    marginBottom: 24,
   },
   instructionItem: {
     flexDirection: 'row',

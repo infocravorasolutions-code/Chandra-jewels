@@ -10,8 +10,8 @@ import Icon from '../common/Icon';
 import { OptimizedImage } from '../common';
 import { FILE_BASE_URL } from '../../config/apiConfig';
 import { getUserName } from '../../utils/userUtils';
-import { getCachedImage, cacheImage } from '../../utils/imageCache';
-import { getCachedImageData, cacheImageData } from '../../utils/imageMemoryCache';
+import { getCachedImage, cacheImage, removePersistentImageCache } from '../../utils/imageCache';
+import { getCachedImageData, cacheImageData, removeCachedImage as removeMemoryCachedImage } from '../../utils/imageMemoryCache';
 import useDeviceLayout from '../../hooks/useDeviceLayout';
 
 export const Card = ({ children, style, onPress, ...props }) => {
@@ -50,6 +50,161 @@ export const StatusCard = ({ title, value, icon, color = colors.primary, valueCo
       </View>
     </Card>
   );
+};
+
+/** Stable fingerprint for all media sources used by getLatestMediaUrl — keeps memo from skipping real updates. */
+const mediaItemSig = (item, idx) => {
+  if (item == null) {
+    return `n:${idx}`;
+  }
+  if (typeof item === 'string') {
+    return `s:${idx}:${item}`;
+  }
+  return `o:${idx}:${item.Key || item.key || item.KeyName || item.keyName || item.Id || item.id || item.FileId || item.fileId || item.Url || item.url || item.URI || item.uri || ''}`;
+};
+
+const getCompactCardMediaFingerprint = (enquiry) => {
+  if (!enquiry || typeof enquiry !== 'object') {
+    return '';
+  }
+  const chunks = [];
+  const add = (label, list) => {
+    if (!Array.isArray(list) || list.length === 0) {
+      return;
+    }
+    list.forEach((it, i) => {
+      chunks.push(`${label}:${mediaItemSig(it, i)}`);
+    });
+  };
+
+  add('RI', enquiry._originalData?.ReferenceImages || enquiry.ReferenceImages);
+  add('im', enquiry.images);
+  add('IM', enquiry.Images);
+  add('RV', enquiry._originalData?.ReferenceVideos || enquiry.ReferenceVideos);
+  add('VD', enquiry.Videos);
+
+  const ver = (versions, prefix) => {
+    if (!Array.isArray(versions)) {
+      return;
+    }
+    versions.forEach((v, vi) => {
+      add(`${prefix}${vi}V`, v?.Videos || v?.videos);
+      add(`${prefix}${vi}I`, v?.Images || v?.images);
+    });
+  };
+  ver(enquiry._originalData?.Coral || enquiry.Coral, 'C');
+  ver(enquiry._originalData?.Cad || enquiry.Cad, 'D');
+
+  return chunks.join('|');
+};
+
+/** Reject video / random binary mis-labeled as image (avoids green garbage tiles in Image). */
+const byteArrayLooksLikeIsobmff = (u8) => {
+  if (!u8 || u8.length < 8) return false;
+  return u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70;
+};
+
+const byteArrayLooksLikeRasterImage = (u8) => {
+  if (!u8 || u8.length < 3) return false;
+  if (u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return true;
+  if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return true;
+  if (u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46) return true;
+  if (
+    u8.length >= 12 &&
+    u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46 &&
+    u8[8] === 0x57 && u8[9] === 0x45 && u8[10] === 0x42 && u8[11] === 0x50
+  ) return true;
+  if (u8[0] === 0x42 && u8[1] === 0x4d) return true;
+  return false;
+};
+
+const isVideoOrNonImageContentType = (ct) => {
+  if (!ct || typeof ct !== 'string') return false;
+  const s = ct.toLowerCase();
+  return s.includes('video/') || s.includes('application/mp4');
+};
+
+const validateImageBytesForPreview = (arrayBuffer, contentTypeHeader) => {
+  if (!arrayBuffer || arrayBuffer.byteLength < 12) return false;
+  if (isVideoOrNonImageContentType(contentTypeHeader)) return false;
+  const u8 = new Uint8Array(arrayBuffer);
+  if (byteArrayLooksLikeIsobmff(u8)) return false;
+  return byteArrayLooksLikeRasterImage(u8);
+};
+
+const validateDataUriRasterImage = (dataUri) => {
+  if (!dataUri || typeof dataUri !== 'string' || !dataUri.startsWith('data:image/')) return false;
+  const comma = dataUri.indexOf(',');
+  if (comma < 0) return false;
+  const head = dataUri.slice(0, comma).toLowerCase();
+  if (!head.includes('base64')) return true;
+  const b64 = dataUri.slice(comma + 1).replace(/\s/g, '');
+  if (b64.length < 24) return false;
+  try {
+    const sampleLen = Math.min(b64.length, 4096);
+    const raw = atob(b64.slice(0, sampleLen));
+    const n = Math.min(raw.length, 16);
+    const u8 = new Uint8Array(n);
+    for (let i = 0; i < n; i += 1) {
+      u8[i] = raw.charCodeAt(i);
+    }
+    if (byteArrayLooksLikeIsobmff(u8)) return false;
+    return byteArrayLooksLikeRasterImage(u8);
+  } catch {
+    return false;
+  }
+};
+
+const invalidateBadPreviewCache = async (storeKey) => {
+  removeMemoryCachedImage(storeKey);
+  await removePersistentImageCache(storeKey);
+};
+
+/**
+ * List/search API returns ReferenceImages like { Id, Key, Description, _id } with no Url.
+ * This backend authorises /api/enquiries/files by storage Key; using Id alone can return 403.
+ * Order: Key → Id/FileId → attachment _id.
+ */
+const resolveEnquiryMediaFileUrl = (item) => {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+  const rawUri = item.Url || item.url || item.URI || item.uri;
+  if (rawUri) {
+    const s = String(rawUri).trim();
+    if (/^https?:\/\//i.test(s)) {
+      return s;
+    }
+    if (s.startsWith('/')) {
+      return `${FILE_BASE_URL}${s}`;
+    }
+    return `${FILE_BASE_URL}/${s}`;
+  }
+
+  const storageKey =
+    item.Key ||
+    item.key ||
+    item.KeyName ||
+    item.keyName;
+  if (storageKey) {
+    return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(String(storageKey))}`;
+  }
+
+  const fileId =
+    item.Id ||
+    item.id ||
+    item.FileId ||
+    item.fileId;
+  if (fileId) {
+    return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(String(fileId))}`;
+  }
+
+  const docId = item._id;
+  if (docId) {
+    return `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(String(docId))}`;
+  }
+
+  return null;
 };
 
 export const EnquiryStatusCard = ({ status, value, color, borderColor, icon, onPress, style }) => (
@@ -521,30 +676,12 @@ export const CompactEnquiryCard = ({
     if (allVideos.length > 0) {
       const latestVideo = allVideos[allVideos.length - 1];
       
-      // Extract URL from video
-      let mediaUrl = null;
-      let mediaKey = null;
-      let mediaId = null;
-      
       if (typeof latestVideo === 'object' && latestVideo !== null) {
-        mediaKey = latestVideo.Key || latestVideo.key || latestVideo.KeyName || latestVideo.keyName || '';
-        mediaId = latestVideo.Id || latestVideo.id || latestVideo._id || latestVideo.FileId || latestVideo.fileId || '';
-        const mediaUri = latestVideo.Url || latestVideo.url || latestVideo.URI || latestVideo.uri || '';
-        
-        if (mediaKey) {
-          mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(mediaKey)}`;
-        } else if (mediaId) {
-          mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${mediaId}`;
-        } else if (mediaUri) {
-          if (mediaUri.startsWith('http://') || mediaUri.startsWith('https://')) {
-            mediaUrl = mediaUri;
-          } else {
-            mediaUrl = mediaUri.startsWith('/') ? `${FILE_BASE_URL}${mediaUri}` : `${FILE_BASE_URL}/${mediaUri}`;
-          }
-        }
-        
+        const mediaUrl = resolveEnquiryMediaFileUrl(latestVideo);
         return { url: mediaUrl, isVideo: true, media: latestVideo };
       }
+      
+      let mediaUrl = null;
       
       if (typeof latestVideo === 'string') {
         if (latestVideo.startsWith('http://') || latestVideo.startsWith('https://')) {
@@ -567,28 +704,10 @@ export const CompactEnquiryCard = ({
     // Get the last image (latest)
     const latestImage = imagesOnly[imagesOnly.length - 1];
     
-    // Extract URL from image
     let mediaUrl = null;
-    let mediaKey = null;
-    let mediaId = null;
     
     if (typeof latestImage === 'object' && latestImage !== null) {
-      mediaKey = latestImage.Key || latestImage.key || latestImage.KeyName || latestImage.keyName || '';
-      mediaId = latestImage.Id || latestImage.id || latestImage._id || latestImage.FileId || latestImage.fileId || '';
-      const mediaUri = latestImage.Url || latestImage.url || latestImage.URI || latestImage.uri || '';
-      
-      if (mediaKey) {
-        mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${encodeURIComponent(mediaKey)}`;
-      } else if (mediaId) {
-        mediaUrl = `${FILE_BASE_URL}/api/enquiries/files/${mediaId}`;
-      } else if (mediaUri) {
-        if (mediaUri.startsWith('http://') || mediaUri.startsWith('https://')) {
-          mediaUrl = mediaUri;
-        } else {
-          mediaUrl = mediaUri.startsWith('/') ? `${FILE_BASE_URL}${mediaUri}` : `${FILE_BASE_URL}/${mediaUri}`;
-      }
-      }
-      
+      mediaUrl = resolveEnquiryMediaFileUrl(latestImage);
       return { url: mediaUrl, isVideo: false, media: latestImage };
     }
     
@@ -624,6 +743,25 @@ export const CompactEnquiryCard = ({
   const imageUrl = mediaInfo.url;
   const mediaIsVideo = mediaInfo.isVideo;
   const latestMedia = mediaInfo.media;
+
+  /** Memory + AsyncStorage caches must not use URL alone — many enquiries can share the same file Key/URL. */
+  const previewImageCacheKey = useMemo(() => {
+    const eid = String(enquiry?.id ?? enquiry?._id ?? '');
+    const m = latestMedia;
+    let mediaSig = 'none';
+    if (m != null) {
+      if (typeof m === 'string') {
+        mediaSig = `s:${m}`;
+      } else if (typeof m === 'object') {
+        mediaSig = [
+          m.Key || m.key || m.KeyName || m.keyName || '',
+          m.Id || m.id || m.FileId || m.fileId || '',
+          m._id != null ? String(m._id) : '',
+        ].join(':');
+      }
+    }
+    return `${eid}::${mediaSig}::${imageUrl || ''}`;
+  }, [enquiry?.id, enquiry?._id, latestMedia, imageUrl]);
   
   // Optimized async base64 conversion (non-blocking, chunked processing)
   const convertToBase64Async = useCallback(async (arrayBuffer) => {
@@ -672,12 +810,12 @@ export const CompactEnquiryCard = ({
     }
 
     let cancelled = false;
+    setVideoUrl(null);
+    setImageError(false);
+    setImageLoading(true);
 
     const fetchVideoUrl = async () => {
       try {
-        setImageLoading(true);
-        setImageError(false);
-
         const token = await AsyncStorage.getItem('token');
         if (!token) {
           setImageError(true);
@@ -749,14 +887,23 @@ export const CompactEnquiryCard = ({
 
     let cancelled = false;
 
+    // Never show the previous enquiry's bitmap while this URL loads (or wrong file flashes)
+    setImageDataUri(null);
+    setImageError(false);
+
+    const storeKey = previewImageCacheKey || imageUrl;
+
     // Check cache synchronously first (fast path)
-    const memoryCached = getCachedImageData(imageUrl);
+    const memoryCached = getCachedImageData(storeKey);
+    if (memoryCached && validateDataUriRasterImage(memoryCached)) {
+      setImageDataUri(memoryCached);
+      setImageLoading(false);
+      setImageError(false);
+      return;
+    }
     if (memoryCached) {
-        setImageDataUri(memoryCached);
-        setImageLoading(false);
-        setImageError(false);
-        return;
-      }
+      void invalidateBadPreviewCache(storeKey);
+    }
 
     // Defer async operations to avoid blocking scroll
     const handle = InteractionManager.runAfterInteractions(() => {
@@ -764,29 +911,29 @@ export const CompactEnquiryCard = ({
 
       const loadImage = async () => {
         try {
-      setImageLoading(true);
+          setImageLoading(true);
           setImageError(false);
 
           // Step 1: Check persistent cache (AsyncStorage)
-          const persistentCached = await getCachedImage(imageUrl);
+          const persistentCached = await getCachedImage(storeKey);
           if (persistentCached) {
-            // Validate cached data is a base64 data URI, not an API endpoint
-            if (persistentCached.startsWith('data:image/')) {
-              // Store in memory cache for faster access next time
-              cacheImageData(imageUrl, persistentCached);
+            if (
+              persistentCached.startsWith('data:image/') &&
+              validateDataUriRasterImage(persistentCached)
+            ) {
+              cacheImageData(storeKey, persistentCached);
               if (!cancelled) {
                 setImageDataUri(persistentCached);
-          setImageLoading(false);
-          setImageError(false);
-        }
-              return;
-            } else {
-              // Invalid cache entry (API endpoint URL), clear it
-        if (__DEV__) {
-                console.warn('Invalid cache entry detected, clearing...');
+                setImageLoading(false);
+                setImageError(false);
               }
+              return;
             }
-        }
+            await invalidateBadPreviewCache(storeKey);
+            if (__DEV__) {
+              console.warn('Invalid or non-image preview cache cleared for key');
+            }
+          }
 
           // Step 2: Fetch from network (not in cache)
             const token = await AsyncStorage.getItem('token');
@@ -831,35 +978,39 @@ export const CompactEnquiryCard = ({
               throw new Error(`Failed to fetch image: ${imageResponse.status}`);
             }
 
-            // Convert to base64 asynchronously (non-blocking)
             const arrayBuffer = await imageResponse.arrayBuffer();
+            const imageContentType = imageResponse.headers.get('content-type') || '';
+            if (!validateImageBytesForPreview(arrayBuffer, imageContentType)) {
+              throw new Error('Preview: response is not a raster image (e.g. video or corrupt)');
+            }
             const base64 = await convertToBase64Async(arrayBuffer);
-            const imageContentType = imageResponse.headers.get('content-type') || 'image/jpeg';
-            const dataUri = `data:${imageContentType};base64,${base64}`;
-            
-            // Cache the image (both memory and persistent)
-            cacheImageData(imageUrl, dataUri);
-            cacheImage(imageUrl, dataUri);
-            
+            const safeCt = imageContentType.split(';')[0].trim() || 'image/jpeg';
+            const dataUri = `data:${safeCt};base64,${base64}`;
+
+            cacheImageData(storeKey, dataUri);
+            cacheImage(storeKey, dataUri);
+
             if (!cancelled) {
-            setImageDataUri(dataUri);
-            setImageLoading(false);
-            setImageError(false);
+              setImageDataUri(dataUri);
+              setImageLoading(false);
+              setImageError(false);
             }
           } else {
-            // Direct image response - convert to base64 asynchronously
             const arrayBuffer = await response.arrayBuffer();
+            if (!validateImageBytesForPreview(arrayBuffer, contentType)) {
+              throw new Error('Preview: direct body is not a raster image');
+            }
             const base64 = await convertToBase64Async(arrayBuffer);
-            const dataUri = `data:${contentType || 'image/jpeg'};base64,${base64}`;
-            
-            // Cache the image (both memory and persistent)
-            cacheImageData(imageUrl, dataUri);
-            cacheImage(imageUrl, dataUri);
-            
+            const safeCt = (contentType || 'image/jpeg').split(';')[0].trim();
+            const dataUri = `data:${safeCt};base64,${base64}`;
+
+            cacheImageData(storeKey, dataUri);
+            cacheImage(storeKey, dataUri);
+
             if (!cancelled) {
-            setImageDataUri(dataUri);
-            setImageLoading(false);
-            setImageError(false);
+              setImageDataUri(dataUri);
+              setImageLoading(false);
+              setImageError(false);
             }
         }
       } catch (error) {
@@ -880,7 +1031,7 @@ export const CompactEnquiryCard = ({
       cancelled = true;
       handle.cancel();
     };
-  }, [imageUrl, convertToBase64Async, mediaIsVideo]);
+  }, [imageUrl, convertToBase64Async, mediaIsVideo, previewImageCacheKey]);
 
   const cardStyle = isTablet 
     ? [styles.compactEnquiryCard, styles.compactEnquiryCardTablet]
@@ -901,6 +1052,7 @@ export const CompactEnquiryCard = ({
         {isVideo && videoUrl && !imageError ? (
           <View style={styles.compactVideoContainer}>
             <Video
+              key={`v-${enquiry.id}-${videoUrl}`}
               source={{ uri: videoUrl }}
               style={styles.compactVideo}
               resizeMode="cover"
@@ -921,11 +1073,12 @@ export const CompactEnquiryCard = ({
           </View>
         ) : imageDataUri && !imageError ? (
           <OptimizedImage
+            key={`img-${previewImageCacheKey}`}
             source={{ uri: imageDataUri }}
             style={styles.compactImage}
             resizeMode="cover"
             showLoader={false}
-            cacheEnabled={true}
+            cacheEnabled={imageDataUri && !String(imageDataUri).startsWith('data:')}
             onError={() => {
               setImageError(true);
             }}
@@ -1044,22 +1197,14 @@ export const CompactEnquiryCardMemo = memo(CompactEnquiryCard, (prevProps, nextP
   if (prevId !== nextId) return false;
   if (prevProps.enquiry?.status !== nextProps.enquiry?.status) return false;
   if (prevProps.enquiry?.priority !== nextProps.enquiry?.priority) return false;
-  
-  // Check ReferenceImages length (cheaper than full comparison)
-  const prevImages = prevProps.enquiry?._originalData?.ReferenceImages || prevProps.enquiry?.ReferenceImages || [];
-  const nextImages = nextProps.enquiry?._originalData?.ReferenceImages || nextProps.enquiry?.ReferenceImages || [];
-  
-  if (prevImages.length !== nextImages.length) return false;
-  
-  // Only compare last image (the one we display)
-  if (prevImages.length > 0 && nextImages.length > 0) {
-    const prevLast = prevImages[prevImages.length - 1];
-    const nextLast = nextImages[nextImages.length - 1];
-    const prevKey = prevLast?.Key || prevLast?.key || prevLast?.Id || prevLast?.id || '';
-    const nextKey = nextLast?.Key || nextLast?.key || nextLast?.Id || nextLast?.id || '';
-    if (prevKey !== nextKey) return false;
+
+  if (
+    getCompactCardMediaFingerprint(prevProps.enquiry) !==
+    getCompactCardMediaFingerprint(nextProps.enquiry)
+  ) {
+    return false;
   }
-  
+
   return true;
 });
 

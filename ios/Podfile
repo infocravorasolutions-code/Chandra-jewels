@@ -1,5 +1,8 @@
 # React Native 0.82+ Podfile
-# Load React Native pods helper first
+# Expo modules (ExpoModulesCore, etc.) — required when the project uses ExpoModulesProvider / expo-av, etc.
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), 'scripts/autolinking')
+
+# Load React Native pods helper
 react_native_path = File.expand_path('../node_modules/react-native', __dir__)
 require_relative File.join(react_native_path, 'scripts', 'react_native_pods.rb')
 
@@ -20,6 +23,9 @@ end
 target 'chandrajewellery' do
   # Disable Sentry before autolinking (react-native.config.js should handle this, but ensure it here too)
   ENV['SENTRY_SKIP_AUTO_SETUP'] = '1'
+
+  # Links Expo native modules (ExpoModulesCore pod). Without this, ExpoModulesProvider.swift fails with "No such module 'ExpoModulesCore'".
+  use_expo_modules!
   
   # Auto-link React Native modules (Sentry should be excluded via react-native.config.js)
   config = use_native_modules!

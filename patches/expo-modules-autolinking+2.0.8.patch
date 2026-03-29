@@ -1,0 +1,25 @@
+diff --git a/node_modules/expo-modules-autolinking/scripts/ios/project_integrator.rb b/node_modules/expo-modules-autolinking/scripts/ios/project_integrator.rb
+index d4c2424..af173c7 100644
+--- a/node_modules/expo-modules-autolinking/scripts/ios/project_integrator.rb
++++ b/node_modules/expo-modules-autolinking/scripts/ios/project_integrator.rb
+@@ -117,13 +117,17 @@ module Expo
+             build_settings[SWIFT_FLAGS] ||= '$(inherited)'
+           end
+ 
++          # RN 0.82+ may store OTHER_SWIFT_FLAGS as an Array; Expo expected a String (gsub).
++          raw_flags = build_settings[SWIFT_FLAGS]
++          flags_str = raw_flags.is_a?(Array) ? raw_flags.join(' ') : raw_flags.to_s
++
+           # If the correct flag is not set yet
+-          if !build_settings[SWIFT_FLAGS].include?(configuration_flag)
++          if !flags_str.include?(configuration_flag)
+             # Remove existing flag to make sure we don't put another one each time
+-            build_settings[SWIFT_FLAGS] = build_settings[SWIFT_FLAGS].gsub(/\b-D\s+#{Regexp.quote(CONFIGURATION_FLAG_PREFIX)}\w+/, '')
++            flags_str = flags_str.gsub(/\b-D\s+#{Regexp.quote(CONFIGURATION_FLAG_PREFIX)}\w+/, '').strip
+ 
+             # Add the correct flag
+-            build_settings[SWIFT_FLAGS] << ' ' << configuration_flag
++            build_settings[SWIFT_FLAGS] = "#{flags_str} #{configuration_flag}".strip
+ 
+             # Make sure the project will be saved as we did some changes
+             project.mark_dirty!

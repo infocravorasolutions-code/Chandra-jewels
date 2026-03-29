@@ -4,6 +4,80 @@ import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
 import IconComponent from '../common/Icon';
 
+export const isEnquiryClientUser = (user) =>
+  user?.role?.toLowerCase() === 'client' ||
+  user?.role === 'cl' ||
+  user?.roleId === 4 ||
+  user?.roleNumber === 4;
+
+/** Shared chat CTA — use standalone on Step 2; embedded inside EnquirySummaryCard */
+const enquiryChatCtaStyles = StyleSheet.create({
+  wrapEmbedded: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  wrapStandalone: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    padding: 16,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  hint: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.regular,
+    color: colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  btn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  btnText: {
+    fontSize: fonts.sm,
+    fontFamily: fonts.medium,
+    color: colors.textWhite,
+    flexShrink: 1,
+    textAlign: 'center',
+  },
+});
+
+export const EnquiryChatCta = ({ user, onPress, visible = true, embedded = false }) => {
+  if (!visible || !onPress) return null;
+  const wrapStyle = embedded
+    ? enquiryChatCtaStyles.wrapEmbedded
+    : enquiryChatCtaStyles.wrapStandalone;
+  const isClient = isEnquiryClientUser(user);
+  const buttonLabel = isClient
+    ? 'Have more instruction? Chat with Us'
+    : 'Add additional info on chat';
+  return (
+    <View style={wrapStyle}>
+      <TouchableOpacity
+        style={enquiryChatCtaStyles.btn}
+        onPress={onPress}
+        activeOpacity={0.88}
+      >
+        <IconComponent name="chat" size={20} color={colors.textWhite} />
+        <Text style={enquiryChatCtaStyles.btnText}>{buttonLabel}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 const dash = (v) => {
   if (v === null || v === undefined) return '—';
   const s = String(v).trim();
@@ -93,11 +167,7 @@ const EnquirySummaryCard = ({
   showChat,
   existingImagesCount,
 }) => {
-  const isClient =
-    user?.role?.toLowerCase() === 'client' ||
-    user?.role === 'cl' ||
-    user?.roleId === 4 ||
-    user?.roleNumber === 4;
+  const isClient = isEnquiryClientUser(user);
 
   const assignedLabel =
     formData.assignedToName ||
@@ -128,16 +198,6 @@ const EnquirySummaryCard = ({
             </Text>
           </View>
         </View>
-        {showChat && onChatPress ? (
-          <TouchableOpacity
-            style={styles.chatBtn}
-            onPress={onChatPress}
-            activeOpacity={0.85}
-          >
-            <IconComponent name="chat" size={18} color={colors.primary} />
-            <Text style={styles.chatBtnText}>Chat</Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
 
       <View style={styles.divider} />
@@ -284,6 +344,10 @@ const EnquirySummaryCard = ({
           </View>
         </>
       ) : null}
+
+      {showChat && onChatPress ? (
+        <EnquiryChatCta user={user} onPress={onChatPress} visible embedded />
+      ) : null}
     </View>
   );
 };
@@ -340,22 +404,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: colors.textSecondary,
     lineHeight: 20,
-  },
-  chatBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: colors.primaryExtraLight,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  chatBtnText: {
-    marginLeft: 6,
-    fontSize: fonts.sm,
-    fontFamily: fonts.medium,
-    color: colors.primary,
   },
   divider: {
     height: 1,

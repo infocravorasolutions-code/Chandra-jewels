@@ -55,6 +55,18 @@ export const getCachedImage = async (url) => {
 /**
  * Cache an image URL or data URI
  */
+/**
+ * Remove one persistent cache entry (same key rules as cacheImage).
+ */
+export const removePersistentImageCache = async (url) => {
+  try {
+    if (!url) return;
+    await AsyncStorage.removeItem(getCacheKey(url));
+  } catch (error) {
+    // ignore
+  }
+};
+
 export const cacheImage = async (url, dataUri) => {
   try {
     if (!url || !dataUri) return;
