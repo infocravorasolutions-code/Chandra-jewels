@@ -21,6 +21,7 @@ import {
   Platform,
 } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
+import { registerForRemoteMessages } from '../../services/pushNotificationService';
 import { Button } from '../../components/common';
 import { colors } from '../../constants/colors';
 import { fonts } from '../../constants/fonts';
@@ -49,6 +50,15 @@ const GetFCMTokenScreen = ({ navigation }) => {
 
       if (!enabled) {
         setError('Notification permission not granted');
+        setLoading(false);
+        return;
+      }
+
+      const ready = await registerForRemoteMessages();
+      if (!ready) {
+        setError(
+          'Device not ready for remote messages (iOS: wait for APNs — use a real device with Push capability).'
+        );
         setLoading(false);
         return;
       }

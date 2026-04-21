@@ -8,6 +8,7 @@ import {
   Text,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { Card } from '../../components/cards/Cards';
 import { Button } from '../../components/common';
@@ -119,8 +120,7 @@ const AccountModal = ({ visible, onClose }) => {
       animationType="slide"
       transparent={false}
       onRequestClose={onClose}>
-      
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
         <View style={styles.header}>
           <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>
             My Account
@@ -183,7 +183,7 @@ const AccountModal = ({ visible, onClose }) => {
             />
           </Card>
         </ScrollView>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 };
