@@ -36,6 +36,7 @@ const ChatListSocketSync = () => {
       const uidRaw = user?.id ?? user?._id;
       if (uidRaw == null) return;
       const patched = patchAllCachesForMessagesRead(dispatch, data, uidRaw);
+      // Avoid extra API calls: only invalidate when we couldn't patch any cached row.
       if (!patched) {
         invalidateAllChatListQueries(dispatch);
       }
